@@ -6,6 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 set_property(GLOBAL PROPERTY PREDEFINED_TARGETS_FOLDER "CMake")
+set_property(GLOBAL PROPERTY AUTOMOC_SOURCE_GROUP "QtMocs")
 
 if(CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_CONFIGURATION_TYPES "Debug;Release" CACHE STRING "" FORCE)
@@ -58,13 +59,19 @@ file(GLOB_RECURSE PATHTRACER_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.hpp")
 
 add_executable(pathtracer WIN32 ${PATHTRACER_SOURCES})
+target_include_directories(pathtracer PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Application"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/View"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Controller"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Model")
 target_link_libraries(pathtracer PRIVATE Qt6::Widgets Qt6::OpenGL Qt6::OpenGLWidgets CUDA::cudart glm::glm)
 set_target_properties(pathtracer PROPERTIES
     OUTPUT_NAME pathtracer
     AUTOMOC ON
     FOLDER "src")
 
-source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}/src" PREFIX "src" FILES ${PATHTRACER_SOURCES})
+source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}/src" PREFIX "" FILES ${PATHTRACER_SOURCES})
 
 target_sources(pathtracer PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt")
 set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt" PROPERTIES HEADER_FILE_ONLY TRUE)

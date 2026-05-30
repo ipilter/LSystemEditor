@@ -152,8 +152,7 @@ void OpenGLViewportWidget::initializeGL()
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), nullptr);
     glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float),
-                          reinterpret_cast<const void*>(2 * sizeof(float)));
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), reinterpret_cast<const void*>(2 * sizeof(float)));
 
     glBindVertexArray(0);
 
@@ -295,13 +294,11 @@ void OpenGLViewportWidget::recreateGpuBuffers()
     }
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
-    if (!m_cudaInterop->registerPbo(static_cast<unsigned int>(m_pbos[0]), byteSize, 0)
-        || !m_cudaInterop->registerPbo(static_cast<unsigned int>(m_pbos[1]), byteSize, 1)) {
-        return;
+    if (!m_cudaInterop->registerPbo(static_cast<unsigned int>(m_pbos[0]), byteSize, 0) || !m_cudaInterop->registerPbo(static_cast<unsigned int>(m_pbos[1]), byteSize, 1)) {
+      return;
     }
 
-    if (!m_cudaInterop->initPboRandomGray(0, w, h, 1u)
-        || !m_cudaInterop->initPboRandomGray(1, w, h, 2u)) {
+    if (!m_cudaInterop->initPboRandomGray(0, w, h, 1u) || !m_cudaInterop->initPboRandomGray(1, w, h, 2u)) {
         return;
     }
 
