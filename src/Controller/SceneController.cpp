@@ -4,6 +4,7 @@
 #include "MainView.h"
 #include "OpenGLViewportWidget.h"
 #include "SceneModel.h"
+#include "SettingsDialog.h"
 
 #include <QColorDialog>
 #include <QPushButton>
@@ -26,24 +27,35 @@ SceneController::SceneController(SceneModel* model, MainView* view, QObject* par
     , m_model(model)
     , m_view(view)
     , m_renderSizeDebounce(AppSettings::instance().debounceMsFor(DebounceElementIds::kRenderSize), this)
+    , m_maxSamplesDebounce(AppSettings::instance().debounceMsFor(DebounceElementIds::kMaxSamples), this)
 {
     syncColorButtonStyle();
     m_view->viewport()->setClearColor(m_model->clearColor());
     m_view->viewport()->setSceneModel(m_model);
 
     syncRenderSpinBoxes();
+    syncMaxSamplesSpinBox();
 
     connect(m_view->colorButton(), &QPushButton::clicked, this, &SceneController::onColorButtonClicked);
     connect(m_model, &SceneModel::clearColorChanged, this, &SceneController::onClearColorChanged);
     connect(m_model, &SceneModel::renderSizeChanged, this, &SceneController::onRenderSizeChanged);
+    connect(m_model, &SceneModel::maxSamplesPerPixelChanged, this, [this](int) { syncMaxSamplesSpinBox(); });
 
     connect(m_view->renderWidthSpinBox(), &QSpinBox::valueChanged, this, &SceneController::onRenderSizeSpinBoxChanged);
     connect(m_view->renderHeightSpinBox(), &QSpinBox::valueChanged, this, &SceneController::onRenderSizeSpinBoxChanged);
+    connect(m_view->maxSamplesSpinBox(), &QSpinBox::valueChanged, this, &SceneController::onMaxSamplesSpinBoxChanged);
     connect(&m_renderSizeDebounce, &DebounceTimer::triggered, this, &SceneController::applyRenderSizeFromSpinBoxes);
+    connect(&m_maxSamplesDebounce, &DebounceTimer::triggered, this, &SceneController::applyMaxSamplesFromSpinBox);
+    connect(m_view->startButton(), &QPushButton::clicked, this, &SceneController::onStartButtonClicked);
+    connect(m_view->stopButton(), &QPushButton::clicked, this, &SceneController::onStopButtonClicked);
+    connect(m_view->settingsButton(), &QPushButton::clicked, this, &SceneController::onSettingsButtonClicked);
+    connect(m_view->viewport(), &OpenGLViewportWidget::iterationChanged, m_view, &MainView::setIteration);
     connect(&AppSettings::instance(), &AppSettings::debounceMsChanged, this,
             [this](const QString& elementId, int ms) {
                 if (elementId == DebounceElementIds::kRenderSize) {
                     m_renderSizeDebounce.setIntervalMs(ms);
+                } else if (elementId == DebounceElementIds::kMaxSamples) {
+                    m_maxSamplesDebounce.setIntervalMs(ms);
                 }
             });
 }
@@ -82,6 +94,33 @@ void SceneController::applyRenderSizeFromSpinBoxes()
     m_model->setRenderSize(m_view->renderWidthSpinBox()->value(), m_view->renderHeightSpinBox()->value());
 }
 
+void SceneController::onMaxSamplesSpinBoxChanged()
+{
+    m_maxSamplesDebounce.schedule();
+}
+
+void SceneController::applyMaxSamplesFromSpinBox()
+{
+    m_model->setMaxSamplesPerPixel(m_view->maxSamplesSpinBox()->value());
+}
+
+void SceneController::onStartButtonClicked()
+{
+    m_view->setIteration(0);
+    m_view->viewport()->restartRender();
+}
+
+void SceneController::onStopButtonClicked()
+{
+    m_view->viewport()->pauseRender();
+}
+
+void SceneController::onSettingsButtonClicked()
+{
+    SettingsDialog dialog(m_view);
+    dialog.exec();
+}
+
 void SceneController::syncColorButtonStyle()
 {
     m_view->colorButton()->setStyleSheet(colorButtonStyleSheet(m_model->clearColor()));
@@ -96,4 +135,11 @@ void SceneController::syncRenderSpinBoxes()
     m_view->renderHeightSpinBox()->setValue(size.height());
     m_view->renderWidthSpinBox()->blockSignals(false);
     m_view->renderHeightSpinBox()->blockSignals(false);
+}
+
+void SceneController::syncMaxSamplesSpinBox()
+{
+    m_view->maxSamplesSpinBox()->blockSignals(true);
+    m_view->maxSamplesSpinBox()->setValue(m_model->maxSamplesPerPixel());
+    m_view->maxSamplesSpinBox()->blockSignals(false);
 }

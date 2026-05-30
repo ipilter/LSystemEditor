@@ -65,7 +65,7 @@ target_include_directories(pathtracer PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src/View"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Controller"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Model")
-target_link_libraries(pathtracer PRIVATE Qt6::Widgets Qt6::OpenGL Qt6::OpenGLWidgets CUDA::cudart glm::glm)
+target_link_libraries(pathtracer PRIVATE Qt6::Widgets Qt6::OpenGL Qt6::OpenGLWidgets CUDA::cudart CUDA::curand glm::glm)
 set_target_properties(pathtracer PROPERTIES
     OUTPUT_NAME pathtracer
     AUTOMOC ON
@@ -84,9 +84,14 @@ find_program(WINDEPLOYQT_EXECUTABLE windeployqt
 if(WIN32 AND WINDEPLOYQT_EXECUTABLE)
     add_custom_command(TARGET pathtracer POST_BUILD
         COMMAND PowerShell -NoProfile -ExecutionPolicy Bypass -Command
-            "if (-not (Test-Path '$<TARGET_FILE_DIR:pathtracer>/platforms')) { & '${WINDEPLOYQT_EXECUTABLE}' --no-translations --no-compiler-runtime --no-opengl-sw '$<TARGET_FILE:pathtracer>' }"
-        COMMENT "Deploying Qt redistributables if needed"
-    )
+            "if (-not (Test-Path '$<TARGET_FILE_DIR:pathtracer>/Qt6OpenGLWidgetsd.dll')) { & '${WINDEPLOYQT_EXECUTABLE}' --no-translations --no-opengl-sw '$<TARGET_FILE:pathtracer>' }"
+        COMMENT "Deploying Qt debug redistributables if needed"
+        CONFIG Debug)
+    add_custom_command(TARGET pathtracer POST_BUILD
+        COMMAND PowerShell -NoProfile -ExecutionPolicy Bypass -Command
+            "if (-not (Test-Path '$<TARGET_FILE_DIR:pathtracer>/Qt6OpenGLWidgets.dll')) { & '${WINDEPLOYQT_EXECUTABLE}' --no-translations --no-compiler-runtime --no-opengl-sw '$<TARGET_FILE:pathtracer>' }"
+        COMMENT "Deploying Qt release redistributables if needed"
+        CONFIG Release)
 endif()
 
 if(WIN32)

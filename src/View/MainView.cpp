@@ -1,5 +1,6 @@
 #include "MainView.h"
 
+#include "AppLog.h"
 #include "AppSettings.h"
 #include "OpenGLViewportWidget.h"
 
@@ -7,8 +8,10 @@
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QPlainTextEdit>
 #include <QPushButton>
 #include <QResizeEvent>
+#include <QScrollBar>
 #include <QSpinBox>
 #include <QVBoxLayout>
 
@@ -17,6 +20,11 @@ namespace {
 constexpr int kMinRenderDimension = 1;
 constexpr int kMaxRenderDimension = 8192;
 constexpr int kDefaultRenderDimension = 256;
+constexpr int kMinMaxSamplesPerPixel = 0;
+constexpr int kMaxMaxSamplesPerPixel = 1'000'000;
+constexpr int kDefaultMaxSamplesPerPixel = 1024;
+constexpr int kLogPanelHeight = 120;
+constexpr int kLogMaxBlockCount = 500;
 
 } // namespace
 
@@ -24,25 +32,30 @@ MainView::MainView(QWidget* parent)
     : QWidget(parent)
 {
     setWindowTitle(QStringLiteral("PathTracer 0.0.1"));
-    resize(800, 500);
+    resize(800, 620);
 
-    auto* mainLayout = new QHBoxLayout(this);
-    mainLayout->setContentsMargins(0, 0, 0, 0);
-    mainLayout->setSpacing(0);
+    auto* rootLayout = new QVBoxLayout(this);
+    rootLayout->setContentsMargins(0, 0, 0, 0);
+    rootLayout->setSpacing(0);
 
-    m_viewportHost = new QWidget(this);
+    auto* contentRow = new QWidget(this);
+    auto* contentLayout = new QHBoxLayout(contentRow);
+    contentLayout->setContentsMargins(0, 0, 0, 0);
+    contentLayout->setSpacing(0);
+
+    m_viewportHost = new QWidget(contentRow);
     m_viewportHost->setAutoFillBackground(true);
     m_viewportHost->setStyleSheet(QStringLiteral("background-color: #2a2a2a;"));
     m_viewportHost->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     m_viewportHost->installEventFilter(this);
-    mainLayout->addWidget(m_viewportHost, 1);
+    contentLayout->addWidget(m_viewportHost, 1);
 
     m_viewport = new OpenGLViewportWidget(m_viewportHost);
     m_viewport->setGeometry(m_viewportHost->rect());
     m_pendingViewportSize = m_viewportHost->size();
 
-    auto* controlBar = new QWidget(this);
-    controlBar->setFixedWidth(160);
+    auto* controlBar = new QWidget(contentRow);
+    controlBar->setFixedWidth(180);
     auto* controlLayout = new QVBoxLayout(controlBar);
     controlLayout->setContentsMargins(8, 8, 8, 8);
 
@@ -65,7 +78,39 @@ MainView::MainView(QWidget* parent)
     heightRow->addWidget(m_renderHeightSpinBox);
     renderLayout->addLayout(heightRow);
 
-    controlLayout->addWidget(renderGroup);
+    auto* samplesRow = new QHBoxLayout();
+    samplesRow->addWidget(new QLabel(QStringLiteral("Samples:"), renderGroup));
+    m_maxSamplesSpinBox = new QSpinBox(renderGroup);
+    m_maxSamplesSpinBox->setRange(kMinMaxSamplesPerPixel, kMaxMaxSamplesPerPixel);
+    m_maxSamplesSpinBox->setValue(kDefaultMaxSamplesPerPixel);
+    m_maxSamplesSpinBox->setToolTip(QStringLiteral("Max samples per pixel (0 = unlimited)"));
+    samplesRow->addWidget(m_maxSamplesSpinBox);
+    renderLayout->addLayout(samplesRow);
+
+    auto* iterationRow = new QHBoxLayout();
+    iterationRow->addWidget(new QLabel(QStringLiteral("Iteration:"), renderGroup));
+    m_iterationLabel = new QLabel(QStringLiteral("0"), renderGroup);
+    m_iterationLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    iterationRow->addWidget(m_iterationLabel, 1);
+    renderLayout->addLayout(iterationRow);
+
+    auto* renderControlRow = new QHBoxLayout();
+    m_startButton = new QPushButton(QStringLiteral("Start"), renderGroup);
+    m_stopButton = new QPushButton(QStringLiteral("Stop"), renderGroup);
+    renderControlRow->addWidget(m_startButton);
+    renderControlRow->addWidget(m_stopButton);
+    renderLayout->addLayout(renderControlRow);
+
+    renderLayout->addStretch(1);
+
+    m_settingsButton = new QPushButton(QStringLiteral("Settings"), renderGroup);
+    renderLayout->addWidget(m_settingsButton);
+
+    auto* closeButton = new QPushButton(QStringLiteral("Close"), renderGroup);
+    connect(closeButton, &QPushButton::clicked, this, &QWidget::close);
+    renderLayout->addWidget(closeButton);
+
+    controlLayout->addWidget(renderGroup, 1);
 
     auto* backgroundRow = new QHBoxLayout();
     auto* backgroundLabel = new QLabel(QStringLiteral("Background: "), controlBar);
@@ -77,13 +122,22 @@ MainView::MainView(QWidget* parent)
     backgroundRow->addStretch();
     controlLayout->addLayout(backgroundRow);
 
-    controlLayout->addStretch();
+    contentLayout->addWidget(controlBar);
+    rootLayout->addWidget(contentRow, 1);
 
-    auto* closeButton = new QPushButton(QStringLiteral("Close"), controlBar);
-    connect(closeButton, &QPushButton::clicked, this, &QWidget::close);
-    controlLayout->addWidget(closeButton);
+    m_logView = new QPlainTextEdit(this);
+    m_logView->setReadOnly(true);
+    m_logView->setFixedHeight(kLogPanelHeight);
+    m_logView->setMaximumBlockCount(kLogMaxBlockCount);
+    m_logView->setPlaceholderText(QStringLiteral("Log messages appear here..."));
+    rootLayout->addWidget(m_logView);
 
-    mainLayout->addWidget(controlBar);
+    connect(&AppLog::instance(), &AppLog::messageLogged, this, [this](const QString& line) {
+        m_logView->appendPlainText(line);
+        if (QScrollBar* scrollBar = m_logView->verticalScrollBar()) {
+            scrollBar->setValue(scrollBar->maximum());
+        }
+    });
 }
 
 OpenGLViewportWidget* MainView::viewport() const
@@ -104,6 +158,33 @@ QSpinBox* MainView::renderWidthSpinBox() const
 QSpinBox* MainView::renderHeightSpinBox() const
 {
     return m_renderHeightSpinBox;
+}
+
+QSpinBox* MainView::maxSamplesSpinBox() const
+{
+    return m_maxSamplesSpinBox;
+}
+
+QPushButton* MainView::startButton() const
+{
+    return m_startButton;
+}
+
+QPushButton* MainView::stopButton() const
+{
+    return m_stopButton;
+}
+
+QPushButton* MainView::settingsButton() const
+{
+    return m_settingsButton;
+}
+
+void MainView::setIteration(int value)
+{
+    if (m_iterationLabel != nullptr) {
+        m_iterationLabel->setText(QString::number(value));
+    }
 }
 
 bool MainView::eventFilter(QObject* watched, QEvent* event)

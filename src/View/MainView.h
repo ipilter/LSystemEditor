@@ -1,11 +1,11 @@
 #pragma once
 
-#include "DebounceTimer.h"
-
 #include <QSize>
 #include <QWidget>
 
 class OpenGLViewportWidget;
+class QLabel;
+class QPlainTextEdit;
 class QPushButton;
 class QSpinBox;
 
@@ -20,6 +20,12 @@ public:
     QPushButton* colorButton() const;
     QSpinBox* renderWidthSpinBox() const;
     QSpinBox* renderHeightSpinBox() const;
+    QSpinBox* maxSamplesSpinBox() const;
+    QPushButton* startButton() const;
+    QPushButton* stopButton() const;
+    QPushButton* settingsButton() const;
+
+    void setIteration(int value);
 
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
@@ -32,5 +38,11 @@ private:
     QPushButton* m_colorButton = nullptr;
     QSpinBox* m_renderWidthSpinBox = nullptr;
     QSpinBox* m_renderHeightSpinBox = nullptr;
+    QSpinBox* m_maxSamplesSpinBox = nullptr;
+    QLabel* m_iterationLabel = nullptr;
+    QPushButton* m_startButton = nullptr;
+    QPushButton* m_stopButton = nullptr;
+    QPushButton* m_settingsButton = nullptr;
+    QPlainTextEdit* m_logView = nullptr;
     QSize m_pendingViewportSize;
 };

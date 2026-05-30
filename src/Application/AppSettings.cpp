@@ -4,8 +4,8 @@
 
 namespace {
 
-constexpr int kDefaultResizeDebounceMs = 50;
 constexpr int kDefaultUiDebounceMs = 300;
+constexpr int kDefaultMaxSamplesDebounceMs = 0;
 constexpr int kMinDebounceMs = 0;
 constexpr int kMaxDebounceMs = 2000;
 
@@ -13,16 +13,24 @@ constexpr int kDefaultRenderDimension = 16;
 constexpr int kMinRenderDimension = 1;
 constexpr int kMaxRenderDimension = 8192;
 constexpr int kDefaultClearColorComponent = 10;
+constexpr int kDefaultMaxSamplesPerPixel = 1024;
+constexpr int kMinMaxSamplesPerPixel = 0;
+constexpr int kMaxMaxSamplesPerPixel = 1'000'000;
 
 constexpr const char* kSettingsOrg = "PathTracer";
 constexpr const char* kSettingsApp = "pathtracer";
-constexpr const char* kLegacyResizeDebounceKey = "resizeDebounceMs";
 constexpr const char* kDebounceGroup = "debounce";
 constexpr const char* kRenderWidthKey = "renderWidth";
 constexpr const char* kRenderHeightKey = "renderHeight";
 constexpr const char* kClearColorRedKey = "clearColorRed";
 constexpr const char* kClearColorGreenKey = "clearColorGreen";
 constexpr const char* kClearColorBlueKey = "clearColorBlue";
+constexpr const char* kMaxSamplesPerPixelKey = "maxSamplesPerPixel";
+
+bool isKnownDebounceElementId(const QString& elementId)
+{
+    return elementId == DebounceElementIds::kRenderSize || elementId == DebounceElementIds::kMaxSamples;
+}
 
 } // namespace
 
@@ -42,19 +50,24 @@ AppSettings::AppSettings(QObject* parent)
     : QObject(parent)
     , m_renderSize(kDefaultRenderDimension, kDefaultRenderDimension)
     , m_clearColor(kDefaultClearColorComponent, kDefaultClearColorComponent, kDefaultClearColorComponent)
+    , m_maxSamplesPerPixel(kDefaultMaxSamplesPerPixel)
 {
     seedDefaultDebounceValues();
     load();
 }
 
-int AppSettings::defaultDebounceMsFor(const QString& /*elementId*/)
+int AppSettings::defaultDebounceMsFor(const QString& elementId)
 {
+    if (elementId == DebounceElementIds::kMaxSamples) {
+        return kDefaultMaxSamplesDebounceMs;
+    }
     return kDefaultUiDebounceMs;
 }
 
 void AppSettings::seedDefaultDebounceValues()
 {
     m_debounceMs.insert(DebounceElementIds::kRenderSize, kDefaultUiDebounceMs);
+    m_debounceMs.insert(DebounceElementIds::kMaxSamples, kDefaultMaxSamplesDebounceMs);
 }
 
 int AppSettings::debounceMsFor(const QString& elementId) const
@@ -111,6 +124,22 @@ void AppSettings::setClearColor(const QColor& color)
     save();
 }
 
+int AppSettings::maxSamplesPerPixel() const
+{
+    return m_maxSamplesPerPixel;
+}
+
+void AppSettings::setMaxSamplesPerPixel(int value)
+{
+    const int clamped = clampMaxSamplesPerPixel(value);
+    if (m_maxSamplesPerPixel == clamped) {
+        return;
+    }
+
+    m_maxSamplesPerPixel = clamped;
+    save();
+}
+
 int AppSettings::clampDebounceMs(int value)
 {
     if (value < kMinDebounceMs) {
@@ -133,6 +162,17 @@ int AppSettings::clampRenderDimension(int value)
     return value;
 }
 
+int AppSettings::clampMaxSamplesPerPixel(int value)
+{
+    if (value < kMinMaxSamplesPerPixel) {
+        return kMinMaxSamplesPerPixel;
+    }
+    if (value > kMaxMaxSamplesPerPixel) {
+        return kMaxMaxSamplesPerPixel;
+    }
+    return value;
+}
+
 void AppSettings::load()
 {
     QSettings settings(kSettingsOrg, kSettingsApp);
@@ -140,6 +180,9 @@ void AppSettings::load()
     settings.beginGroup(kDebounceGroup);
     const QStringList debounceKeys = settings.childKeys();
     for (const QString& key : debounceKeys) {
+        if (!isKnownDebounceElementId(key)) {
+            continue;
+        }
         bool ok = false;
         const int loaded = settings.value(key).toInt(&ok);
         if (ok && loaded >= kMinDebounceMs && loaded <= kMaxDebounceMs) {
@@ -177,6 +220,15 @@ void AppSettings::load()
             m_clearColor = QColor(red, green, blue);
         }
     }
+
+    const QVariant maxSamplesValue = settings.value(kMaxSamplesPerPixelKey);
+    if (maxSamplesValue.isValid()) {
+        bool ok = false;
+        const int maxSamples = maxSamplesValue.toInt(&ok);
+        if (ok) {
+            m_maxSamplesPerPixel = clampMaxSamplesPerPixel(maxSamples);
+        }
+    }
 }
 
 void AppSettings::save()
@@ -195,5 +247,6 @@ void AppSettings::save()
     settings.setValue(kClearColorRedKey, m_clearColor.red());
     settings.setValue(kClearColorGreenKey, m_clearColor.green());
     settings.setValue(kClearColorBlueKey, m_clearColor.blue());
+    settings.setValue(kMaxSamplesPerPixelKey, m_maxSamplesPerPixel);
     settings.sync();
 }

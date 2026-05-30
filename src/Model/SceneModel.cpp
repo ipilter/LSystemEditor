@@ -6,6 +6,8 @@ namespace {
 
 constexpr int kMinRenderDimension = 1;
 constexpr int kMaxRenderDimension = 10000;
+constexpr int kMinMaxSamplesPerPixel = 0;
+constexpr int kMaxMaxSamplesPerPixel = 1'000'000;
 
 } // namespace
 
@@ -13,6 +15,7 @@ SceneModel::SceneModel(QObject* parent)
     : QObject(parent)
     , m_clearColor(AppSettings::instance().clearColor())
     , m_renderSize(AppSettings::instance().renderSize())
+    , m_maxSamplesPerPixel(AppSettings::instance().maxSamplesPerPixel())
 {
 }
 
@@ -55,6 +58,23 @@ int SceneModel::bufferByteSize() const
     return m_renderSize.width() * m_renderSize.height() * 4;
 }
 
+int SceneModel::maxSamplesPerPixel() const
+{
+    return m_maxSamplesPerPixel;
+}
+
+void SceneModel::setMaxSamplesPerPixel(int value)
+{
+    const int clamped = clampMaxSamples(value);
+    if (m_maxSamplesPerPixel == clamped) {
+        return;
+    }
+
+    m_maxSamplesPerPixel = clamped;
+    AppSettings::instance().setMaxSamplesPerPixel(clamped);
+    emit maxSamplesPerPixelChanged(m_maxSamplesPerPixel);
+}
+
 GLuint SceneModel::pboId(int index) const
 {
     if (index < 0 || index >= bufferCount) {
@@ -76,6 +96,17 @@ int SceneModel::clampDimension(int value)
     }
     if (value > kMaxRenderDimension) {
         return kMaxRenderDimension;
+    }
+    return value;
+}
+
+int SceneModel::clampMaxSamples(int value)
+{
+    if (value < kMinMaxSamplesPerPixel) {
+        return kMinMaxSamplesPerPixel;
+    }
+    if (value > kMaxMaxSamplesPerPixel) {
+        return kMaxMaxSamplesPerPixel;
     }
     return value;
 }

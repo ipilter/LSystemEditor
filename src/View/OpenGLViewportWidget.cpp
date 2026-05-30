@@ -1,10 +1,11 @@
 #include "OpenGLViewportWidget.h"
 
-#include "CudaGlInterop.h"
+#include "AppLog.h"
 #include "SceneModel.h"
 
 #include <QKeyEvent>
 #include <QMatrix4x4>
+#include <QMetaObject>
 #include <QMouseEvent>
 #include <QSurfaceFormat>
 #include <QWheelEvent>
@@ -59,7 +60,6 @@ constexpr float kZoomFactor = 1.1f;
 
 OpenGLViewportWidget::OpenGLViewportWidget(QWidget* parent)
     : QOpenGLWidget(parent)
-    , m_cudaInterop(new CudaGlInterop())
     , m_clearColor(QColor(10, 10, 10))
 {
     QSurfaceFormat format;
@@ -70,6 +70,14 @@ OpenGLViewportWidget::OpenGLViewportWidget(QWidget* parent)
 
     setMouseTracking(true);
     setFocusPolicy(Qt::StrongFocus);
+
+    m_pathTracer.setFrameReadyCallback([this]() {
+        m_hasNewFrame.store(true);
+        if (!m_frameCallbackQueued.exchange(true)) {
+            QMetaObject::invokeMethod(this, "dispatchFrameUpdate", Qt::QueuedConnection);
+        }
+        QMetaObject::invokeMethod(this, "notifyIterationChanged", Qt::QueuedConnection);
+    });
 }
 
 OpenGLViewportWidget::~OpenGLViewportWidget()
@@ -77,8 +85,6 @@ OpenGLViewportWidget::~OpenGLViewportWidget()
     makeCurrent();
     releaseGlResources();
     doneCurrent();
-    delete m_cudaInterop;
-    m_cudaInterop = nullptr;
 }
 
 void OpenGLViewportWidget::setClearColor(const QColor& color)
@@ -119,6 +125,10 @@ void OpenGLViewportWidget::setSceneModel(SceneModel* model)
         update();
     });
 
+    connect(m_model, &SceneModel::maxSamplesPerPixelChanged, this, [this](int max) {
+        m_pathTracer.setMaxSamplesPerPixel(max);
+    });
+
     if (m_glInitialized) {
         makeCurrent();
         recreateGpuBuffers();
@@ -136,6 +146,12 @@ void OpenGLViewportWidget::initializeGL()
     m_program = linkProgram(vertexShader, fragmentShader);
     glDeleteShader(vertexShader);
     glDeleteShader(fragmentShader);
+
+    if (m_program == 0) {
+        AppLog::instance().error(QStringLiteral("OpenGL shader program failed to link"));
+    } else {
+        AppLog::instance().info(QStringLiteral("OpenGL shaders compiled and linked"));
+    }
 
     glGenVertexArrays(1, &m_vao);
     glGenBuffers(1, &m_vbo);
@@ -173,7 +189,20 @@ void OpenGLViewportWidget::paintGL()
     glClearColor(r, g, b, a);
     glClear(GL_COLOR_BUFFER_BIT);
 
-    if (m_model == nullptr || m_texture == 0 || m_program == 0) {
+    if (m_model == nullptr || m_program == 0) {
+        return;
+    }
+
+    if (m_hasNewFrame.exchange(false)) {
+        const int slot = m_displaySlot;
+        if (m_pathTracer.publishDisplayFrame(slot)) {
+            uploadDisplayTexture(slot, !m_textureAllocated);
+            m_textureAllocated = true;
+            m_displaySlot = 1 - slot;
+        }
+    }
+
+    if (!m_textureAllocated || m_texture == 0) {
         return;
     }
 
@@ -261,18 +290,52 @@ void OpenGLViewportWidget::keyPressEvent(QKeyEvent* event)
     QOpenGLWidget::keyPressEvent(event);
 }
 
+void OpenGLViewportWidget::dispatchFrameUpdate()
+{
+    m_frameCallbackQueued.store(false);
+    update();
+}
+
+void OpenGLViewportWidget::notifyIterationChanged()
+{
+    emit iterationChanged(m_pathTracer.currentSampleCount());
+}
+
+void OpenGLViewportWidget::restartRender()
+{
+    m_renderPaused = false;
+    m_pathTracer.resetAccumulation();
+    if (!m_pathTracer.isRunning()) {
+        m_pathTracer.start();
+    }
+    emit iterationChanged(0);
+    update();
+}
+
+void OpenGLViewportWidget::pauseRender()
+{
+    m_pathTracer.stop();
+    m_renderPaused = true;
+}
+
 void OpenGLViewportWidget::recreateGpuBuffers()
 {
     if (m_model == nullptr) {
         return;
     }
 
-    m_cudaInterop->unregisterAll();
+    m_pathTracer.releaseOutputSurfaces();
+
+    m_hasNewFrame.store(false);
+    m_frameCallbackQueued.store(false);
+    m_displaySlot = 0;
 
     if (m_texture != 0) {
         glDeleteTextures(1, &m_texture);
         m_texture = 0;
     }
+    m_textureAllocated = false;
+
     if (m_pbos[0] != 0 || m_pbos[1] != 0) {
         glDeleteBuffers(2, m_pbos);
         m_pbos[0] = 0;
@@ -284,6 +347,7 @@ void OpenGLViewportWidget::recreateGpuBuffers()
     const int h = m_model->renderSize().height();
     const std::size_t byteSize = static_cast<std::size_t>(m_model->bufferByteSize());
     if (w <= 0 || h <= 0 || byteSize == 0) {
+        AppLog::instance().error(QStringLiteral("Invalid render buffer size %1x%2").arg(w).arg(h));
         return;
     }
 
@@ -294,13 +358,12 @@ void OpenGLViewportWidget::recreateGpuBuffers()
     }
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
-    if (!m_cudaInterop->registerPbo(static_cast<unsigned int>(m_pbos[0]), byteSize, 0) || !m_cudaInterop->registerPbo(static_cast<unsigned int>(m_pbos[1]), byteSize, 1)) {
-      return;
-    }
-
-    if (!m_cudaInterop->initPboRandomGray(0, w, h, 1u) || !m_cudaInterop->initPboRandomGray(1, w, h, 2u)) {
+    if (!m_pathTracer.configure(w, h, m_pbos[0], m_pbos[1])) {
+        AppLog::instance().error(QStringLiteral("PathTracer configure failed for %1x%2").arg(w).arg(h));
         return;
     }
+
+    m_pathTracer.setMaxSamplesPerPixel(m_model->maxSamplesPerPixel());
 
     m_model->setPboIds(m_pbos[0], m_pbos[1]);
 
@@ -312,44 +375,55 @@ void OpenGLViewportWidget::recreateGpuBuffers()
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glBindTexture(GL_TEXTURE_2D, 0);
 
-    uploadDisplayTexture();
+    m_camera.focusOnImage(w, h, width(), height());
+
+    if (!m_renderPaused) {
+        m_pathTracer.start();
+    }
+    AppLog::instance().info(QStringLiteral("Render buffers configured %1x%2").arg(w).arg(h));
 }
 
-void OpenGLViewportWidget::uploadDisplayTexture()
+void OpenGLViewportWidget::uploadDisplayTexture(int slot, bool initialUpload)
 {
-    if (m_model == nullptr || m_texture == 0 || m_pbos[0] == 0) {
+    if (m_model == nullptr || m_texture == 0 || slot < 0 || slot > 1 || m_pbos[slot] == 0) {
         return;
     }
 
     const int w = m_model->renderSize().width();
     const int h = m_model->renderSize().height();
 
-    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, m_pbos[0]);
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, m_pbos[slot]);
     glBindTexture(GL_TEXTURE_2D, m_texture);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-    glTexImage2D(GL_TEXTURE_2D,
-                 0,
-                 GL_RGBA8,
-                 w,
-                 h,
-                 0,
-                 GL_RGBA,
-                 GL_UNSIGNED_BYTE,
-                 nullptr);
+
+    if (initialUpload) {
+        glTexImage2D(GL_TEXTURE_2D,
+                     0,
+                     GL_RGBA8,
+                     w,
+                     h,
+                     0,
+                     GL_RGBA,
+                     GL_UNSIGNED_BYTE,
+                     nullptr);
+    } else {
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    }
+
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
     glBindTexture(GL_TEXTURE_2D, 0);
 }
 
 void OpenGLViewportWidget::releaseGlResources()
 {
-    if (m_cudaInterop != nullptr) {
-        m_cudaInterop->unregisterAll();
-    }
+    m_pathTracer.releaseOutputSurfaces();
 
     if (m_texture != 0) {
         glDeleteTextures(1, &m_texture);
         m_texture = 0;
     }
+    m_textureAllocated = false;
+
     if (m_pbos[0] != 0 || m_pbos[1] != 0) {
         glDeleteBuffers(2, m_pbos);
         m_pbos[0] = 0;
@@ -382,14 +456,51 @@ GLuint OpenGLViewportWidget::compileShader(GLenum type, const char* source)
     const GLuint shader = glCreateShader(type);
     glShaderSource(shader, 1, &source, nullptr);
     glCompileShader(shader);
+
+    GLint compiled = GL_FALSE;
+    glGetShaderiv(shader, GL_COMPILE_STATUS, &compiled);
+    if (compiled != GL_TRUE) {
+        GLint logLength = 0;
+        glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &logLength);
+        QByteArray log;
+        log.resize(logLength);
+        glGetShaderInfoLog(shader, logLength, nullptr, log.data());
+
+        const QString typeName =
+            type == GL_VERTEX_SHADER ? QStringLiteral("vertex") : QStringLiteral("fragment");
+        AppLog::instance().error(
+            QStringLiteral("Shader compile failed (%1): %2").arg(typeName, QString::fromUtf8(log)));
+        glDeleteShader(shader);
+        return 0;
+    }
+
     return shader;
 }
 
 GLuint OpenGLViewportWidget::linkProgram(GLuint vertexShader, GLuint fragmentShader)
 {
+    if (vertexShader == 0 || fragmentShader == 0) {
+        return 0;
+    }
+
     const GLuint program = glCreateProgram();
     glAttachShader(program, vertexShader);
     glAttachShader(program, fragmentShader);
     glLinkProgram(program);
+
+    GLint linked = GL_FALSE;
+    glGetProgramiv(program, GL_LINK_STATUS, &linked);
+    if (linked != GL_TRUE) {
+        GLint logLength = 0;
+        glGetProgramiv(program, GL_INFO_LOG_LENGTH, &logLength);
+        QByteArray log;
+        log.resize(logLength);
+        glGetProgramInfoLog(program, logLength, nullptr, log.data());
+
+        AppLog::instance().error(QStringLiteral("Shader link failed: %1").arg(QString::fromUtf8(log)));
+        glDeleteProgram(program);
+        return 0;
+    }
+
     return program;
 }

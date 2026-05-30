@@ -9,6 +9,7 @@
 namespace DebounceElementIds {
 
 inline constexpr const char* kRenderSize = "renderSize";
+inline constexpr const char* kMaxSamples = "maxSamples";
 
 } // namespace DebounceElementIds
 
@@ -33,6 +34,9 @@ public:
     QColor clearColor() const;
     void setClearColor(const QColor& color);
 
+    int maxSamplesPerPixel() const;
+    void setMaxSamplesPerPixel(int value);
+
     void load();
     void save();
 
@@ -42,6 +46,7 @@ signals:
 private:
     static int clampDebounceMs(int value);
     static int clampRenderDimension(int value);
+    static int clampMaxSamplesPerPixel(int value);
     void seedDefaultDebounceValues();
 
     static AppSettings* s_instance;
@@ -49,4 +54,5 @@ private:
     QHash<QString, int> m_debounceMs;
     QSize m_renderSize = QSize(16, 16);
     QColor m_clearColor = QColor(10, 10, 10);
+    int m_maxSamplesPerPixel = 1024;
 };
