@@ -27,7 +27,7 @@ if(DEFINED ENV{QTDIR})
     list(PREPEND CMAKE_PREFIX_PATH "$ENV{QTDIR}")
 endif()
 
-find_package(Qt6 REQUIRED COMPONENTS Widgets)
+find_package(Qt6 REQUIRED COMPONENTS Widgets OpenGL OpenGLWidgets)
 find_package(CUDAToolkit REQUIRED)
 
 enable_language(CUDA)
@@ -58,10 +58,10 @@ file(GLOB_RECURSE PATHTRACER_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.hpp")
 
 add_executable(pathtracer WIN32 ${PATHTRACER_SOURCES})
-target_link_libraries(pathtracer PRIVATE Qt6::Widgets CUDA::cudart glm::glm)
+target_link_libraries(pathtracer PRIVATE Qt6::Widgets Qt6::OpenGL Qt6::OpenGLWidgets CUDA::cudart glm::glm)
 set_target_properties(pathtracer PROPERTIES
     OUTPUT_NAME pathtracer
-    AUTOMOC OFF
+    AUTOMOC ON
     FOLDER "src")
 
 source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}/src" PREFIX "src" FILES ${PATHTRACER_SOURCES})
