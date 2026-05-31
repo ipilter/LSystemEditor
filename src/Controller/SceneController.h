@@ -24,15 +24,19 @@ private:
     void applyRenderSizeFromSpinBoxes();
     void onMaxSamplesSpinBoxChanged();
     void applyMaxSamplesFromSpinBox();
+    void onPreviewStepsSpinBoxChanged();
+    void applyPreviewStepsFromSpinBox();
     void onStartButtonClicked();
     void onStopButtonClicked();
     void onSettingsButtonClicked();
     void syncColorButtonStyle();
     void syncRenderSpinBoxes();
     void syncMaxSamplesSpinBox();
+    void syncPreviewStepsSpinBox();
 
     SceneModel* m_model = nullptr;
     MainView* m_view = nullptr;
     DebounceTimer m_renderSizeDebounce;
     DebounceTimer m_maxSamplesDebounce;
+    DebounceTimer m_previewStepsDebounce;
 };

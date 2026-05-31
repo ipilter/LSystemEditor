@@ -6,6 +6,7 @@ namespace {
 
 constexpr int kDefaultUiDebounceMs = 300;
 constexpr int kDefaultMaxSamplesDebounceMs = 0;
+constexpr int kDefaultPreviewStepsDebounceMs = 0;
 constexpr int kMinDebounceMs = 0;
 constexpr int kMaxDebounceMs = 2000;
 
@@ -16,6 +17,8 @@ constexpr int kDefaultClearColorComponent = 10;
 constexpr int kDefaultMaxSamplesPerPixel = 1024;
 constexpr int kMinMaxSamplesPerPixel = 0;
 constexpr int kMaxMaxSamplesPerPixel = 1'000'000;
+constexpr int kMinPreviewStepsPerLevel = 0;
+constexpr int kMaxPreviewStepsPerLevel = 128;
 
 constexpr const char* kSettingsOrg = "PathTracer";
 constexpr const char* kSettingsApp = "pathtracer";
@@ -26,10 +29,13 @@ constexpr const char* kClearColorRedKey = "clearColorRed";
 constexpr const char* kClearColorGreenKey = "clearColorGreen";
 constexpr const char* kClearColorBlueKey = "clearColorBlue";
 constexpr const char* kMaxSamplesPerPixelKey = "maxSamplesPerPixel";
+constexpr const char* kPreviewStepsPerLevelKey = "previewStepsPerLevel";
 
 bool isKnownDebounceElementId(const QString& elementId)
 {
-    return elementId == DebounceElementIds::kRenderSize || elementId == DebounceElementIds::kMaxSamples;
+    return elementId == DebounceElementIds::kRenderSize
+        || elementId == DebounceElementIds::kMaxSamples
+        || elementId == DebounceElementIds::kPreviewSteps;
 }
 
 } // namespace
@@ -61,6 +67,9 @@ int AppSettings::defaultDebounceMsFor(const QString& elementId)
     if (elementId == DebounceElementIds::kMaxSamples) {
         return kDefaultMaxSamplesDebounceMs;
     }
+    if (elementId == DebounceElementIds::kPreviewSteps) {
+        return kDefaultPreviewStepsDebounceMs;
+    }
     return kDefaultUiDebounceMs;
 }
 
@@ -68,6 +77,7 @@ void AppSettings::seedDefaultDebounceValues()
 {
     m_debounceMs.insert(DebounceElementIds::kRenderSize, kDefaultUiDebounceMs);
     m_debounceMs.insert(DebounceElementIds::kMaxSamples, kDefaultMaxSamplesDebounceMs);
+    m_debounceMs.insert(DebounceElementIds::kPreviewSteps, kDefaultPreviewStepsDebounceMs);
 }
 
 int AppSettings::debounceMsFor(const QString& elementId) const
@@ -140,6 +150,22 @@ void AppSettings::setMaxSamplesPerPixel(int value)
     save();
 }
 
+int AppSettings::previewStepsPerLevel() const
+{
+    return m_previewStepsPerLevel;
+}
+
+void AppSettings::setPreviewStepsPerLevel(int value)
+{
+    const int clamped = clampPreviewStepsPerLevel(value);
+    if (m_previewStepsPerLevel == clamped) {
+        return;
+    }
+
+    m_previewStepsPerLevel = clamped;
+    save();
+}
+
 int AppSettings::clampDebounceMs(int value)
 {
     if (value < kMinDebounceMs) {
@@ -169,6 +195,17 @@ int AppSettings::clampMaxSamplesPerPixel(int value)
     }
     if (value > kMaxMaxSamplesPerPixel) {
         return kMaxMaxSamplesPerPixel;
+    }
+    return value;
+}
+
+int AppSettings::clampPreviewStepsPerLevel(int value)
+{
+    if (value < kMinPreviewStepsPerLevel) {
+        return kMinPreviewStepsPerLevel;
+    }
+    if (value > kMaxPreviewStepsPerLevel) {
+        return kMaxPreviewStepsPerLevel;
     }
     return value;
 }
@@ -229,6 +266,15 @@ void AppSettings::load()
             m_maxSamplesPerPixel = clampMaxSamplesPerPixel(maxSamples);
         }
     }
+
+    const QVariant previewStepsValue = settings.value(kPreviewStepsPerLevelKey);
+    if (previewStepsValue.isValid()) {
+        bool ok = false;
+        const int previewSteps = previewStepsValue.toInt(&ok);
+        if (ok) {
+            m_previewStepsPerLevel = clampPreviewStepsPerLevel(previewSteps);
+        }
+    }
 }
 
 void AppSettings::save()
@@ -248,5 +294,6 @@ void AppSettings::save()
     settings.setValue(kClearColorGreenKey, m_clearColor.green());
     settings.setValue(kClearColorBlueKey, m_clearColor.blue());
     settings.setValue(kMaxSamplesPerPixelKey, m_maxSamplesPerPixel);
+    settings.setValue(kPreviewStepsPerLevelKey, m_previewStepsPerLevel);
     settings.sync();
 }

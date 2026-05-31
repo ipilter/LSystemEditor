@@ -34,9 +34,10 @@ bool pathTracerSample(
     uint32_t* d_samples,
     int width,
     int height,
+    int stride,
     curandState* rng,
     cudaStream_t stream);
-bool pathTracerCopyToPbo(const float4* acc, uchar4* pbo, int width, int height, cudaStream_t stream);
+bool pathTracerCopyToPbo(const float4* acc, uchar4* pbo, int width, int height, int stride, cudaStream_t stream);
 
 struct PathTracerDetail::PathTracerImpl
 {
@@ -56,12 +57,14 @@ struct PathTracerDetail::PathTracerImpl
     std::condition_variable workerCv;
 
     std::atomic<int> maxSamplesPerPixel{1024};
+    std::atomic<int> previewStepsPerLevel{0};
     std::atomic<int> sampleCount{0};
 };
 
 namespace {
 
 constexpr int kMaxSamplesUpperBound = 1'000'000;
+constexpr int kMaxPreviewStepsPerLevel = 128;
 
 int clampMaxSamples(int value)
 {
@@ -72,6 +75,74 @@ int clampMaxSamples(int value)
         return kMaxSamplesUpperBound;
     }
     return value;
+}
+
+int clampPreviewStepsPerLevel(int value)
+{
+    if (value < 0) {
+        return 0;
+    }
+    if (value > kMaxPreviewStepsPerLevel) {
+        return kMaxPreviewStepsPerLevel;
+    }
+    return value;
+}
+
+int largestPowerOfTwoAtMost(int value)
+{
+    if (value < 1) {
+        return 1;
+    }
+
+    int power = 1;
+    while (power * 2 <= value) {
+        power *= 2;
+    }
+    return power;
+}
+
+int maxStartingStride(int width, int height)
+{
+    const int maxDim = width > height ? width : height;
+    int stride = largestPowerOfTwoAtMost(maxDim);
+    if (stride > 32) {
+        stride = 32;
+    }
+    return stride >= 1 ? stride : 1;
+}
+
+int countStrideLevels(int maxStride)
+{
+    int numLevels = 0;
+    for (int stride = maxStride; stride >= 1; stride /= 2) {
+        ++numLevels;
+    }
+    return numLevels;
+}
+
+int strideAtLevel(int maxStride, int levelIndex)
+{
+    int stride = maxStride;
+    for (int i = 0; i < levelIndex; ++i) {
+        stride /= 2;
+    }
+    return stride >= 1 ? stride : 1;
+}
+
+int computeStride(int sampleCount, int previewStepsPerLevel, int width, int height)
+{
+    if (previewStepsPerLevel <= 0 || width <= 0 || height <= 0) {
+        return 1;
+    }
+
+    const int maxStride = maxStartingStride(width, height);
+    const int numLevels = countStrideLevels(maxStride);
+    const int levelIndex = sampleCount / previewStepsPerLevel;
+    if (levelIndex >= numLevels) {
+        return 1;
+    }
+
+    return strideAtLevel(maxStride, levelIndex);
 }
 
 QString cudaErrorString(cudaError_t error)
@@ -125,7 +196,7 @@ bool mapPboResource(cudaGraphicsResource_t resource, cudaStream_t stream, void**
         }
         return false;
     }
-
+ 
     cudaError_t error = cudaGraphicsMapResources(1, &resource, stream);
     if (error != cudaSuccess) {
         if (outError != nullptr) {
@@ -544,11 +615,18 @@ bool PathTracer::publishDisplayFrame(int slot)
         return false;
     }
 
+    const int stride = computeStride(
+        m_impl->sampleCount.load(),
+        m_impl->previewStepsPerLevel.load(),
+        m_impl->acc.width,
+        m_impl->acc.height);
+
     const bool copied = pathTracerCopyToPbo(
         m_impl->acc.d_buffer,
         static_cast<uchar4*>(devicePointer),
         m_impl->acc.width,
         m_impl->acc.height,
+        stride,
         m_impl->stream);
 
     if (!copied) {
@@ -581,6 +659,17 @@ void PathTracer::setMaxSamplesPerPixel(int max)
 int PathTracer::maxSamplesPerPixel() const
 {
     return m_impl->maxSamplesPerPixel.load();
+}
+
+void PathTracer::setPreviewStepsPerLevel(int steps)
+{
+    m_impl->previewStepsPerLevel.store(clampPreviewStepsPerLevel(steps));
+    notifyWorker();
+}
+
+int PathTracer::previewStepsPerLevel() const
+{
+    return m_impl->previewStepsPerLevel.load();
 }
 
 int PathTracer::currentSampleCount() const
@@ -630,11 +719,18 @@ void PathTracer::renderLoop()
             continue;
         }
 
+        const int stride = computeStride(
+            m_impl->sampleCount.load(),
+            m_impl->previewStepsPerLevel.load(),
+            m_impl->acc.width,
+            m_impl->acc.height);
+
         if (!pathTracerSample(
                 m_impl->acc.d_buffer,
                 m_impl->acc.d_samples,
                 m_impl->acc.width,
                 m_impl->acc.height,
+                stride,
                 m_impl->rngStates,
                 m_impl->stream)) {
             AppLog::instance().error(QStringLiteral("PathTracer sample kernel launch failed"));

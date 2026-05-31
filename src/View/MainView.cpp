@@ -23,6 +23,9 @@ constexpr int kDefaultRenderDimension = 256;
 constexpr int kMinMaxSamplesPerPixel = 0;
 constexpr int kMaxMaxSamplesPerPixel = 1'000'000;
 constexpr int kDefaultMaxSamplesPerPixel = 1024;
+constexpr int kMinPreviewStepsPerLevel = 0;
+constexpr int kMaxPreviewStepsPerLevel = 128;
+constexpr int kDefaultPreviewStepsPerLevel = 0;
 constexpr int kLogPanelHeight = 120;
 constexpr int kLogMaxBlockCount = 500;
 
@@ -86,6 +89,16 @@ MainView::MainView(QWidget* parent)
     m_maxSamplesSpinBox->setToolTip(QStringLiteral("Max samples per pixel (0 = unlimited)"));
     samplesRow->addWidget(m_maxSamplesSpinBox);
     renderLayout->addLayout(samplesRow);
+
+    auto* previewRow = new QHBoxLayout();
+    previewRow->addWidget(new QLabel(QStringLiteral("Preview:"), renderGroup));
+    m_previewStepsSpinBox = new QSpinBox(renderGroup);
+    m_previewStepsSpinBox->setRange(kMinPreviewStepsPerLevel, kMaxPreviewStepsPerLevel);
+    m_previewStepsSpinBox->setValue(kDefaultPreviewStepsPerLevel);
+    m_previewStepsSpinBox->setToolTip(
+        QStringLiteral("Iterations per coarse stride level before full resolution (0 = disabled)"));
+    previewRow->addWidget(m_previewStepsSpinBox);
+    renderLayout->addLayout(previewRow);
 
     auto* iterationRow = new QHBoxLayout();
     iterationRow->addWidget(new QLabel(QStringLiteral("Iteration:"), renderGroup));
@@ -163,6 +176,11 @@ QSpinBox* MainView::renderHeightSpinBox() const
 QSpinBox* MainView::maxSamplesSpinBox() const
 {
     return m_maxSamplesSpinBox;
+}
+
+QSpinBox* MainView::previewStepsSpinBox() const
+{
+    return m_previewStepsSpinBox;
 }
 
 QPushButton* MainView::startButton() const

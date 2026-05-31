@@ -8,6 +8,8 @@ constexpr int kMinRenderDimension = 1;
 constexpr int kMaxRenderDimension = 10000;
 constexpr int kMinMaxSamplesPerPixel = 0;
 constexpr int kMaxMaxSamplesPerPixel = 1'000'000;
+constexpr int kMinPreviewStepsPerLevel = 0;
+constexpr int kMaxPreviewStepsPerLevel = 128;
 
 } // namespace
 
@@ -16,6 +18,7 @@ SceneModel::SceneModel(QObject* parent)
     , m_clearColor(AppSettings::instance().clearColor())
     , m_renderSize(AppSettings::instance().renderSize())
     , m_maxSamplesPerPixel(AppSettings::instance().maxSamplesPerPixel())
+    , m_previewStepsPerLevel(AppSettings::instance().previewStepsPerLevel())
 {
 }
 
@@ -75,6 +78,23 @@ void SceneModel::setMaxSamplesPerPixel(int value)
     emit maxSamplesPerPixelChanged(m_maxSamplesPerPixel);
 }
 
+int SceneModel::previewStepsPerLevel() const
+{
+    return m_previewStepsPerLevel;
+}
+
+void SceneModel::setPreviewStepsPerLevel(int value)
+{
+    const int clamped = clampPreviewSteps(value);
+    if (m_previewStepsPerLevel == clamped) {
+        return;
+    }
+
+    m_previewStepsPerLevel = clamped;
+    AppSettings::instance().setPreviewStepsPerLevel(clamped);
+    emit previewStepsPerLevelChanged(m_previewStepsPerLevel);
+}
+
 GLuint SceneModel::pboId(int index) const
 {
     if (index < 0 || index >= bufferCount) {
@@ -107,6 +127,17 @@ int SceneModel::clampMaxSamples(int value)
     }
     if (value > kMaxMaxSamplesPerPixel) {
         return kMaxMaxSamplesPerPixel;
+    }
+    return value;
+}
+
+int SceneModel::clampPreviewSteps(int value)
+{
+    if (value < kMinPreviewStepsPerLevel) {
+        return kMinPreviewStepsPerLevel;
+    }
+    if (value > kMaxPreviewStepsPerLevel) {
+        return kMaxPreviewStepsPerLevel;
     }
     return value;
 }

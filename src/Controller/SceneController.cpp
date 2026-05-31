@@ -28,6 +28,7 @@ SceneController::SceneController(SceneModel* model, MainView* view, QObject* par
     , m_view(view)
     , m_renderSizeDebounce(AppSettings::instance().debounceMsFor(DebounceElementIds::kRenderSize), this)
     , m_maxSamplesDebounce(AppSettings::instance().debounceMsFor(DebounceElementIds::kMaxSamples), this)
+    , m_previewStepsDebounce(AppSettings::instance().debounceMsFor(DebounceElementIds::kPreviewSteps), this)
 {
     syncColorButtonStyle();
     m_view->viewport()->setClearColor(m_model->clearColor());
@@ -35,17 +36,21 @@ SceneController::SceneController(SceneModel* model, MainView* view, QObject* par
 
     syncRenderSpinBoxes();
     syncMaxSamplesSpinBox();
+    syncPreviewStepsSpinBox();
 
     connect(m_view->colorButton(), &QPushButton::clicked, this, &SceneController::onColorButtonClicked);
     connect(m_model, &SceneModel::clearColorChanged, this, &SceneController::onClearColorChanged);
     connect(m_model, &SceneModel::renderSizeChanged, this, &SceneController::onRenderSizeChanged);
     connect(m_model, &SceneModel::maxSamplesPerPixelChanged, this, [this](int) { syncMaxSamplesSpinBox(); });
+    connect(m_model, &SceneModel::previewStepsPerLevelChanged, this, [this](int) { syncPreviewStepsSpinBox(); });
 
     connect(m_view->renderWidthSpinBox(), &QSpinBox::valueChanged, this, &SceneController::onRenderSizeSpinBoxChanged);
     connect(m_view->renderHeightSpinBox(), &QSpinBox::valueChanged, this, &SceneController::onRenderSizeSpinBoxChanged);
     connect(m_view->maxSamplesSpinBox(), &QSpinBox::valueChanged, this, &SceneController::onMaxSamplesSpinBoxChanged);
+    connect(m_view->previewStepsSpinBox(), &QSpinBox::valueChanged, this, &SceneController::onPreviewStepsSpinBoxChanged);
     connect(&m_renderSizeDebounce, &DebounceTimer::triggered, this, &SceneController::applyRenderSizeFromSpinBoxes);
     connect(&m_maxSamplesDebounce, &DebounceTimer::triggered, this, &SceneController::applyMaxSamplesFromSpinBox);
+    connect(&m_previewStepsDebounce, &DebounceTimer::triggered, this, &SceneController::applyPreviewStepsFromSpinBox);
     connect(m_view->startButton(), &QPushButton::clicked, this, &SceneController::onStartButtonClicked);
     connect(m_view->stopButton(), &QPushButton::clicked, this, &SceneController::onStopButtonClicked);
     connect(m_view->settingsButton(), &QPushButton::clicked, this, &SceneController::onSettingsButtonClicked);
@@ -56,6 +61,8 @@ SceneController::SceneController(SceneModel* model, MainView* view, QObject* par
                     m_renderSizeDebounce.setIntervalMs(ms);
                 } else if (elementId == DebounceElementIds::kMaxSamples) {
                     m_maxSamplesDebounce.setIntervalMs(ms);
+                } else if (elementId == DebounceElementIds::kPreviewSteps) {
+                    m_previewStepsDebounce.setIntervalMs(ms);
                 }
             });
 }
@@ -104,6 +111,16 @@ void SceneController::applyMaxSamplesFromSpinBox()
     m_model->setMaxSamplesPerPixel(m_view->maxSamplesSpinBox()->value());
 }
 
+void SceneController::onPreviewStepsSpinBoxChanged()
+{
+    m_previewStepsDebounce.schedule();
+}
+
+void SceneController::applyPreviewStepsFromSpinBox()
+{
+    m_model->setPreviewStepsPerLevel(m_view->previewStepsSpinBox()->value());
+}
+
 void SceneController::onStartButtonClicked()
 {
     m_view->setIteration(0);
@@ -142,4 +159,11 @@ void SceneController::syncMaxSamplesSpinBox()
     m_view->maxSamplesSpinBox()->blockSignals(true);
     m_view->maxSamplesSpinBox()->setValue(m_model->maxSamplesPerPixel());
     m_view->maxSamplesSpinBox()->blockSignals(false);
+}
+
+void SceneController::syncPreviewStepsSpinBox()
+{
+    m_view->previewStepsSpinBox()->blockSignals(true);
+    m_view->previewStepsSpinBox()->setValue(m_model->previewStepsPerLevel());
+    m_view->previewStepsSpinBox()->blockSignals(false);
 }

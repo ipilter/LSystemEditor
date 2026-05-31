@@ -14,11 +14,15 @@ __global__ void initRngKernel(curandState* states, int count, unsigned int seed)
     curand_init(seed, idx, 0, &states[idx]);
 }
 
-__global__ void sampleKernel(float4* acc, uint32_t* counts, curandState* rng, int width, int height)
+__global__ void sampleKernel(float4* acc, uint32_t* counts, curandState* rng, int width, int height, int stride)
 {
     const int x = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
     const int y = static_cast<int>(blockIdx.y * blockDim.y + threadIdx.y);
     if (x >= width || y >= height) {
+        return;
+    }
+
+    if (x % stride != 0 || y % stride != 0) {
         return;
     }
 
@@ -36,7 +40,7 @@ __global__ void sampleKernel(float4* acc, uint32_t* counts, curandState* rng, in
     counts[idx] = n + 1;
 }
 
-__global__ void copyToPboKernel(const float4* acc, uchar4* pbo, int width, int height)
+__global__ void copyToPboKernel(const float4* acc, uchar4* pbo, int width, int height, int stride)
 {
     const int x = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
     const int y = static_cast<int>(blockIdx.y * blockDim.y + threadIdx.y);
@@ -44,10 +48,12 @@ __global__ void copyToPboKernel(const float4* acc, uchar4* pbo, int width, int h
         return;
     }
 
-    const int idx = y * width + x;
-    const float4 v = acc[idx];
+    const int ax = x - (x % stride);
+    const int ay = y - (y % stride);
+    const int aidx = ay * width + ax;
+    const float4 v = acc[aidx];
     const unsigned char c = static_cast<unsigned char>(fminf(v.x, 1.0f) * 255.0f);
-    pbo[idx] = make_uchar4(c, c, c, 255);
+    pbo[y * width + x] = make_uchar4(c, c, c, 255);
 }
 
 dim3 grid2d(int width, int height, dim3 block)
@@ -84,6 +90,7 @@ bool pathTracerSample(
     uint32_t* d_samples,
     int width,
     int height,
+    int stride,
     curandState* rng,
     cudaStream_t stream)
 {
@@ -91,20 +98,22 @@ bool pathTracerSample(
         return false;
     }
 
+    const int clampedStride = stride < 1 ? 1 : stride;
     const dim3 block(16, 16);
     const dim3 grid = grid2d(width, height, block);
-    sampleKernel<<<grid, block, 0, stream>>>(d_buffer, d_samples, rng, width, height);
+    sampleKernel<<<grid, block, 0, stream>>>(d_buffer, d_samples, rng, width, height, clampedStride);
     return checkLaunch(cudaSuccess);
 }
 
-bool pathTracerCopyToPbo(const float4* acc, uchar4* pbo, int width, int height, cudaStream_t stream)
+bool pathTracerCopyToPbo(const float4* acc, uchar4* pbo, int width, int height, int stride, cudaStream_t stream)
 {
     if (acc == nullptr || pbo == nullptr || width <= 0 || height <= 0) {
         return false;
     }
 
+    const int clampedStride = stride < 1 ? 1 : stride;
     const dim3 block(16, 16);
     const dim3 grid = grid2d(width, height, block);
-    copyToPboKernel<<<grid, block, 0, stream>>>(acc, pbo, width, height);
+    copyToPboKernel<<<grid, block, 0, stream>>>(acc, pbo, width, height, clampedStride);
     return checkLaunch(cudaSuccess);
 }

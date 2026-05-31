@@ -129,6 +129,10 @@ void OpenGLViewportWidget::setSceneModel(SceneModel* model)
         m_pathTracer.setMaxSamplesPerPixel(max);
     });
 
+    connect(m_model, &SceneModel::previewStepsPerLevelChanged, this, [this](int steps) {
+        m_pathTracer.setPreviewStepsPerLevel(steps);
+    });
+
     if (m_glInitialized) {
         makeCurrent();
         recreateGpuBuffers();
@@ -364,6 +368,7 @@ void OpenGLViewportWidget::recreateGpuBuffers()
     }
 
     m_pathTracer.setMaxSamplesPerPixel(m_model->maxSamplesPerPixel());
+    m_pathTracer.setPreviewStepsPerLevel(m_model->previewStepsPerLevel());
 
     m_model->setPboIds(m_pbos[0], m_pbos[1]);
 

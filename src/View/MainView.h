@@ -21,6 +21,7 @@ public:
     QSpinBox* renderWidthSpinBox() const;
     QSpinBox* renderHeightSpinBox() const;
     QSpinBox* maxSamplesSpinBox() const;
+    QSpinBox* previewStepsSpinBox() const;
     QPushButton* startButton() const;
     QPushButton* stopButton() const;
     QPushButton* settingsButton() const;
@@ -39,6 +40,7 @@ private:
     QSpinBox* m_renderWidthSpinBox = nullptr;
     QSpinBox* m_renderHeightSpinBox = nullptr;
     QSpinBox* m_maxSamplesSpinBox = nullptr;
+    QSpinBox* m_previewStepsSpinBox = nullptr;
     QLabel* m_iterationLabel = nullptr;
     QPushButton* m_startButton = nullptr;
     QPushButton* m_stopButton = nullptr;

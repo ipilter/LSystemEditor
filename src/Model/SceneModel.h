@@ -25,6 +25,9 @@ public:
     int maxSamplesPerPixel() const;
     void setMaxSamplesPerPixel(int value);
 
+    int previewStepsPerLevel() const;
+    void setPreviewStepsPerLevel(int value);
+
     GLuint pboId(int index) const;
     void setPboIds(GLuint pbo0, GLuint pbo1);
 
@@ -32,13 +35,16 @@ signals:
     void clearColorChanged(const QColor& color);
     void renderSizeChanged(const QSize& size);
     void maxSamplesPerPixelChanged(int value);
+    void previewStepsPerLevelChanged(int value);
 
 private:
     static int clampDimension(int value);
     static int clampMaxSamples(int value);
+    static int clampPreviewSteps(int value);
 
     QColor m_clearColor;
     QSize m_renderSize;
     int m_maxSamplesPerPixel = 1024;
+    int m_previewStepsPerLevel = 0;
     GLuint m_pboIds[bufferCount] = {0, 0};
 };
