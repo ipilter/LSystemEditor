@@ -4,11 +4,9 @@
 #include "SceneModel.h"
 
 #include <QKeyEvent>
-#include <QMatrix4x4>
 #include <QMetaObject>
 #include <QMouseEvent>
 #include <QSurfaceFormat>
-#include <QWheelEvent>
 
 namespace {
 
@@ -16,15 +14,11 @@ constexpr const char* kVertexShader = R"(#version 460 core
 layout(location = 0) in vec2 aPos;
 layout(location = 1) in vec2 aTexCoord;
 
-uniform mat4 uViewProj;
-uniform vec2 uQuadSize;
-
 out vec2 vTexCoord;
 
 void main()
 {
-    vec2 worldPos = aPos * uQuadSize;
-    gl_Position = uViewProj * vec4(worldPos, 0.0, 1.0);
+    gl_Position = vec4(aPos, 0.0, 1.0);
     vTexCoord = aTexCoord;
 }
 )";
@@ -43,10 +37,10 @@ void main()
 )";
 
 constexpr float kQuadVertices[] = {
-    -0.5f, -0.5f, 0.0f, 0.0f,
-     0.5f, -0.5f, 1.0f, 0.0f,
-    -0.5f,  0.5f, 0.0f, 1.0f,
-     0.5f,  0.5f, 1.0f, 1.0f,
+    -1.0f, -1.0f, 0.0f, 0.0f,
+     1.0f, -1.0f, 1.0f, 0.0f,
+    -1.0f,  1.0f, 0.0f, 1.0f,
+     1.0f,  1.0f, 1.0f, 1.0f,
 };
 
 constexpr unsigned int kQuadIndices[] = {
@@ -54,7 +48,8 @@ constexpr unsigned int kQuadIndices[] = {
     2, 1, 3,
 };
 
-constexpr float kZoomFactor = 1.1f;
+constexpr float kMoveSpeed = 0.05f;
+constexpr float kMouseSensitivity = 0.15f;
 
 } // namespace
 
@@ -220,21 +215,7 @@ void OpenGLViewportWidget::paintGL()
         return;
     }
 
-    const int renderW = m_model->renderSize().width();
-    const int renderH = m_model->renderSize().height();
-    if (renderW <= 0 || renderH <= 0) {
-        return;
-    }
-
-    const QMatrix4x4 viewProj = m_camera.viewProjection(width(), height());
-
     glUseProgram(m_program);
-
-    const int viewProjLoc = glGetUniformLocation(m_program, "uViewProj");
-    glUniformMatrix4fv(viewProjLoc, 1, GL_FALSE, viewProj.constData());
-
-    const int quadSizeLoc = glGetUniformLocation(m_program, "uQuadSize");
-    glUniform2f(quadSizeLoc, static_cast<float>(renderW), static_cast<float>(renderH));
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, m_texture);
@@ -245,23 +226,11 @@ void OpenGLViewportWidget::paintGL()
     glBindVertexArray(0);
 }
 
-void OpenGLViewportWidget::wheelEvent(QWheelEvent* event)
-{
-    const float factor = event->angleDelta().y() > 0 ? kZoomFactor : (1.0f / kZoomFactor);
-    m_camera.zoomAt(factor,
-                    static_cast<float>(event->position().x()),
-                    static_cast<float>(event->position().y()),
-                    width(),
-                    height());
-    update();
-    event->accept();
-}
-
 void OpenGLViewportWidget::mousePressEvent(QMouseEvent* event)
 {
     if (event->button() == Qt::LeftButton) {
         setFocus();
-        m_panning = true;
+        m_looking = true;
         m_lastMousePos = event->pos();
         event->accept();
     }
@@ -269,36 +238,64 @@ void OpenGLViewportWidget::mousePressEvent(QMouseEvent* event)
 
 void OpenGLViewportWidget::mouseMoveEvent(QMouseEvent* event)
 {
-    if (!m_panning) {
+    if (!m_looking) {
         return;
     }
 
     const QPoint delta = event->pos() - m_lastMousePos;
     m_lastMousePos = event->pos();
-    m_camera.pan(static_cast<float>(delta.x()), static_cast<float>(delta.y()));
-    update();
+
+    const float deltaYaw = static_cast<float>(delta.x()) * kMouseSensitivity;
+    const float deltaPitch = static_cast<float>(-delta.y()) * kMouseSensitivity;
+    m_camera.yawPitch(glm::radians(deltaYaw), glm::radians(deltaPitch));
+    onCameraChanged();
     event->accept();
 }
 
 void OpenGLViewportWidget::mouseReleaseEvent(QMouseEvent* event)
 {
     if (event->button() == Qt::LeftButton) {
-        m_panning = false;
+        m_looking = false;
         event->accept();
     }
 }
 
 void OpenGLViewportWidget::keyPressEvent(QKeyEvent* event)
 {
-    if (event->key() == Qt::Key_F && m_model != nullptr) {
-        const int renderW = m_model->renderSize().width();
-        const int renderH = m_model->renderSize().height();
-        if (renderW > 0 && renderH > 0) {
-            m_camera.focusOnImage(renderW, renderH, width(), height());
-            update();
-            event->accept();
-            return;
-        }
+    bool moved = false;
+    switch (event->key()) {
+    case Qt::Key_W:
+        m_camera.moveForward(kMoveSpeed);
+        moved = true;
+        break;
+    case Qt::Key_S:
+        m_camera.moveBackward(kMoveSpeed);
+        moved = true;
+        break;
+    case Qt::Key_A:
+        m_camera.moveLeft(kMoveSpeed);
+        moved = true;
+        break;
+    case Qt::Key_D:
+        m_camera.moveRight(kMoveSpeed);
+        moved = true;
+        break;
+    case Qt::Key_E:
+        m_camera.moveUp(kMoveSpeed);
+        moved = true;
+        break;
+    case Qt::Key_Q:
+        m_camera.moveDown(kMoveSpeed);
+        moved = true;
+        break;
+    default:
+        break;
+    }
+
+    if (moved) {
+        onCameraChanged();
+        event->accept();
+        return;
     }
 
     QOpenGLWidget::keyPressEvent(event);
@@ -330,6 +327,18 @@ void OpenGLViewportWidget::pauseRender()
 {
     m_pathTracer.stop();
     m_renderPaused = true;
+}
+
+void OpenGLViewportWidget::syncCameraToPathTracer()
+{
+    m_pathTracer.setCamera(m_camera.toGpu());
+}
+
+void OpenGLViewportWidget::onCameraChanged()
+{
+    syncCameraToPathTracer();
+    restartRender();
+    update();
 }
 
 void OpenGLViewportWidget::recreateGpuBuffers()
@@ -390,7 +399,8 @@ void OpenGLViewportWidget::recreateGpuBuffers()
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glBindTexture(GL_TEXTURE_2D, 0);
 
-    m_camera.focusOnImage(w, h, width(), height());
+    m_camera.setAspect(w, h);
+    syncCameraToPathTracer();
 
     if (!m_renderPaused) {
         m_pathTracer.start();

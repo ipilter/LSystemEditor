@@ -1,6 +1,7 @@
 #include "PathTracer.h"
 
 #include "AppLog.h"
+#include "CameraGpu.h"
 #include "PathTracerCuda.h"
 #include "QmcGpuResources.h"
 
@@ -33,6 +34,10 @@ struct AccumulatorData
 struct PathTracerDetail::PathTracerImpl
 {
     AccumulatorData acc;
+    CameraGpu* d_camera = nullptr;
+    CameraGpu hostCamera{};
+    std::mutex cameraMutex;
+    std::atomic<bool> cameraDirty{true};
     cudaGraphicsResource_t pboResources[2] = {nullptr, nullptr};
     cudaStream_t stream = nullptr;
     cudaEvent_t sampleCompleteEvent = nullptr;
@@ -319,6 +324,84 @@ bool initAccumulator(AccumulatorData* acc, int width, int height, QString* outEr
     return true;
 }
 
+void freeCameraGpu(PathTracerDetail::PathTracerImpl* impl)
+{
+    if (impl == nullptr || impl->d_camera == nullptr) {
+        return;
+    }
+
+    cudaFree(impl->d_camera);
+    impl->d_camera = nullptr;
+}
+
+CameraGpu defaultCameraGpu()
+{
+    CameraGpu camera{};
+    camera.position = make_float3(0.0f, 0.0f, 0.0f);
+    camera.orientation = make_float4(1.0f, 0.0f, 0.0f, 0.0f);
+    camera.fovY = 1.04719755f; // 60 degrees
+    camera.aspect = 1.0f;
+    camera.nearPlane = 0.1f;
+    camera.farPlane = 1000.0f;
+    return camera;
+}
+
+bool initCameraGpu(PathTracerDetail::PathTracerImpl* impl, QString* outError)
+{
+    if (impl == nullptr) {
+        if (outError != nullptr) {
+            *outError = QStringLiteral("invalid path tracer impl");
+        }
+        return false;
+    }
+
+    freeCameraGpu(impl);
+
+    cudaError_t error = cudaMalloc(&impl->d_camera, sizeof(CameraGpu));
+    if (error != cudaSuccess) {
+        if (outError != nullptr) {
+            *outError = cudaErrorString(error);
+        }
+        return false;
+    }
+
+    impl->hostCamera = defaultCameraGpu();
+    impl->cameraDirty.store(true);
+    return true;
+}
+
+bool uploadCameraIfDirty(PathTracerDetail::PathTracerImpl* impl, cudaStream_t stream, QString* outError)
+{
+    if (impl == nullptr || impl->d_camera == nullptr) {
+        if (outError != nullptr) {
+            *outError = QStringLiteral("camera not configured");
+        }
+        return false;
+    }
+
+    if (!impl->cameraDirty.load()) {
+        return true;
+    }
+
+    CameraGpu cameraCopy{};
+    {
+        std::lock_guard<std::mutex> lock(impl->cameraMutex);
+        cameraCopy = impl->hostCamera;
+    }
+
+    const cudaError_t error =
+        cudaMemcpyAsync(impl->d_camera, &cameraCopy, sizeof(CameraGpu), cudaMemcpyHostToDevice, stream);
+    if (error != cudaSuccess) {
+        if (outError != nullptr) {
+            *outError = cudaErrorString(error);
+        }
+        return false;
+    }
+
+    impl->cameraDirty.store(false);
+    return true;
+}
+
 void unregisterPboResources(PathTracerDetail::PathTracerImpl* impl)
 {
     if (impl == nullptr) {
@@ -420,6 +503,7 @@ PathTracer::~PathTracer()
 {
     stop();
     unregisterPboResources(m_impl.get());
+    freeCameraGpu(m_impl.get());
     freeQmcGpuResources(&m_impl->qmc);
     freeAccumulator(&m_impl->acc);
     destroySampleEvent(m_impl.get());
@@ -444,6 +528,7 @@ bool PathTracer::configure(int width, int height, uint32_t pbo0, uint32_t pbo1)
     }
 
     unregisterPboResources(m_impl.get());
+    freeCameraGpu(m_impl.get());
     freeQmcGpuResources(&m_impl->qmc);
     freeAccumulator(&m_impl->acc);
 
@@ -486,10 +571,19 @@ bool PathTracer::configure(int width, int height, uint32_t pbo0, uint32_t pbo1)
         return false;
     }
 
+    if (!initCameraGpu(m_impl.get(), &error)) {
+        AppLog::instance().error(
+            QStringLiteral("PathTracer configure: camera allocation failed: %1").arg(error));
+        unregisterPboResources(m_impl.get());
+        freeAccumulator(&m_impl->acc);
+        return false;
+    }
+
     if (!initQmcGpuResources(&m_impl->qmc, width, height, m_impl->stream, &error)) {
         AppLog::instance().error(
             QStringLiteral("PathTracer configure: QMC sampler init failed: %1").arg(error));
         unregisterPboResources(m_impl.get());
+        freeCameraGpu(m_impl.get());
         freeAccumulator(&m_impl->acc);
         return false;
     }
@@ -500,6 +594,7 @@ bool PathTracer::configure(int width, int height, uint32_t pbo0, uint32_t pbo1)
             QStringLiteral("PathTracer configure: stream sync failed: %1").arg(cudaErrorString(syncError)));
         unregisterPboResources(m_impl.get());
         freeQmcGpuResources(&m_impl->qmc);
+        freeCameraGpu(m_impl.get());
         freeAccumulator(&m_impl->acc);
         return false;
     }
@@ -647,6 +742,16 @@ int PathTracer::currentSampleCount() const
     return m_impl->sampleCount.load();
 }
 
+void PathTracer::setCamera(const CameraGpu& camera)
+{
+    {
+        std::lock_guard<std::mutex> lock(m_impl->cameraMutex);
+        m_impl->hostCamera = camera;
+    }
+    m_impl->cameraDirty.store(true);
+    notifyWorker();
+}
+
 void PathTracer::notifyWorker()
 {
     m_impl->workerCv.notify_all();
@@ -702,12 +807,20 @@ void PathTracer::renderLoop()
             m_impl->acc.height);
         m_impl->lastSamplingStride.store(stride);
 
+        QString cameraError;
+        if (!uploadCameraIfDirty(m_impl.get(), m_impl->stream, &cameraError)) {
+            AppLog::instance().error(
+                QStringLiteral("PathTracer camera upload failed: %1").arg(cameraError));
+            continue;
+        }
+
         if (!pathTracerSample(
                 m_impl->acc.d_buffer,
                 m_impl->acc.d_samples,
                 m_impl->acc.width,
                 m_impl->acc.height,
                 stride,
+                m_impl->d_camera,
                 m_impl->qmc.sobolMatrices,
                 m_impl->qmc.pixelScramble,
                 kMaxSobolDimensions,

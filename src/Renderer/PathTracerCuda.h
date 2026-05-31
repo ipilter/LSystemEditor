@@ -1,5 +1,7 @@
 #pragma once
 
+#include "CameraGpu.h"
+
 #include <cuda_runtime.h>
 #include <vector_types.h>
 
@@ -11,6 +13,7 @@ bool pathTracerSample(
     int width,
     int height,
     int stride,
+    const CameraGpu* d_camera,
     const uint32_t* sobolMatrices,
     const unsigned int* pixelScramble,
     int sobolDimensionCount,

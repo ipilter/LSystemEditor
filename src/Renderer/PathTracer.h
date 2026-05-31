@@ -1,5 +1,7 @@
 #pragma once
 
+#include "CameraGpu.h"
+
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -51,6 +53,8 @@ public:
     int previewStepsPerLevel() const;
 
     int currentSampleCount() const;
+
+    void setCamera(const CameraGpu& camera);
 
 private:
     void renderLoop();
