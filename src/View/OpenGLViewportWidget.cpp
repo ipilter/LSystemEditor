@@ -126,7 +126,17 @@ void OpenGLViewportWidget::setSceneModel(SceneModel* model)
     });
 
     connect(m_model, &SceneModel::maxSamplesPerPixelChanged, this, [this](int max) {
+        const int current = m_pathTracer.currentSampleCount();
         m_pathTracer.setMaxSamplesPerPixel(max);
+
+        if (m_renderPaused || max == 0) {
+            return;
+        }
+
+        const int previewSteps = m_model->previewStepsPerLevel();
+        if (current >= previewSteps + max) {
+            restartRender();
+        }
     });
 
     connect(m_model, &SceneModel::previewStepsPerLevelChanged, this, [this](int steps) {

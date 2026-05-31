@@ -58,14 +58,29 @@ file(GLOB_RECURSE PATHTRACER_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.hpp")
 
+set(PATHTRACER_SAMPLING_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Sampling/SobolDirectionData.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Sampling/SobolTables.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Sampling/QmcGpuResources.cpp")
+
+list(FILTER PATHTRACER_SOURCES EXCLUDE REGEX ".*/Renderer/Sampling/(SobolDirectionData|SobolTables|QmcGpuResources)\\.cpp$")
+
+add_library(pathtracer_sampling STATIC ${PATHTRACER_SAMPLING_SOURCES})
+target_include_directories(pathtracer_sampling PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Sampling")
+target_link_libraries(pathtracer_sampling PUBLIC CUDA::cudart Qt6::Core)
+set_target_properties(pathtracer_sampling PROPERTIES FOLDER "src")
+
 add_executable(pathtracer WIN32 ${PATHTRACER_SOURCES})
 target_include_directories(pathtracer PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Application"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Sampling"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/View"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Controller"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Model")
-target_link_libraries(pathtracer PRIVATE Qt6::Widgets Qt6::OpenGL Qt6::OpenGLWidgets CUDA::cudart CUDA::curand glm::glm)
+target_link_libraries(pathtracer PRIVATE pathtracer_sampling Qt6::Widgets Qt6::OpenGL Qt6::OpenGLWidgets CUDA::cudart glm::glm)
 set_target_properties(pathtracer PROPERTIES
     OUTPUT_NAME pathtracer
     AUTOMOC ON
@@ -105,3 +120,14 @@ if(WIN32)
         COMMENT "Copying CUDA runtime if needed"
     )
 endif()
+
+enable_testing()
+
+add_executable(qmc_sampling_tests tests/QmcSamplerTests.cpp)
+target_link_libraries(qmc_sampling_tests PRIVATE pathtracer_sampling)
+target_include_directories(qmc_sampling_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Sampling"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests")
+set_target_properties(qmc_sampling_tests PROPERTIES FOLDER "tests")
+
+add_test(NAME QmcSampling COMMAND qmc_sampling_tests)

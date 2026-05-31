@@ -96,7 +96,7 @@ MainView::MainView(QWidget* parent)
     m_previewStepsSpinBox->setRange(kMinPreviewStepsPerLevel, kMaxPreviewStepsPerLevel);
     m_previewStepsSpinBox->setValue(kDefaultPreviewStepsPerLevel);
     m_previewStepsSpinBox->setToolTip(
-        QStringLiteral("Iterations per coarse stride level before full resolution (0 = disabled)"));
+        QStringLiteral("Coarse preview iterations before full-resolution samples (0 = disabled)"));
     previewRow->addWidget(m_previewStepsSpinBox);
     renderLayout->addLayout(previewRow);
 

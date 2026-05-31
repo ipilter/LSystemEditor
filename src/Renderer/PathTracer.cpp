@@ -1,6 +1,8 @@
 #include "PathTracer.h"
 
 #include "AppLog.h"
+#include "PathTracerCuda.h"
+#include "QmcGpuResources.h"
 
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
@@ -9,7 +11,6 @@
 
 #include <cuda_gl_interop.h>
 #include <cuda_runtime.h>
-#include <curand_kernel.h>
 #include <vector_types.h>
 
 #include <atomic>
@@ -17,6 +18,7 @@
 #include <condition_variable>
 #include <mutex>
 #include <thread>
+#include <vector>
 
 #include <QString>
 
@@ -28,25 +30,13 @@ struct AccumulatorData
     int height = 0;
 };
 
-bool pathTracerInitRng(curandState* states, int count, unsigned int seed, cudaStream_t stream);
-bool pathTracerSample(
-    float4* d_buffer,
-    uint32_t* d_samples,
-    int width,
-    int height,
-    int stride,
-    curandState* rng,
-    cudaStream_t stream);
-bool pathTracerCopyToPbo(const float4* acc, uchar4* pbo, int width, int height, int stride, cudaStream_t stream);
-
 struct PathTracerDetail::PathTracerImpl
 {
     AccumulatorData acc;
     cudaGraphicsResource_t pboResources[2] = {nullptr, nullptr};
     cudaStream_t stream = nullptr;
     cudaEvent_t sampleCompleteEvent = nullptr;
-    curandState* rngStates = nullptr;
-    int rngCount = 0;
+    QmcGpuResources qmc;
 
     std::thread worker;
     std::atomic<bool> running{false};
@@ -59,6 +49,7 @@ struct PathTracerDetail::PathTracerImpl
     std::atomic<int> maxSamplesPerPixel{1024};
     std::atomic<int> previewStepsPerLevel{0};
     std::atomic<int> sampleCount{0};
+    std::atomic<int> lastSamplingStride{1};
 };
 
 namespace {
@@ -129,20 +120,41 @@ int strideAtLevel(int maxStride, int levelIndex)
     return stride >= 1 ? stride : 1;
 }
 
-int computeStride(int sampleCount, int previewStepsPerLevel, int width, int height)
+int samplingStride(int globalIter, int previewSteps, int width, int height)
 {
-    if (previewStepsPerLevel <= 0 || width <= 0 || height <= 0) {
+    if (previewSteps <= 0 || width <= 0 || height <= 0 || globalIter >= previewSteps) {
         return 1;
     }
 
     const int maxStride = maxStartingStride(width, height);
     const int numLevels = countStrideLevels(maxStride);
-    const int levelIndex = sampleCount / previewStepsPerLevel;
-    if (levelIndex >= numLevels) {
+    const int levelIndex = globalIter < numLevels - 1 ? globalIter : numLevels - 1;
+    return strideAtLevel(maxStride, levelIndex);
+}
+
+int displayStrideFallback(int previewSteps, int width, int height)
+{
+    if (previewSteps <= 0 || width <= 0 || height <= 0) {
+        return 1;
+    }
+    return maxStartingStride(width, height);
+}
+
+int displayStrideForCopy(const PathTracerDetail::PathTracerImpl* impl)
+{
+    if (impl == nullptr || impl->acc.width <= 0 || impl->acc.height <= 0) {
         return 1;
     }
 
-    return strideAtLevel(maxStride, levelIndex);
+    if (impl->sampleCount.load() > 0) {
+        const int stride = impl->lastSamplingStride.load();
+        return stride >= 1 ? stride : 1;
+    }
+
+    return displayStrideFallback(
+        impl->previewStepsPerLevel.load(),
+        impl->acc.width,
+        impl->acc.height);
 }
 
 QString cudaErrorString(cudaError_t error)
@@ -307,52 +319,6 @@ bool initAccumulator(AccumulatorData* acc, int width, int height, QString* outEr
     return true;
 }
 
-void freeRngStates(PathTracerDetail::PathTracerImpl* impl)
-{
-    if (impl == nullptr) {
-        return;
-    }
-
-    if (impl->rngStates != nullptr) {
-        cudaFree(impl->rngStates);
-        impl->rngStates = nullptr;
-    }
-    impl->rngCount = 0;
-}
-
-bool initRngStates(PathTracerDetail::PathTracerImpl* impl, int width, int height, cudaStream_t stream, QString* outError)
-{
-    if (impl == nullptr || width <= 0 || height <= 0) {
-        if (outError != nullptr) {
-            *outError = QStringLiteral("invalid RNG dimensions");
-        }
-        return false;
-    }
-
-    freeRngStates(impl);
-
-    const int count = width * height;
-    const cudaError_t allocError =
-        cudaMalloc(&impl->rngStates, static_cast<std::size_t>(count) * sizeof(curandState));
-    if (allocError != cudaSuccess) {
-        if (outError != nullptr) {
-            *outError = cudaErrorString(allocError);
-        }
-        return false;
-    }
-
-    impl->rngCount = count;
-    if (!pathTracerInitRng(impl->rngStates, count, 1u, stream)) {
-        freeRngStates(impl);
-        if (outError != nullptr) {
-            *outError = QStringLiteral("RNG kernel launch failed");
-        }
-        return false;
-    }
-
-    return true;
-}
-
 void unregisterPboResources(PathTracerDetail::PathTracerImpl* impl)
 {
     if (impl == nullptr) {
@@ -407,7 +373,8 @@ bool canTakeSample(const PathTracerDetail::PathTracerImpl* impl)
     if (maxSamples == 0) {
         return true;
     }
-    return impl->sampleCount.load() < maxSamples;
+    const int previewSteps = impl->previewStepsPerLevel.load();
+    return impl->sampleCount.load() < previewSteps + maxSamples;
 }
 
 void checkCudaGlDeviceAffinity()
@@ -453,7 +420,7 @@ PathTracer::~PathTracer()
 {
     stop();
     unregisterPboResources(m_impl.get());
-    freeRngStates(m_impl.get());
+    freeQmcGpuResources(&m_impl->qmc);
     freeAccumulator(&m_impl->acc);
     destroySampleEvent(m_impl.get());
     destroyStream(m_impl.get());
@@ -477,7 +444,7 @@ bool PathTracer::configure(int width, int height, uint32_t pbo0, uint32_t pbo1)
     }
 
     unregisterPboResources(m_impl.get());
-    freeRngStates(m_impl.get());
+    freeQmcGpuResources(&m_impl->qmc);
     freeAccumulator(&m_impl->acc);
 
     if (m_impl->stream == nullptr) {
@@ -519,9 +486,9 @@ bool PathTracer::configure(int width, int height, uint32_t pbo0, uint32_t pbo1)
         return false;
     }
 
-    if (!initRngStates(m_impl.get(), width, height, m_impl->stream, &error)) {
+    if (!initQmcGpuResources(&m_impl->qmc, width, height, m_impl->stream, &error)) {
         AppLog::instance().error(
-            QStringLiteral("PathTracer configure: RNG init failed: %1").arg(error));
+            QStringLiteral("PathTracer configure: QMC sampler init failed: %1").arg(error));
         unregisterPboResources(m_impl.get());
         freeAccumulator(&m_impl->acc);
         return false;
@@ -532,13 +499,20 @@ bool PathTracer::configure(int width, int height, uint32_t pbo0, uint32_t pbo1)
         AppLog::instance().error(
             QStringLiteral("PathTracer configure: stream sync failed: %1").arg(cudaErrorString(syncError)));
         unregisterPboResources(m_impl.get());
-        freeRngStates(m_impl.get());
+        freeQmcGpuResources(&m_impl->qmc);
         freeAccumulator(&m_impl->acc);
         return false;
     }
 
+    AppLog::instance().info(
+        QStringLiteral("PathTracer: Cranley-Patterson scrambled Sobol QMC sampler active"));
     m_impl->resetRequested.store(false);
     m_impl->sampleCount.store(0);
+    m_impl->lastSamplingStride.store(
+        displayStrideFallback(
+            m_impl->previewStepsPerLevel.load(),
+            width,
+            height));
     m_impl->configured.store(true);
     notifyWorker();
     return true;
@@ -615,11 +589,7 @@ bool PathTracer::publishDisplayFrame(int slot)
         return false;
     }
 
-    const int stride = computeStride(
-        m_impl->sampleCount.load(),
-        m_impl->previewStepsPerLevel.load(),
-        m_impl->acc.width,
-        m_impl->acc.height);
+    const int stride = displayStrideForCopy(m_impl.get());
 
     const bool copied = pathTracerCopyToPbo(
         m_impl->acc.d_buffer,
@@ -692,7 +662,13 @@ void PathTracer::renderLoop()
                 cudaMemsetAsync(m_impl->acc.d_buffer, 0, pixelCount * sizeof(float4), m_impl->stream);
                 cudaMemsetAsync(m_impl->acc.d_samples, 0, pixelCount * sizeof(uint32_t), m_impl->stream);
             }
+            refreshPixelScramble(&m_impl->qmc, m_impl->stream);
             m_impl->sampleCount.store(0);
+            m_impl->lastSamplingStride.store(
+                displayStrideFallback(
+                    m_impl->previewStepsPerLevel.load(),
+                    m_impl->acc.width,
+                    m_impl->acc.height));
         }
 
         if (m_impl->acc.width <= 0 || m_impl->acc.height <= 0) {
@@ -719,11 +695,12 @@ void PathTracer::renderLoop()
             continue;
         }
 
-        const int stride = computeStride(
+        const int stride = samplingStride(
             m_impl->sampleCount.load(),
             m_impl->previewStepsPerLevel.load(),
             m_impl->acc.width,
             m_impl->acc.height);
+        m_impl->lastSamplingStride.store(stride);
 
         if (!pathTracerSample(
                 m_impl->acc.d_buffer,
@@ -731,7 +708,9 @@ void PathTracer::renderLoop()
                 m_impl->acc.width,
                 m_impl->acc.height,
                 stride,
-                m_impl->rngStates,
+                m_impl->qmc.sobolMatrices,
+                m_impl->qmc.pixelScramble,
+                kMaxSobolDimensions,
                 m_impl->stream)) {
             AppLog::instance().error(QStringLiteral("PathTracer sample kernel launch failed"));
             continue;

@@ -42,11 +42,11 @@ public:
     /// Requires an active OpenGL context. Maps pbo[slot], copies accumulator, unmaps.
     bool publishDisplayFrame(int slot);
 
-    /// 0 = unlimited. Live update; does not reset accumulation.
+    /// Full-resolution sample iterations only (0 = unlimited). Total kernel launches = preview + max.
     void setMaxSamplesPerPixel(int max);
     int maxSamplesPerPixel() const;
 
-    /// 0 = disabled (stride 1 always). N > 0 runs N iterations per coarse stride level before full res.
+    /// 0 = disabled (stride 1 always). N > 0 runs N coarse pyramid iterations before full-res samples.
     void setPreviewStepsPerLevel(int steps);
     int previewStepsPerLevel() const;
 
