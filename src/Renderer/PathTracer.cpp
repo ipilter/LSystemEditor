@@ -4,6 +4,7 @@
 #include "CameraGpu.h"
 #include "PathTracerCuda.h"
 #include "QmcGpuResources.h"
+#include "Sdf/SdfRayMarcher.h"
 
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
@@ -55,6 +56,8 @@ struct PathTracerDetail::PathTracerImpl
     std::atomic<int> previewStepsPerLevel{0};
     std::atomic<int> sampleCount{0};
     std::atomic<int> lastSamplingStride{1};
+
+    SdfRayMarcher sdfMarcher;
 };
 
 namespace {
@@ -506,6 +509,7 @@ PathTracer::~PathTracer()
     freeCameraGpu(m_impl.get());
     freeQmcGpuResources(&m_impl->qmc);
     freeAccumulator(&m_impl->acc);
+    m_impl->sdfMarcher.release();
     destroySampleEvent(m_impl.get());
     destroyStream(m_impl.get());
 }
@@ -531,6 +535,7 @@ bool PathTracer::configure(int width, int height, uint32_t pbo0, uint32_t pbo1)
     freeCameraGpu(m_impl.get());
     freeQmcGpuResources(&m_impl->qmc);
     freeAccumulator(&m_impl->acc);
+    m_impl->sdfMarcher.release();
 
     if (m_impl->stream == nullptr) {
         const cudaError_t streamError = cudaStreamCreate(&m_impl->stream);
@@ -585,6 +590,28 @@ bool PathTracer::configure(int width, int height, uint32_t pbo0, uint32_t pbo1)
         unregisterPboResources(m_impl.get());
         freeCameraGpu(m_impl.get());
         freeAccumulator(&m_impl->acc);
+        m_impl->sdfMarcher.release();
+        return false;
+    }
+
+    if (!m_impl->sdfMarcher.allocate()) {
+        AppLog::instance().error(QStringLiteral("PathTracer configure: SDF ray marcher allocation failed"));
+        unregisterPboResources(m_impl.get());
+        freeQmcGpuResources(&m_impl->qmc);
+        freeCameraGpu(m_impl.get());
+        freeAccumulator(&m_impl->acc);
+        m_impl->sdfMarcher.release();
+        return false;
+    }
+
+    m_impl->sdfMarcher.setDefaultLayout();
+    if (!m_impl->sdfMarcher.upload(m_impl->stream)) {
+        AppLog::instance().error(QStringLiteral("PathTracer configure: SDF ray marcher upload failed"));
+        unregisterPboResources(m_impl.get());
+        freeQmcGpuResources(&m_impl->qmc);
+        freeCameraGpu(m_impl.get());
+        freeAccumulator(&m_impl->acc);
+        m_impl->sdfMarcher.release();
         return false;
     }
 
@@ -596,6 +623,7 @@ bool PathTracer::configure(int width, int height, uint32_t pbo0, uint32_t pbo1)
         freeQmcGpuResources(&m_impl->qmc);
         freeCameraGpu(m_impl.get());
         freeAccumulator(&m_impl->acc);
+        m_impl->sdfMarcher.release();
         return false;
     }
 
@@ -814,6 +842,11 @@ void PathTracer::renderLoop()
             continue;
         }
 
+        if (!m_impl->sdfMarcher.upload(m_impl->stream)) {
+            AppLog::instance().error(QStringLiteral("PathTracer SDF scene upload failed"));
+            continue;
+        }
+
         if (!pathTracerSample(
                 m_impl->acc.d_buffer,
                 m_impl->acc.d_samples,
@@ -821,6 +854,8 @@ void PathTracer::renderLoop()
                 m_impl->acc.height,
                 stride,
                 m_impl->d_camera,
+                m_impl->sdfMarcher.deviceScene(),
+                m_impl->sdfMarcher.deviceMarchParams(),
                 m_impl->qmc.sobolMatrices,
                 m_impl->qmc.pixelScramble,
                 kMaxSobolDimensions,

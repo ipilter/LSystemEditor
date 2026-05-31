@@ -13,7 +13,7 @@ constexpr float kMaxPitchRad = glm::radians(89.0f);
 } // namespace
 
 Camera3D::Camera3D()
-    : m_position(0.0f, 0.0f, 0.0f)
+    : m_position(0.0f, 0.5f, 4.0f)
     , m_orientation(1.0f, 0.0f, 0.0f, 0.0f)
     , m_fovY(glm::radians(60.0f))
     , m_near(kDefaultNear)

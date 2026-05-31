@@ -63,7 +63,11 @@ set(PATHTRACER_SAMPLING_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Sampling/SobolTables.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Sampling/QmcGpuResources.cpp")
 
+set(PATHTRACER_SDF_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Sdf/SdfRayMarcher.cpp")
+
 list(FILTER PATHTRACER_SOURCES EXCLUDE REGEX ".*/Renderer/Sampling/(SobolDirectionData|SobolTables|QmcGpuResources)\\.cpp$")
+list(FILTER PATHTRACER_SOURCES EXCLUDE REGEX ".*/Renderer/Sdf/SdfRayMarcher\\.cpp$")
 
 add_library(pathtracer_sampling STATIC ${PATHTRACER_SAMPLING_SOURCES})
 target_include_directories(pathtracer_sampling PUBLIC
@@ -72,15 +76,23 @@ target_include_directories(pathtracer_sampling PUBLIC
 target_link_libraries(pathtracer_sampling PUBLIC CUDA::cudart Qt6::Core)
 set_target_properties(pathtracer_sampling PROPERTIES FOLDER "src")
 
+add_library(pathtracer_sdf STATIC ${PATHTRACER_SDF_SOURCES})
+target_include_directories(pathtracer_sdf PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Sdf")
+target_link_libraries(pathtracer_sdf PUBLIC CUDA::cudart)
+set_target_properties(pathtracer_sdf PROPERTIES FOLDER "src")
+
 add_executable(pathtracer WIN32 ${PATHTRACER_SOURCES})
 target_include_directories(pathtracer PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Application"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Sampling"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Sdf"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/View"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Controller"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Model")
-target_link_libraries(pathtracer PRIVATE pathtracer_sampling Qt6::Widgets Qt6::OpenGL Qt6::OpenGLWidgets CUDA::cudart glm::glm)
+target_link_libraries(pathtracer PRIVATE pathtracer_sampling pathtracer_sdf Qt6::Widgets Qt6::OpenGL Qt6::OpenGLWidgets CUDA::cudart glm::glm)
 set_target_properties(pathtracer PROPERTIES
     OUTPUT_NAME pathtracer
     AUTOMOC ON
@@ -131,3 +143,12 @@ target_include_directories(qmc_sampling_tests PRIVATE
 set_target_properties(qmc_sampling_tests PROPERTIES FOLDER "tests")
 
 add_test(NAME QmcSampling COMMAND qmc_sampling_tests)
+
+add_executable(sdf_raymarcher_tests tests/SdfRayMarcherTests.cpp)
+target_link_libraries(sdf_raymarcher_tests PRIVATE pathtracer_sdf)
+target_include_directories(sdf_raymarcher_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Sdf"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests")
+set_target_properties(sdf_raymarcher_tests PROPERTIES FOLDER "tests")
+
+add_test(NAME SdfRayMarcher COMMAND sdf_raymarcher_tests)
