@@ -3,6 +3,7 @@
 #include <QSize>
 #include <QWidget>
 
+class QComboBox;
 class OpenGLViewportWidget;
 class QLabel;
 class QPlainTextEdit;
@@ -22,6 +23,7 @@ public:
     QSpinBox* renderHeightSpinBox() const;
     QSpinBox* maxSamplesSpinBox() const;
     QSpinBox* previewStepsSpinBox() const;
+    QComboBox* sdfVisualModeComboBox() const;
     QPushButton* startButton() const;
     QPushButton* stopButton() const;
     QPushButton* settingsButton() const;
@@ -41,6 +43,7 @@ private:
     QSpinBox* m_renderHeightSpinBox = nullptr;
     QSpinBox* m_maxSamplesSpinBox = nullptr;
     QSpinBox* m_previewStepsSpinBox = nullptr;
+    QComboBox* m_sdfVisualModeComboBox = nullptr;
     QLabel* m_iterationLabel = nullptr;
     QPushButton* m_startButton = nullptr;
     QPushButton* m_stopButton = nullptr;

@@ -76,19 +76,60 @@ SDF_CORE_FN SdfHit sdfRayMarch(SdfFloat3 ro, SdfFloat3 rd, const SdfSceneGpu* sc
         t += d;
 
         if (t >= params->maxDistance) {
+            result.steps = steps;
             return result;
         }
 
         ++steps;
     }
 
+    result.steps = steps;
     return result;
+}
+
+SDF_CORE_FN SdfFloat3 sdfMissBackground()
+{
+    return sdfMakeFloat3(0.02f, 0.02f, 0.05f);
+}
+
+SDF_CORE_FN SdfFloat3 stepsToHeatmap(int steps, int maxSteps)
+{
+    if (maxSteps <= 0) {
+        return sdfMissBackground();
+    }
+
+    const float u = sdfClamp(static_cast<float>(steps) / static_cast<float>(maxSteps), 0.0f, 1.0f);
+    const float r = sdfMin2(u * 4.0f, 1.0f);
+    const float g = sdfMax2(0.0f, sdfMin2(u * 4.0f - 1.0f, 1.0f));
+    const float b = sdfMax2(0.0f, 1.0f - u * 2.5f);
+    return sdfMakeFloat3(r, g, b);
+}
+
+SDF_CORE_FN SdfFloat3 stepsToHeatmap(int steps, int maxSteps, bool hit)
+{
+    if (!hit && steps <= 0) {
+        return sdfMissBackground();
+    }
+
+    return stepsToHeatmap(steps, maxSteps);
+}
+
+SDF_CORE_FN SdfFloat3 normalToColor(SdfFloat3 normal, bool hit)
+{
+    if (!hit) {
+        return sdfMissBackground();
+    }
+
+    return sdfMakeFloat3(
+        normal.x * 0.5f + 0.5f,
+        normal.y * 0.5f + 0.5f,
+        normal.z * 0.5f + 0.5f);
 }
 
 SDF_CORE_FN SdfFloat3 distanceToHeatmap(float t, float maxDist, bool hit)
 {
     if (!hit) {
-        return sdfMakeFloat3(0.02f, 0.02f, 0.05f);
+        return sdfMissBackground();
     }
 
     const float u = sdfMin2(t / maxDist, 1.0f);

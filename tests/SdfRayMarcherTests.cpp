@@ -184,6 +184,170 @@ void testDeterminism()
     expectNear(first.sdfAtHit, second.sdfAtHit, 1.0e-7f, "DeterminismSdfAtHit");
 }
 
+void testMissRecordsSteps()
+{
+    const SdfSceneGpu scene = defaultScene();
+    SdfMarchParamsGpu params = defaultMarchParams();
+    params.maxDistance = 20.0f;
+
+    const SdfFloat3 ro = sdfMakeFloat3(-5.0f, 0.0f, 0.55f);
+    const SdfFloat3 rd = sdfMakeFloat3(1.0f, 0.0f, 0.0f);
+    const SdfHit miss = sdfRayMarch(ro, rd, &scene, &params);
+    expectTrue(!miss.hit, "MissRecordsStepsNotHit");
+    expectTrue(miss.steps > 0, "MissRecordsStepsCount");
+
+    params.maxSteps = 3;
+    params.maxDistance = 100.0f;
+    const SdfHit exhausted = sdfRayMarch(sdfMakeFloat3(-5.0f, 0.0f, 0.3f), rd, &scene, &params);
+    expectTrue(!exhausted.hit, "ExhaustedStepsMiss");
+    expectTrue(exhausted.steps == params.maxSteps, "ExhaustedStepsCount");
+}
+
+void testStepsToHeatmapSanity()
+{
+    const SdfFloat3 low = stepsToHeatmap(1, 256, true);
+    const SdfFloat3 high = stepsToHeatmap(200, 256, true);
+    expectTrue(low.x < high.x || low.y < high.y, "StepsToHeatmapLowVsHigh");
+
+    const SdfFloat3 missNoSteps = stepsToHeatmap(0, 256, false);
+    const SdfFloat3 missWithSteps = stepsToHeatmap(32, 256, false);
+    expectTrue(missNoSteps.x < 0.1f && missNoSteps.y < 0.1f, "StepsToHeatmapMissBackground");
+    expectTrue(missWithSteps.x > missNoSteps.x || missWithSteps.y > missNoSteps.y, "StepsToHeatmapMissNearGeometry");
+
+    const SdfFloat3 normalColor = normalToColor(sdfMakeFloat3(0.0f, 1.0f, 0.0f), true);
+    expectNear(normalColor.x, 0.5f, 1.0e-5f, "NormalToColorX");
+    expectNear(normalColor.y, 1.0f, 1.0e-5f, "NormalToColorY");
+    expectNear(normalColor.z, 0.5f, 1.0e-5f, "NormalToColorZ");
+}
+
+void testConeReferenceParity()
+{
+    const float h = 1.0f;
+    const float r1 = 0.5f;
+    const float r2 = 0.125f;
+
+    const SdfFloat3 samples[] = {
+        sdfMakeFloat3(0.0f, h, 0.0f),
+        sdfMakeFloat3(r2, h, 0.0f),
+        sdfMakeFloat3(0.0f, -h, 0.0f),
+        sdfMakeFloat3(r1, -h, 0.0f),
+        sdfMakeFloat3(0.3125f, 0.0f, 0.0f),
+    };
+
+    for (const SdfFloat3& localP : samples) {
+        const float current = sdCappedCone(localP, h, r1, r2);
+        const float reference = sdCappedConeReference(localP, h, r1, r2);
+        expectNear(current, reference, 1.0e-4f, "ConeReferenceParity");
+    }
+
+    for (int azimuth = 0; azimuth < 12; ++azimuth) {
+        const float angle = static_cast<float>(azimuth) * (6.2831853f / 12.0f);
+        const SdfFloat3 localP = sdfMakeFloat3(r2 * std::cos(angle), h, r2 * std::sin(angle));
+        const float current = sdCappedCone(localP, h, r1, r2);
+        const float reference = sdCappedConeReference(localP, h, r1, r2);
+        expectNear(current, reference, 1.0e-4f, "ConeReferenceAzimuthGrid");
+    }
+
+    for (int ix = -4; ix <= 4; ++ix) {
+        for (int iy = -4; iy <= 4; ++iy) {
+            const SdfFloat3 localP = sdfMakeFloat3(
+                static_cast<float>(ix) * 0.12f,
+                static_cast<float>(iy) * 0.25f,
+                0.0f);
+            const float current = sdCappedCone(localP, h, r1, r2);
+            const float reference = sdCappedConeReference(localP, h, r1, r2);
+            expectNear(current, reference, 1.0e-4f, "ConeReferenceOffSurfaceGrid");
+        }
+    }
+}
+
+void testConeOnSurfaceSanity()
+{
+    const SdfSceneGpu scene = coneOnlyScene();
+    const float h = scene.coneHalfHeight;
+    const float r1 = scene.coneRadiusBottom;
+    const float r2 = scene.coneRadiusTop;
+
+    const SdfFloat3 localSamples[] = {
+        sdfMakeFloat3(0.0f, h, 0.0f),
+        sdfMakeFloat3(r2 * 0.8f, h, 0.0f),
+        sdfMakeFloat3(0.0f, -h, 0.0f),
+        sdfMakeFloat3(r1 * 0.9f, -h, 0.0f),
+        sdfMakeFloat3(0.3125f, 0.0f, 0.0f),
+    };
+
+    for (const SdfFloat3& localP : localSamples) {
+        const float d = evalConeSDF(worldConePoint(&scene, localP), &scene);
+        expectNear(d, 0.0f, 1.0e-3f, "ConeOnSurfaceSanity");
+    }
+}
+
+void testConeCameraGridMarch()
+{
+    const SdfSceneGpu scene = coneOnlyScene();
+    const SdfMarchParamsGpu params = defaultMarchParams();
+    const SdfFloat3 coneTarget = scene.coneCenter;
+
+    for (int ix = -2; ix <= 2; ++ix) {
+        for (int iy = -2; iy <= 2; ++iy) {
+            const SdfFloat3 ro = sdfMakeFloat3(
+                static_cast<float>(ix) * 0.15f,
+                0.5f + static_cast<float>(iy) * 0.1f,
+                4.0f);
+            const SdfFloat3 target = sdfMakeFloat3(
+                coneTarget.x,
+                static_cast<float>(iy) * 0.05f,
+                coneTarget.z);
+            const SdfFloat3 rd = sdfNormalize3(sdfSub3(target, ro));
+
+            if (!isOutsideStart(ro, &scene, params.surfaceEpsilon)) {
+                continue;
+            }
+
+            const SdfHit march = sdfRayMarch(ro, rd, &scene, &params);
+            const SdfHit reference = bruteForceMarch(ro, rd, &scene, &params);
+
+            if (reference.hit) {
+                expectTrue(march.hit, "ConeCameraGridHit");
+                if (!march.hit) {
+                    std::cerr << "  miss steps=" << march.steps << " maxSteps=" << params.maxSteps << '\n';
+                }
+                expectNear(march.t, reference.t, params.surfaceEpsilon * 50.0f, "ConeCameraGridDistance");
+                expectHitInvariants(ro, rd, march, &scene, &params, "ConeCameraGridInvariants");
+            }
+        }
+    }
+
+    const SdfFloat3 capCenterRo = sdfMakeFloat3(0.0f, 0.5f, 4.0f);
+    const SdfFloat3 capCenterTarget = sdfMakeFloat3(coneTarget.x, scene.coneHalfHeight, coneTarget.z);
+    const SdfFloat3 capCenterRd = sdfNormalize3(sdfSub3(capCenterTarget, capCenterRo));
+    const SdfHit capCenterMarch = sdfRayMarch(capCenterRo, capCenterRd, &scene, &params);
+    const SdfHit capCenterReference = bruteForceMarch(capCenterRo, capCenterRd, &scene, &params);
+    expectTrue(capCenterReference.hit, "ConeCapCenterReferenceHit");
+    expectTrue(capCenterMarch.hit, "ConeCapCenterMarchHit");
+    if (!capCenterMarch.hit) {
+        std::cerr << "  cap-center miss steps=" << capCenterMarch.steps << " maxSteps=" << params.maxSteps << '\n';
+    }
+    expectHitInvariants(capCenterRo, capCenterRd, capCenterMarch, &scene, &params, "ConeCapCenterInvariants");
+}
+
+void testDemoSceneConeSmoke()
+{
+    const SdfSceneGpu scene = demoScene();
+    const SdfMarchParamsGpu params = defaultMarchParams();
+
+    const SdfFloat3 capCenterRo = sdfMakeFloat3(0.0f, 0.5f, 4.0f);
+    const SdfFloat3 capCenterTarget = sdfMakeFloat3(scene.coneCenter.x, scene.coneHalfHeight, scene.coneCenter.z);
+    const SdfFloat3 capCenterRd = sdfNormalize3(sdfSub3(capCenterTarget, capCenterRo));
+
+    const SdfHit march = sdfRayMarch(capCenterRo, capCenterRd, &scene, &params);
+    const SdfHit reference = bruteForceMarch(capCenterRo, capCenterRd, &scene, &params);
+
+    expectTrue(reference.hit, "DemoSceneConeReferenceHit");
+    expectTrue(march.hit, "DemoSceneConeMarchHit");
+    expectHitInvariants(capCenterRo, capCenterRd, march, &scene, &params, "DemoSceneConeInvariants");
+}
+
 } // namespace
 
 int main()
@@ -197,6 +361,12 @@ int main()
     testSilhouetteAndShallowCap();
     testParameterSensitivity();
     testDeterminism();
+    testMissRecordsSteps();
+    testStepsToHeatmapSanity();
+    testConeReferenceParity();
+    testConeOnSurfaceSanity();
+    testConeCameraGridMarch();
+    testDemoSceneConeSmoke();
 
     if (failureCount() == 0) {
         std::cout << "All SDF ray marcher tests passed.\n";

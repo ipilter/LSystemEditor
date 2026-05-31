@@ -31,7 +31,8 @@ __global__ void sampleKernel(
     int sobolDimensionCount,
     int width,
     int height,
-    int stride)
+    int stride,
+    int visualMode)
 {
     const int x = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
     const int y = static_cast<int>(blockIdx.y * blockDim.y + threadIdx.y);
@@ -67,7 +68,21 @@ __global__ void sampleKernel(
     cameraPrimaryRay(camera, u, v, roFloat, rdFloat);
 
     const SdfHit hit = sdfRayMarch(toSdfFloat3(roFloat), toSdfFloat3(rdFloat), scene, marchParams);
-    const SdfFloat3 rgbSdf = distanceToHeatmap(hit.t, marchParams->maxDistance, hit.hit);
+
+    SdfFloat3 rgbSdf{};
+    switch (visualMode) {
+    case static_cast<int>(SdfVisualMode::HitDistance):
+        rgbSdf = distanceToHeatmap(hit.t, marchParams->maxDistance, hit.hit);
+        break;
+    case static_cast<int>(SdfVisualMode::Normals):
+        rgbSdf = normalToColor(hit.normal, hit.hit);
+        break;
+    case static_cast<int>(SdfVisualMode::StepCount):
+    default:
+        rgbSdf = stepsToHeatmap(hit.steps, marchParams->maxSteps, hit.hit);
+        break;
+    }
+
     const float3 rgb = toFloat3(rgbSdf);
     const float4 sample = make_float4(rgb.x, rgb.y, rgb.z, 1.0f);
 
@@ -125,6 +140,7 @@ bool pathTracerSample(
     const CameraGpu* d_camera,
     const SdfSceneGpu* d_scene,
     const SdfMarchParamsGpu* d_marchParams,
+    int visualMode,
     const uint32_t* sobolMatrices,
     const unsigned int* pixelScramble,
     int sobolDimensionCount,
@@ -150,7 +166,8 @@ bool pathTracerSample(
         sobolDimensionCount,
         width,
         height,
-        clampedStride);
+        clampedStride,
+        visualMode);
     return checkLaunch(cudaSuccess);
 }
 

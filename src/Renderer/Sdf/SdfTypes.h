@@ -49,3 +49,10 @@ struct SdfHit
     float sdfAtHit = 0.0f;
     SdfFloat3 normal{};
 };
+
+enum class SdfVisualMode : int
+{
+    StepCount = 0,
+    HitDistance = 1,
+    Normals = 2,
+};

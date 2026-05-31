@@ -28,10 +28,10 @@ SDF_CORE_FN float sdCappedCone(SdfFloat3 p, float halfHeight, float radiusBottom
         ? sdfClamp(((k1.x - q.x) * k2.x + (k1.y - q.y) * k2.y) / k2Dot, 0.0f, 1.0f)
         : 0.0f;
     const SdfFloat2 cb = sdfMakeFloat2(q.x - k1.x + k2.x * t, q.y - k1.y + k2.y * t);
+    const float caLenSq = ca.x * ca.x + ca.y * ca.y;
     const float cbLenSq = cb.x * cb.x + cb.y * cb.y;
-    const float caLen = sdfLength2(ca);
     const float s = cb.x < 0.0f && ca.y < 0.0f ? -1.0f : 1.0f;
-    return s * sdfMin2(caLen, cbLenSq);
+    return s * sqrtf(sdfMin2(caLenSq, cbLenSq));
 }
 
 SDF_CORE_FN float sceneSDF(SdfFloat3 p, const SdfSceneGpu* scene)

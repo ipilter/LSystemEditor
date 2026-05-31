@@ -56,6 +56,7 @@ struct PathTracerDetail::PathTracerImpl
     std::atomic<int> previewStepsPerLevel{0};
     std::atomic<int> sampleCount{0};
     std::atomic<int> lastSamplingStride{1};
+    std::atomic<int> visualMode{static_cast<int>(SdfVisualMode::StepCount)};
 
     SdfRayMarcher sdfMarcher;
 };
@@ -780,6 +781,17 @@ void PathTracer::setCamera(const CameraGpu& camera)
     notifyWorker();
 }
 
+void PathTracer::setVisualMode(SdfVisualMode mode)
+{
+    m_impl->visualMode.store(static_cast<int>(mode));
+    notifyWorker();
+}
+
+SdfVisualMode PathTracer::visualMode() const
+{
+    return static_cast<SdfVisualMode>(m_impl->visualMode.load());
+}
+
 void PathTracer::notifyWorker()
 {
     m_impl->workerCv.notify_all();
@@ -856,6 +868,7 @@ void PathTracer::renderLoop()
                 m_impl->d_camera,
                 m_impl->sdfMarcher.deviceScene(),
                 m_impl->sdfMarcher.deviceMarchParams(),
+                static_cast<int>(m_impl->visualMode.load()),
                 m_impl->qmc.sobolMatrices,
                 m_impl->qmc.pixelScramble,
                 kMaxSobolDimensions,

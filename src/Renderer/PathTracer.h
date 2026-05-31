@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CameraGpu.h"
+#include "Sdf/SdfTypes.h"
 
 #include <cstdint>
 #include <functional>
@@ -55,6 +56,9 @@ public:
     int currentSampleCount() const;
 
     void setCamera(const CameraGpu& camera);
+
+    void setVisualMode(SdfVisualMode mode);
+    SdfVisualMode visualMode() const;
 
 private:
     void renderLoop();

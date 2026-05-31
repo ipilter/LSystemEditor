@@ -17,6 +17,7 @@ bool pathTracerSample(
     const CameraGpu* d_camera,
     const SdfSceneGpu* d_scene,
     const SdfMarchParamsGpu* d_marchParams,
+    int visualMode,
     const uint32_t* sobolMatrices,
     const unsigned int* pixelScramble,
     int sobolDimensionCount,

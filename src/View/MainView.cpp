@@ -4,6 +4,7 @@
 #include "AppSettings.h"
 #include "OpenGLViewportWidget.h"
 
+#include <QComboBox>
 #include <QEvent>
 #include <QGroupBox>
 #include <QHBoxLayout>
@@ -100,6 +101,17 @@ MainView::MainView(QWidget* parent)
     previewRow->addWidget(m_previewStepsSpinBox);
     renderLayout->addLayout(previewRow);
 
+    auto* visualModeRow = new QHBoxLayout();
+    visualModeRow->addWidget(new QLabel(QStringLiteral("Debug:"), renderGroup));
+    m_sdfVisualModeComboBox = new QComboBox(renderGroup);
+    m_sdfVisualModeComboBox->addItem(QStringLiteral("Step Count"));
+    m_sdfVisualModeComboBox->addItem(QStringLiteral("Distance"));
+    m_sdfVisualModeComboBox->addItem(QStringLiteral("Off"));
+    m_sdfVisualModeComboBox->setToolTip(
+        QStringLiteral("Step Count: march iteration heatmap. Distance: hit distance heatmap. Off: SDF normals."));
+    visualModeRow->addWidget(m_sdfVisualModeComboBox, 1);
+    renderLayout->addLayout(visualModeRow);
+
     auto* iterationRow = new QHBoxLayout();
     iterationRow->addWidget(new QLabel(QStringLiteral("Iteration:"), renderGroup));
     m_iterationLabel = new QLabel(QStringLiteral("0"), renderGroup);
@@ -181,6 +193,11 @@ QSpinBox* MainView::maxSamplesSpinBox() const
 QSpinBox* MainView::previewStepsSpinBox() const
 {
     return m_previewStepsSpinBox;
+}
+
+QComboBox* MainView::sdfVisualModeComboBox() const
+{
+    return m_sdfVisualModeComboBox;
 }
 
 QPushButton* MainView::startButton() const

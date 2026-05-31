@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Sdf/SdfTypes.h"
+
 #include <QColor>
 #include <QObject>
 #include <QSize>
@@ -28,6 +30,9 @@ public:
     int previewStepsPerLevel() const;
     void setPreviewStepsPerLevel(int value);
 
+    SdfVisualMode sdfVisualMode() const;
+    void setSdfVisualMode(SdfVisualMode mode);
+
     GLuint pboId(int index) const;
     void setPboIds(GLuint pbo0, GLuint pbo1);
 
@@ -36,8 +41,10 @@ signals:
     void renderSizeChanged(const QSize& size);
     void maxSamplesPerPixelChanged(int value);
     void previewStepsPerLevelChanged(int value);
+    void sdfVisualModeChanged(SdfVisualMode mode);
 
 private:
+    static SdfVisualMode clampVisualMode(SdfVisualMode mode);
     static int clampDimension(int value);
     static int clampMaxSamples(int value);
     static int clampPreviewSteps(int value);
@@ -46,5 +53,6 @@ private:
     QSize m_renderSize;
     int m_maxSamplesPerPixel = 1024;
     int m_previewStepsPerLevel = 0;
+    SdfVisualMode m_sdfVisualMode = SdfVisualMode::StepCount;
     GLuint m_pboIds[bufferCount] = {0, 0};
 };

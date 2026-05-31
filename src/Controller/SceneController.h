@@ -26,6 +26,7 @@ private:
     void applyMaxSamplesFromSpinBox();
     void onPreviewStepsSpinBoxChanged();
     void applyPreviewStepsFromSpinBox();
+    void onSdfVisualModeComboBoxChanged();
     void onStartButtonClicked();
     void onStopButtonClicked();
     void onSettingsButtonClicked();
@@ -33,6 +34,7 @@ private:
     void syncRenderSpinBoxes();
     void syncMaxSamplesSpinBox();
     void syncPreviewStepsSpinBox();
+    void syncSdfVisualModeComboBox();
 
     SceneModel* m_model = nullptr;
     MainView* m_view = nullptr;

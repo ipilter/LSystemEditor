@@ -95,6 +95,22 @@ void SceneModel::setPreviewStepsPerLevel(int value)
     emit previewStepsPerLevelChanged(m_previewStepsPerLevel);
 }
 
+SdfVisualMode SceneModel::sdfVisualMode() const
+{
+    return m_sdfVisualMode;
+}
+
+void SceneModel::setSdfVisualMode(SdfVisualMode mode)
+{
+    const SdfVisualMode clamped = clampVisualMode(mode);
+    if (m_sdfVisualMode == clamped) {
+        return;
+    }
+
+    m_sdfVisualMode = clamped;
+    emit sdfVisualModeChanged(m_sdfVisualMode);
+}
+
 GLuint SceneModel::pboId(int index) const
 {
     if (index < 0 || index >= bufferCount) {
@@ -140,4 +156,16 @@ int SceneModel::clampPreviewSteps(int value)
         return kMaxPreviewStepsPerLevel;
     }
     return value;
+}
+
+SdfVisualMode SceneModel::clampVisualMode(SdfVisualMode mode)
+{
+    switch (mode) {
+    case SdfVisualMode::StepCount:
+    case SdfVisualMode::HitDistance:
+    case SdfVisualMode::Normals:
+        return mode;
+    default:
+        return SdfVisualMode::StepCount;
+    }
 }

@@ -68,6 +68,72 @@ inline SdfSceneGpu defaultScene()
     return scene;
 }
 
+inline SdfSceneGpu coneOnlyScene()
+{
+    SdfSceneGpu scene{};
+    scene.cylinderCenter = sdfMakeFloat3(1.0e6f, 0.0f, 0.0f);
+    scene.cylinderHalfExtents = sdfMakeFloat2(0.5f, 1.0f);
+    scene.sphereCenter = sdfMakeFloat3(1.0e6f, 0.0f, 0.0f);
+    scene.sphereRadius = 0.5f;
+    scene.coneCenter = sdfMakeFloat3(2.5f, 0.0f, 0.0f);
+    scene.coneHalfHeight = 1.0f;
+    scene.coneRadiusBottom = 0.5f;
+    scene.coneRadiusTop = 0.125f;
+    return scene;
+}
+
+inline SdfSceneGpu demoScene()
+{
+    SdfSceneGpu scene{};
+    scene.cylinderCenter = sdfMakeFloat3(-2.5f, 0.0f, 0.0f);
+    scene.cylinderHalfExtents = sdfMakeFloat2(0.5f, 1.0f);
+    scene.sphereCenter = sdfMakeFloat3(0.0f, 0.0f, 0.0f);
+    scene.sphereRadius = 0.5f;
+    scene.coneCenter = sdfMakeFloat3(2.5f, 0.0f, 0.0f);
+    scene.coneHalfHeight = 1.0f;
+    scene.coneRadiusBottom = 0.5f;
+    scene.coneRadiusTop = 0.125f;
+    return scene;
+}
+
+inline float evalConeSDF(SdfFloat3 p, const SdfSceneGpu* scene)
+{
+    const SdfFloat3 localP = sdfSub3(p, scene->coneCenter);
+    return sdCappedCone(
+        localP,
+        scene->coneHalfHeight,
+        scene->coneRadiusBottom,
+        scene->coneRadiusTop);
+}
+
+inline float sdCappedConeReference(
+    SdfFloat3 p,
+    float halfHeight,
+    float radiusBottom,
+    float radiusTop)
+{
+    const SdfFloat2 q = sdfMakeFloat2(sdfLength2(sdfMakeFloat2(p.x, p.z)), p.y);
+    const SdfFloat2 k1 = sdfMakeFloat2(radiusTop, halfHeight);
+    const SdfFloat2 k2 = sdfMakeFloat2(radiusTop - radiusBottom, 2.0f * halfHeight);
+    const float capRadius = q.y < 0.0f ? radiusBottom : radiusTop;
+    const SdfFloat2 ca = sdfMakeFloat2(q.x - sdfMin2(q.x, capRadius), sdfFabs(q.y) - halfHeight);
+
+    const float k2Dot = k2.x * k2.x + k2.y * k2.y;
+    const float t = k2Dot > 0.0f
+        ? sdfClamp(((k1.x - q.x) * k2.x + (k1.y - q.y) * k2.y) / k2Dot, 0.0f, 1.0f)
+        : 0.0f;
+    const SdfFloat2 cb = sdfMakeFloat2(q.x - k1.x + k2.x * t, q.y - k1.y + k2.y * t);
+    const float caLenSq = ca.x * ca.x + ca.y * ca.y;
+    const float cbLenSq = cb.x * cb.x + cb.y * cb.y;
+    const float s = cb.x < 0.0f && ca.y < 0.0f ? -1.0f : 1.0f;
+    return s * std::sqrt(sdfMin2(caLenSq, cbLenSq));
+}
+
+inline SdfFloat3 worldConePoint(const SdfSceneGpu* scene, SdfFloat3 localP)
+{
+    return sdfAdd3(localP, scene->coneCenter);
+}
+
 inline bool isOutsideStart(SdfFloat3 ro, const SdfSceneGpu* scene, float surfaceEpsilon)
 {
     return sceneSDF(ro, scene) >= -surfaceEpsilon;

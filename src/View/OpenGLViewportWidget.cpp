@@ -8,17 +8,21 @@
 #include <QMouseEvent>
 #include <QSurfaceFormat>
 
+#include <utility>
+
 namespace {
 
 constexpr const char* kVertexShader = R"(#version 460 core
 layout(location = 0) in vec2 aPos;
 layout(location = 1) in vec2 aTexCoord;
 
+uniform vec2 uQuadScale;
+
 out vec2 vTexCoord;
 
 void main()
 {
-    gl_Position = vec4(aPos, 0.0, 1.0);
+    gl_Position = vec4(aPos * uQuadScale, 0.0, 1.0);
     vTexCoord = aTexCoord;
 }
 )";
@@ -50,6 +54,20 @@ constexpr unsigned int kQuadIndices[] = {
 
 constexpr float kMoveSpeed = 0.05f;
 constexpr float kMouseSensitivity = 0.15f;
+
+std::pair<float, float> aspectFitNdcScale(int widgetW, int widgetH, int renderW, int renderH)
+{
+    if (widgetW <= 0 || widgetH <= 0 || renderW <= 0 || renderH <= 0) {
+        return {1.0f, 1.0f};
+    }
+
+    const float widgetAspect = static_cast<float>(widgetW) / static_cast<float>(widgetH);
+    const float renderAspect = static_cast<float>(renderW) / static_cast<float>(renderH);
+    if (widgetAspect > renderAspect) {
+        return {renderAspect / widgetAspect, 1.0f};
+    }
+    return {1.0f, widgetAspect / renderAspect};
+}
 
 } // namespace
 
@@ -138,6 +156,12 @@ void OpenGLViewportWidget::setSceneModel(SceneModel* model)
         m_pathTracer.setPreviewStepsPerLevel(steps);
     });
 
+    connect(m_model, &SceneModel::sdfVisualModeChanged, this, [this](SdfVisualMode mode) {
+        m_pathTracer.setVisualMode(mode);
+        m_pathTracer.resetAccumulation();
+        update();
+    });
+
     if (m_glInitialized) {
         makeCurrent();
         recreateGpuBuffers();
@@ -188,6 +212,13 @@ void OpenGLViewportWidget::initializeGL()
     }
 }
 
+void OpenGLViewportWidget::resizeGL(int w, int h)
+{
+    Q_UNUSED(w);
+    Q_UNUSED(h);
+    update();
+}
+
 void OpenGLViewportWidget::paintGL()
 {
     const float r = static_cast<float>(m_clearColor.redF());
@@ -220,6 +251,11 @@ void OpenGLViewportWidget::paintGL()
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, m_texture);
     glUniform1i(glGetUniformLocation(m_program, "uTexture"), 0);
+
+    const int renderW = m_model->renderSize().width();
+    const int renderH = m_model->renderSize().height();
+    const auto [sx, sy] = aspectFitNdcScale(width(), height(), renderW, renderH);
+    glUniform2f(glGetUniformLocation(m_program, "uQuadScale"), sx, sy);
 
     glBindVertexArray(m_vao);
     glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, nullptr);
@@ -388,6 +424,7 @@ void OpenGLViewportWidget::recreateGpuBuffers()
 
     m_pathTracer.setMaxSamplesPerPixel(m_model->maxSamplesPerPixel());
     m_pathTracer.setPreviewStepsPerLevel(m_model->previewStepsPerLevel());
+    m_pathTracer.setVisualMode(m_model->sdfVisualMode());
 
     m_model->setPboIds(m_pbos[0], m_pbos[1]);
 

@@ -7,6 +7,7 @@
 #include "SettingsDialog.h"
 
 #include <QColorDialog>
+#include <QComboBox>
 #include <QPushButton>
 #include <QSpinBox>
 
@@ -18,6 +19,32 @@ QString colorButtonStyleSheet(const QColor& color)
                "QPushButton { background-color: %1; border: 1px solid #333; }"
                "QPushButton:hover { border: 1px solid #666; }")
         .arg(color.name(QColor::HexRgb));
+}
+
+SdfVisualMode visualModeFromComboIndex(int index)
+{
+    switch (index) {
+    case 1:
+        return SdfVisualMode::HitDistance;
+    case 2:
+        return SdfVisualMode::Normals;
+    case 0:
+    default:
+        return SdfVisualMode::StepCount;
+    }
+}
+
+int comboIndexFromVisualMode(SdfVisualMode mode)
+{
+    switch (mode) {
+    case SdfVisualMode::HitDistance:
+        return 1;
+    case SdfVisualMode::Normals:
+        return 2;
+    case SdfVisualMode::StepCount:
+    default:
+        return 0;
+    }
 }
 
 } // namespace
@@ -37,17 +64,24 @@ SceneController::SceneController(SceneModel* model, MainView* view, QObject* par
     syncRenderSpinBoxes();
     syncMaxSamplesSpinBox();
     syncPreviewStepsSpinBox();
+    syncSdfVisualModeComboBox();
 
     connect(m_view->colorButton(), &QPushButton::clicked, this, &SceneController::onColorButtonClicked);
     connect(m_model, &SceneModel::clearColorChanged, this, &SceneController::onClearColorChanged);
     connect(m_model, &SceneModel::renderSizeChanged, this, &SceneController::onRenderSizeChanged);
     connect(m_model, &SceneModel::maxSamplesPerPixelChanged, this, [this](int) { syncMaxSamplesSpinBox(); });
     connect(m_model, &SceneModel::previewStepsPerLevelChanged, this, [this](int) { syncPreviewStepsSpinBox(); });
+    connect(m_model, &SceneModel::sdfVisualModeChanged, this, [this](SdfVisualMode) { syncSdfVisualModeComboBox(); });
 
     connect(m_view->renderWidthSpinBox(), &QSpinBox::valueChanged, this, &SceneController::onRenderSizeSpinBoxChanged);
     connect(m_view->renderHeightSpinBox(), &QSpinBox::valueChanged, this, &SceneController::onRenderSizeSpinBoxChanged);
     connect(m_view->maxSamplesSpinBox(), &QSpinBox::valueChanged, this, &SceneController::onMaxSamplesSpinBoxChanged);
     connect(m_view->previewStepsSpinBox(), &QSpinBox::valueChanged, this, &SceneController::onPreviewStepsSpinBoxChanged);
+    connect(
+        m_view->sdfVisualModeComboBox(),
+        QOverload<int>::of(&QComboBox::currentIndexChanged),
+        this,
+        &SceneController::onSdfVisualModeComboBoxChanged);
     connect(&m_renderSizeDebounce, &DebounceTimer::triggered, this, &SceneController::applyRenderSizeFromSpinBoxes);
     connect(&m_maxSamplesDebounce, &DebounceTimer::triggered, this, &SceneController::applyMaxSamplesFromSpinBox);
     connect(&m_previewStepsDebounce, &DebounceTimer::triggered, this, &SceneController::applyPreviewStepsFromSpinBox);
@@ -121,6 +155,11 @@ void SceneController::applyPreviewStepsFromSpinBox()
     m_model->setPreviewStepsPerLevel(m_view->previewStepsSpinBox()->value());
 }
 
+void SceneController::onSdfVisualModeComboBoxChanged()
+{
+    m_model->setSdfVisualMode(visualModeFromComboIndex(m_view->sdfVisualModeComboBox()->currentIndex()));
+}
+
 void SceneController::onStartButtonClicked()
 {
     m_view->setIteration(0);
@@ -166,4 +205,11 @@ void SceneController::syncPreviewStepsSpinBox()
     m_view->previewStepsSpinBox()->blockSignals(true);
     m_view->previewStepsSpinBox()->setValue(m_model->previewStepsPerLevel());
     m_view->previewStepsSpinBox()->blockSignals(false);
+}
+
+void SceneController::syncSdfVisualModeComboBox()
+{
+    m_view->sdfVisualModeComboBox()->blockSignals(true);
+    m_view->sdfVisualModeComboBox()->setCurrentIndex(comboIndexFromVisualMode(m_model->sdfVisualMode()));
+    m_view->sdfVisualModeComboBox()->blockSignals(false);
 }

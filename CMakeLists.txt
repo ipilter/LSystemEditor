@@ -91,7 +91,8 @@ target_include_directories(pathtracer PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Sdf"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/View"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Controller"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Model")
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Model"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Sdf")
 target_link_libraries(pathtracer PRIVATE pathtracer_sampling pathtracer_sdf Qt6::Widgets Qt6::OpenGL Qt6::OpenGLWidgets CUDA::cudart glm::glm)
 set_target_properties(pathtracer PROPERTIES
     OUTPUT_NAME pathtracer
