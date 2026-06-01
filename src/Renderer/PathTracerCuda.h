@@ -8,6 +8,18 @@
 
 #include <cstdint>
 
+struct SdfAccelSceneGpu;
+
+bool pathTracerClearAccumulator(
+    float4* d_buffer,
+    uint32_t* d_samples,
+    int width,
+    int height,
+    float backgroundR,
+    float backgroundG,
+    float backgroundB,
+    cudaStream_t stream);
+
 bool pathTracerSample(
     float4* d_buffer,
     uint32_t* d_samples,
@@ -15,7 +27,7 @@ bool pathTracerSample(
     int height,
     int stride,
     const CameraGpu* d_camera,
-    const SdfSceneGpu* d_scene,
+    const SdfAccelSceneGpu* d_scene,
     const SdfMarchParamsGpu* d_marchParams,
     int visualMode,
     const uint32_t* sobolMatrices,

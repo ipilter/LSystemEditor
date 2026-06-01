@@ -106,11 +106,23 @@ MainView::MainView(QWidget* parent)
     m_sdfVisualModeComboBox = new QComboBox(renderGroup);
     m_sdfVisualModeComboBox->addItem(QStringLiteral("Step Count"));
     m_sdfVisualModeComboBox->addItem(QStringLiteral("Distance"));
-    m_sdfVisualModeComboBox->addItem(QStringLiteral("Off"));
+    m_sdfVisualModeComboBox->addItem(QStringLiteral("Shaded"));
     m_sdfVisualModeComboBox->setToolTip(
-        QStringLiteral("Step Count: march iteration heatmap. Distance: hit distance heatmap. Off: SDF normals."));
+        QStringLiteral("Step Count: march iteration heatmap. Distance: hit distance heatmap. Shaded: shaded SDF surface."));
     visualModeRow->addWidget(m_sdfVisualModeComboBox, 1);
     renderLayout->addLayout(visualModeRow);
+
+    auto* boundsOverlayRow = new QHBoxLayout();
+    boundsOverlayRow->addWidget(new QLabel(QStringLiteral("Bounds:"), renderGroup));
+    m_boundsOverlayComboBox = new QComboBox(renderGroup);
+    m_boundsOverlayComboBox->addItem(QStringLiteral("Off"));
+    m_boundsOverlayComboBox->addItem(QStringLiteral("AABB"));
+    m_boundsOverlayComboBox->addItem(QStringLiteral("Octree"));
+    m_boundsOverlayComboBox->addItem(QStringLiteral("Both"));
+    m_boundsOverlayComboBox->setToolTip(
+        QStringLiteral("Debug wireframe overlay for object AABBs and/or octree node bounds"));
+    boundsOverlayRow->addWidget(m_boundsOverlayComboBox, 1);
+    renderLayout->addLayout(boundsOverlayRow);
 
     auto* iterationRow = new QHBoxLayout();
     iterationRow->addWidget(new QLabel(QStringLiteral("Iteration:"), renderGroup));
@@ -198,6 +210,11 @@ QSpinBox* MainView::previewStepsSpinBox() const
 QComboBox* MainView::sdfVisualModeComboBox() const
 {
     return m_sdfVisualModeComboBox;
+}
+
+QComboBox* MainView::boundsOverlayComboBox() const
+{
+    return m_boundsOverlayComboBox;
 }
 
 QPushButton* MainView::startButton() const

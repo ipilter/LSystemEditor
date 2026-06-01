@@ -7,8 +7,9 @@
 
 __device__ inline float3 rotateByQuat(float4 q, float3 v)
 {
-    const float3 u = make_float3(q.x, q.y, q.z);
-    const float s = q.w;
+    // CameraGpu.orientation: (w, x, y, z) in (.x, .y, .z, .w)
+    const float s = q.x;
+    const float3 u = make_float3(q.y, q.z, q.w);
     const float3 cross1 = make_float3(
         u.y * v.z - u.z * v.y,
         u.z * v.x - u.x * v.z,

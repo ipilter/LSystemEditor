@@ -40,6 +40,9 @@ public:
     void setAspect(int imageW, int imageH);
     CameraGpu toGpu() const;
 
+    static glm::mat4 viewMatrixFromGpu(const CameraGpu& camera);
+    static glm::mat4 projMatrixFromGpu(const CameraGpu& camera, int imageW, int imageH);
+
 private:
     void rebuildOrientation();
 

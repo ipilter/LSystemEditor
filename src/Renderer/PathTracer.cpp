@@ -4,7 +4,8 @@
 #include "CameraGpu.h"
 #include "PathTracerCuda.h"
 #include "QmcGpuResources.h"
-#include "Sdf/SdfRayMarcher.h"
+#include "SdfAccel/SdfAccelBoundsMesh.h"
+#include "SdfAccel/SdfAccelScene.h"
 
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
@@ -58,7 +59,13 @@ struct PathTracerDetail::PathTracerImpl
     std::atomic<int> lastSamplingStride{1};
     std::atomic<int> visualMode{static_cast<int>(SdfVisualMode::StepCount)};
 
-    SdfRayMarcher sdfMarcher;
+    SdfAccelScene accelScene;
+    SdfMarchParamsGpu hostMarchParams{};
+    SdfMarchParamsGpu* d_marchParams = nullptr;
+    SdfAccelBoundsMesh boundsMesh;
+
+    CameraGpu lastSampleCamera{};
+    std::mutex lastSampleCameraMutex;
 };
 
 namespace {
@@ -305,15 +312,6 @@ bool initAccumulator(AccumulatorData* acc, int width, int height, QString* outEr
         return false;
     }
 
-    error = cudaMemset(acc->d_buffer, 0, pixelCount * sizeof(float4));
-    if (error != cudaSuccess) {
-        freeAccumulator(acc);
-        if (outError != nullptr) {
-            *outError = cudaErrorString(error);
-        }
-        return false;
-    }
-
     error = cudaMemset(acc->d_samples, 0, pixelCount * sizeof(uint32_t));
     if (error != cudaSuccess) {
         freeAccumulator(acc);
@@ -325,6 +323,53 @@ bool initAccumulator(AccumulatorData* acc, int width, int height, QString* outEr
 
     acc->width = width;
     acc->height = height;
+    return true;
+}
+
+bool clearAccumulator(PathTracerDetail::PathTracerImpl* impl, QString* outError)
+{
+    if (impl == nullptr || impl->acc.d_buffer == nullptr || impl->acc.d_samples == nullptr ||
+        impl->acc.width <= 0 || impl->acc.height <= 0 || impl->stream == nullptr) {
+        return true;
+    }
+
+    if (!pathTracerClearAccumulator(
+            impl->acc.d_buffer,
+            impl->acc.d_samples,
+            impl->acc.width,
+            impl->acc.height,
+            impl->hostMarchParams.backgroundR,
+            impl->hostMarchParams.backgroundG,
+            impl->hostMarchParams.backgroundB,
+            impl->stream)) {
+        if (outError != nullptr) {
+            *outError = QStringLiteral("clear accumulator kernel launch failed");
+        }
+        return false;
+    }
+
+    return true;
+}
+
+bool uploadMarchParams(PathTracerDetail::PathTracerImpl* impl, cudaStream_t stream, QString* outError)
+{
+    if (impl == nullptr || impl->d_marchParams == nullptr) {
+        return true;
+    }
+
+    const cudaError_t copyError = cudaMemcpyAsync(
+        impl->d_marchParams,
+        &impl->hostMarchParams,
+        sizeof(SdfMarchParamsGpu),
+        cudaMemcpyHostToDevice,
+        stream);
+    if (copyError != cudaSuccess) {
+        if (outError != nullptr) {
+            *outError = cudaErrorString(copyError);
+        }
+        return false;
+    }
+
     return true;
 }
 
@@ -383,14 +428,19 @@ bool uploadCameraIfDirty(PathTracerDetail::PathTracerImpl* impl, cudaStream_t st
         return false;
     }
 
-    if (!impl->cameraDirty.load()) {
-        return true;
-    }
-
     CameraGpu cameraCopy{};
     {
         std::lock_guard<std::mutex> lock(impl->cameraMutex);
         cameraCopy = impl->hostCamera;
+    }
+
+    if (impl->acc.width > 0 && impl->acc.height > 0) {
+        cameraCopy.aspect =
+            static_cast<float>(impl->acc.width) / static_cast<float>(impl->acc.height);
+    }
+
+    if (!impl->cameraDirty.load()) {
+        return true;
     }
 
     const cudaError_t error =
@@ -404,6 +454,35 @@ bool uploadCameraIfDirty(PathTracerDetail::PathTracerImpl* impl, cudaStream_t st
 
     impl->cameraDirty.store(false);
     return true;
+}
+
+CameraGpu sampleCameraForFrame(PathTracerDetail::PathTracerImpl* impl)
+{
+    CameraGpu camera{};
+    if (impl == nullptr) {
+        return camera;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(impl->cameraMutex);
+        camera = impl->hostCamera;
+    }
+
+    if (impl->acc.width > 0 && impl->acc.height > 0) {
+        camera.aspect = static_cast<float>(impl->acc.width) / static_cast<float>(impl->acc.height);
+    }
+
+    return camera;
+}
+
+void storeLastSampleCamera(PathTracerDetail::PathTracerImpl* impl, const CameraGpu& camera)
+{
+    if (impl == nullptr) {
+        return;
+    }
+
+    std::lock_guard<std::mutex> lock(impl->lastSampleCameraMutex);
+    impl->lastSampleCamera = camera;
 }
 
 void unregisterPboResources(PathTracerDetail::PathTracerImpl* impl)
@@ -496,6 +575,77 @@ void checkCudaGlDeviceAffinity()
     }
 }
 
+void freeMarchParams(PathTracerDetail::PathTracerImpl* impl)
+{
+    if (impl == nullptr || impl->d_marchParams == nullptr) {
+        return;
+    }
+
+    cudaFree(impl->d_marchParams);
+    impl->d_marchParams = nullptr;
+}
+
+bool initMarchParams(PathTracerDetail::PathTracerImpl* impl, cudaStream_t stream, QString* outError)
+{
+    if (impl == nullptr) {
+        if (outError != nullptr) {
+            *outError = QStringLiteral("invalid path tracer impl");
+        }
+        return false;
+    }
+
+    freeMarchParams(impl);
+
+    const float backgroundR = impl->hostMarchParams.backgroundR;
+    const float backgroundG = impl->hostMarchParams.backgroundG;
+    const float backgroundB = impl->hostMarchParams.backgroundB;
+
+    impl->hostMarchParams = SdfMarchParamsGpu{};
+    impl->hostMarchParams.maxDistance = 100.0f;
+    impl->hostMarchParams.surfaceEpsilon = 1.0e-4f;
+    impl->hostMarchParams.normalEpsilon = 1.0e-4f;
+    impl->hostMarchParams.maxSteps = 256;
+    impl->hostMarchParams.refineIterations = 10;
+    impl->hostMarchParams.backgroundR = backgroundR;
+    impl->hostMarchParams.backgroundG = backgroundG;
+    impl->hostMarchParams.backgroundB = backgroundB;
+
+    const cudaError_t allocError = cudaMalloc(&impl->d_marchParams, sizeof(SdfMarchParamsGpu));
+    if (allocError != cudaSuccess) {
+        if (outError != nullptr) {
+            *outError = cudaErrorString(allocError);
+        }
+        return false;
+    }
+
+    const cudaError_t copyError = cudaMemcpyAsync(
+        impl->d_marchParams,
+        &impl->hostMarchParams,
+        sizeof(SdfMarchParamsGpu),
+        cudaMemcpyHostToDevice,
+        stream);
+    if (copyError != cudaSuccess) {
+        freeMarchParams(impl);
+        if (outError != nullptr) {
+            *outError = cudaErrorString(copyError);
+        }
+        return false;
+    }
+
+    return true;
+}
+
+void releaseAccelScene(PathTracerDetail::PathTracerImpl* impl)
+{
+    if (impl == nullptr) {
+        return;
+    }
+
+    freeMarchParams(impl);
+    impl->accelScene.release();
+    impl->boundsMesh = SdfAccelBoundsMesh{};
+}
+
 } // namespace
 
 PathTracer::PathTracer()
@@ -510,7 +660,7 @@ PathTracer::~PathTracer()
     freeCameraGpu(m_impl.get());
     freeQmcGpuResources(&m_impl->qmc);
     freeAccumulator(&m_impl->acc);
-    m_impl->sdfMarcher.release();
+    releaseAccelScene(m_impl.get());
     destroySampleEvent(m_impl.get());
     destroyStream(m_impl.get());
 }
@@ -536,7 +686,7 @@ bool PathTracer::configure(int width, int height, uint32_t pbo0, uint32_t pbo1)
     freeCameraGpu(m_impl.get());
     freeQmcGpuResources(&m_impl->qmc);
     freeAccumulator(&m_impl->acc);
-    m_impl->sdfMarcher.release();
+    releaseAccelScene(m_impl.get());
 
     if (m_impl->stream == nullptr) {
         const cudaError_t streamError = cudaStreamCreate(&m_impl->stream);
@@ -591,28 +741,60 @@ bool PathTracer::configure(int width, int height, uint32_t pbo0, uint32_t pbo1)
         unregisterPboResources(m_impl.get());
         freeCameraGpu(m_impl.get());
         freeAccumulator(&m_impl->acc);
-        m_impl->sdfMarcher.release();
+        releaseAccelScene(m_impl.get());
         return false;
     }
 
-    if (!m_impl->sdfMarcher.allocate()) {
-        AppLog::instance().error(QStringLiteral("PathTracer configure: SDF ray marcher allocation failed"));
+    m_impl->accelScene.setDefaultLayout();
+    if (!m_impl->accelScene.build()) {
+        AppLog::instance().error(QStringLiteral("PathTracer configure: SDF accel scene build failed"));
         unregisterPboResources(m_impl.get());
         freeQmcGpuResources(&m_impl->qmc);
         freeCameraGpu(m_impl.get());
         freeAccumulator(&m_impl->acc);
-        m_impl->sdfMarcher.release();
+        releaseAccelScene(m_impl.get());
         return false;
     }
 
-    m_impl->sdfMarcher.setDefaultLayout();
-    if (!m_impl->sdfMarcher.upload(m_impl->stream)) {
-        AppLog::instance().error(QStringLiteral("PathTracer configure: SDF ray marcher upload failed"));
+    if (!m_impl->accelScene.allocate()) {
+        AppLog::instance().error(QStringLiteral("PathTracer configure: SDF accel scene allocation failed"));
         unregisterPboResources(m_impl.get());
         freeQmcGpuResources(&m_impl->qmc);
         freeCameraGpu(m_impl.get());
         freeAccumulator(&m_impl->acc);
-        m_impl->sdfMarcher.release();
+        releaseAccelScene(m_impl.get());
+        return false;
+    }
+
+    if (!m_impl->accelScene.upload(m_impl->stream)) {
+        AppLog::instance().error(QStringLiteral("PathTracer configure: SDF accel scene upload failed"));
+        unregisterPboResources(m_impl.get());
+        freeQmcGpuResources(&m_impl->qmc);
+        freeCameraGpu(m_impl.get());
+        freeAccumulator(&m_impl->acc);
+        releaseAccelScene(m_impl.get());
+        return false;
+    }
+
+    if (!initMarchParams(m_impl.get(), m_impl->stream, &error)) {
+        AppLog::instance().error(
+            QStringLiteral("PathTracer configure: SDF march params upload failed: %1").arg(error));
+        unregisterPboResources(m_impl.get());
+        freeQmcGpuResources(&m_impl->qmc);
+        freeCameraGpu(m_impl.get());
+        freeAccumulator(&m_impl->acc);
+        releaseAccelScene(m_impl.get());
+        return false;
+    }
+
+    if (!clearAccumulator(m_impl.get(), &error)) {
+        AppLog::instance().error(
+            QStringLiteral("PathTracer configure: accumulator clear failed: %1").arg(error));
+        unregisterPboResources(m_impl.get());
+        freeQmcGpuResources(&m_impl->qmc);
+        freeCameraGpu(m_impl.get());
+        freeAccumulator(&m_impl->acc);
+        releaseAccelScene(m_impl.get());
         return false;
     }
 
@@ -624,7 +806,7 @@ bool PathTracer::configure(int width, int height, uint32_t pbo0, uint32_t pbo1)
         freeQmcGpuResources(&m_impl->qmc);
         freeCameraGpu(m_impl.get());
         freeAccumulator(&m_impl->acc);
-        m_impl->sdfMarcher.release();
+        releaseAccelScene(m_impl.get());
         return false;
     }
 
@@ -773,12 +955,28 @@ int PathTracer::currentSampleCount() const
 
 void PathTracer::setCamera(const CameraGpu& camera)
 {
+    CameraGpu stored = camera;
+    if (m_impl->acc.width > 0 && m_impl->acc.height > 0) {
+        stored.aspect =
+            static_cast<float>(m_impl->acc.width) / static_cast<float>(m_impl->acc.height);
+    }
+
     {
         std::lock_guard<std::mutex> lock(m_impl->cameraMutex);
-        m_impl->hostCamera = camera;
+        m_impl->hostCamera = stored;
+    }
+    {
+        std::lock_guard<std::mutex> lock(m_impl->lastSampleCameraMutex);
+        m_impl->lastSampleCamera = stored;
     }
     m_impl->cameraDirty.store(true);
     notifyWorker();
+}
+
+CameraGpu PathTracer::lastSampleCamera() const
+{
+    std::lock_guard<std::mutex> lock(m_impl->lastSampleCameraMutex);
+    return m_impl->lastSampleCamera;
 }
 
 void PathTracer::setVisualMode(SdfVisualMode mode)
@@ -792,6 +990,45 @@ SdfVisualMode PathTracer::visualMode() const
     return static_cast<SdfVisualMode>(m_impl->visualMode.load());
 }
 
+void PathTracer::setClearColor(const QColor& color)
+{
+    if (!color.isValid()) {
+        return;
+    }
+
+    m_impl->hostMarchParams.backgroundR = static_cast<float>(color.redF());
+    m_impl->hostMarchParams.backgroundG = static_cast<float>(color.greenF());
+    m_impl->hostMarchParams.backgroundB = static_cast<float>(color.blueF());
+
+    if (m_impl->stream == nullptr) {
+        return;
+    }
+
+    QString error;
+    if (!uploadMarchParams(m_impl.get(), m_impl->stream, &error)) {
+        AppLog::instance().error(
+            QStringLiteral("PathTracer clear color upload failed: %1").arg(error));
+        return;
+    }
+
+    if (m_impl->configured.load()) {
+        if (!clearAccumulator(m_impl.get(), &error)) {
+            AppLog::instance().error(
+                QStringLiteral("PathTracer accumulator clear failed: %1").arg(error));
+        }
+    }
+}
+
+void PathTracer::rebuildAccelBoundsMesh(const QColor& aabbColor, const QColor& octreeColor)
+{
+    m_impl->boundsMesh = sdfAccelBuildBoundsMesh(m_impl->accelScene, aabbColor, octreeColor);
+}
+
+const SdfAccelBoundsMesh& PathTracer::accelBoundsMesh() const
+{
+    return m_impl->boundsMesh;
+}
+
 void PathTracer::notifyWorker()
 {
     m_impl->workerCv.notify_all();
@@ -802,10 +1039,11 @@ void PathTracer::renderLoop()
     while (m_impl->running.load()) {
         if (m_impl->resetRequested.exchange(false)) {
             if (m_impl->acc.d_buffer != nullptr && m_impl->acc.d_samples != nullptr) {
-                const std::size_t pixelCount =
-                    static_cast<std::size_t>(m_impl->acc.width) * static_cast<std::size_t>(m_impl->acc.height);
-                cudaMemsetAsync(m_impl->acc.d_buffer, 0, pixelCount * sizeof(float4), m_impl->stream);
-                cudaMemsetAsync(m_impl->acc.d_samples, 0, pixelCount * sizeof(uint32_t), m_impl->stream);
+                QString clearError;
+                if (!clearAccumulator(m_impl.get(), &clearError)) {
+                    AppLog::instance().error(
+                        QStringLiteral("PathTracer accumulator reset failed: %1").arg(clearError));
+                }
             }
             refreshPixelScramble(&m_impl->qmc, m_impl->stream);
             m_impl->sampleCount.store(0);
@@ -854,10 +1092,13 @@ void PathTracer::renderLoop()
             continue;
         }
 
-        if (!m_impl->sdfMarcher.upload(m_impl->stream)) {
+        if (!m_impl->accelScene.upload(m_impl->stream)) {
             AppLog::instance().error(QStringLiteral("PathTracer SDF scene upload failed"));
             continue;
         }
+
+        const CameraGpu sampleCamera = sampleCameraForFrame(m_impl.get());
+        storeLastSampleCamera(m_impl.get(), sampleCamera);
 
         if (!pathTracerSample(
                 m_impl->acc.d_buffer,
@@ -866,8 +1107,8 @@ void PathTracer::renderLoop()
                 m_impl->acc.height,
                 stride,
                 m_impl->d_camera,
-                m_impl->sdfMarcher.deviceScene(),
-                m_impl->sdfMarcher.deviceMarchParams(),
+                m_impl->accelScene.deviceScene(),
+                m_impl->d_marchParams,
                 static_cast<int>(m_impl->visualMode.load()),
                 m_impl->qmc.sobolMatrices,
                 m_impl->qmc.pixelScramble,

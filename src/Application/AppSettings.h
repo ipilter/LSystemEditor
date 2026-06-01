@@ -41,6 +41,12 @@ public:
     int previewStepsPerLevel() const;
     void setPreviewStepsPerLevel(int value);
 
+    QColor accelAabbColor() const;
+    void setAccelAabbColor(const QColor& color);
+
+    QColor accelOctreeColor() const;
+    void setAccelOctreeColor(const QColor& color);
+
     void load();
     void save();
 
@@ -61,4 +67,6 @@ private:
     QColor m_clearColor = QColor(10, 10, 10);
     int m_maxSamplesPerPixel = 1024;
     int m_previewStepsPerLevel = 0;
+    QColor m_accelAabbColor = QColor(0, 200, 80);
+    QColor m_accelOctreeColor = QColor(230, 200, 0);
 };

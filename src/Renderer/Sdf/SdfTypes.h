@@ -20,6 +20,9 @@ struct SdfMarchParamsGpu
     float normalEpsilon = 1.0e-4f;
     int maxSteps = 256;
     int refineIterations = 10;
+    float backgroundR = 10.0f / 255.0f;
+    float backgroundG = 10.0f / 255.0f;
+    float backgroundB = 10.0f / 255.0f;
 };
 
 using SdfMarchParamsHost = SdfMarchParamsGpu;
@@ -54,5 +57,13 @@ enum class SdfVisualMode : int
 {
     StepCount = 0,
     HitDistance = 1,
-    Normals = 2,
+    Shaded = 2,
+};
+
+enum class SdfAccelBoundsOverlayMode : int
+{
+    Off = 0,
+    Aabb = 1,
+    Octree = 2,
+    Both = 3,
 };

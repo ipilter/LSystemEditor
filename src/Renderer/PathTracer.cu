@@ -1,6 +1,7 @@
 #include "CameraDevice.cuh"
 #include "QmcSampler.cuh"
-#include "SdfRayMarcher.cuh"
+#include "SdfAccelScene.cuh"
+#include "SdfRayMarcherCore.h"
 
 #include <cuda_runtime.h>
 #include <vector_types.h>
@@ -24,7 +25,7 @@ __global__ void sampleKernel(
     float4* acc,
     uint32_t* counts,
     const CameraGpu* camera,
-    const SdfSceneGpu* scene,
+    const SdfAccelSceneGpu* scene,
     const SdfMarchParamsGpu* marchParams,
     const uint32_t* sobolMatrices,
     const unsigned int* pixelScramble,
@@ -67,19 +68,19 @@ __global__ void sampleKernel(
     float3 rdFloat{};
     cameraPrimaryRay(camera, u, v, roFloat, rdFloat);
 
-    const SdfHit hit = sdfRayMarch(toSdfFloat3(roFloat), toSdfFloat3(rdFloat), scene, marchParams);
+    const SdfHit hit = sdfAccelRayMarch(toSdfFloat3(roFloat), toSdfFloat3(rdFloat), scene, marchParams);
 
     SdfFloat3 rgbSdf{};
     switch (visualMode) {
     case static_cast<int>(SdfVisualMode::HitDistance):
-        rgbSdf = distanceToHeatmap(hit.t, marchParams->maxDistance, hit.hit);
+        rgbSdf = distanceToHeatmap(hit.t, marchParams->maxDistance, hit.hit, marchParams);
         break;
-    case static_cast<int>(SdfVisualMode::Normals):
-        rgbSdf = normalToColor(hit.normal, hit.hit);
+    case static_cast<int>(SdfVisualMode::Shaded):
+        rgbSdf = normalToColor(hit.normal, hit.hit, marchParams);
         break;
     case static_cast<int>(SdfVisualMode::StepCount):
     default:
-        rgbSdf = stepsToHeatmap(hit.steps, marchParams->maxSteps, hit.hit);
+        rgbSdf = stepsToHeatmap(hit.steps, marchParams->maxSteps, hit.hit, marchParams);
         break;
     }
 
@@ -94,6 +95,19 @@ __global__ void sampleKernel(
         (prev.z * static_cast<float>(n) + sample.z) * invN,
         1.0f);
     counts[idx] = n + 1;
+}
+
+__global__ void clearAccumulatorKernel(float4* acc, uint32_t* counts, int width, int height, float4 background)
+{
+    const int x = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
+    const int y = static_cast<int>(blockIdx.y * blockDim.y + threadIdx.y);
+    if (x >= width || y >= height) {
+        return;
+    }
+
+    const int idx = y * width + x;
+    acc[idx] = background;
+    counts[idx] = 0;
 }
 
 __global__ void copyToPboKernel(const float4* acc, uchar4* pbo, int width, int height, int stride)
@@ -131,6 +145,27 @@ bool checkLaunch(cudaError_t error)
 
 } // namespace
 
+bool pathTracerClearAccumulator(
+    float4* d_buffer,
+    uint32_t* d_samples,
+    int width,
+    int height,
+    float backgroundR,
+    float backgroundG,
+    float backgroundB,
+    cudaStream_t stream)
+{
+    if (d_buffer == nullptr || d_samples == nullptr || width <= 0 || height <= 0) {
+        return false;
+    }
+
+    const float4 background = make_float4(backgroundR, backgroundG, backgroundB, 1.0f);
+    const dim3 block(16, 16);
+    const dim3 grid = grid2d(width, height, block);
+    clearAccumulatorKernel<<<grid, block, 0, stream>>>(d_buffer, d_samples, width, height, background);
+    return checkLaunch(cudaSuccess);
+}
+
 bool pathTracerSample(
     float4* d_buffer,
     uint32_t* d_samples,
@@ -138,7 +173,7 @@ bool pathTracerSample(
     int height,
     int stride,
     const CameraGpu* d_camera,
-    const SdfSceneGpu* d_scene,
+    const SdfAccelSceneGpu* d_scene,
     const SdfMarchParamsGpu* d_marchParams,
     int visualMode,
     const uint32_t* sobolMatrices,

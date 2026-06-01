@@ -30,6 +30,12 @@ constexpr const char* kClearColorGreenKey = "clearColorGreen";
 constexpr const char* kClearColorBlueKey = "clearColorBlue";
 constexpr const char* kMaxSamplesPerPixelKey = "maxSamplesPerPixel";
 constexpr const char* kPreviewStepsPerLevelKey = "previewStepsPerLevel";
+constexpr const char* kAccelAabbColorRedKey = "accelAabbColorRed";
+constexpr const char* kAccelAabbColorGreenKey = "accelAabbColorGreen";
+constexpr const char* kAccelAabbColorBlueKey = "accelAabbColorBlue";
+constexpr const char* kAccelOctreeColorRedKey = "accelOctreeColorRed";
+constexpr const char* kAccelOctreeColorGreenKey = "accelOctreeColorGreen";
+constexpr const char* kAccelOctreeColorBlueKey = "accelOctreeColorBlue";
 
 bool isKnownDebounceElementId(const QString& elementId)
 {
@@ -166,6 +172,36 @@ void AppSettings::setPreviewStepsPerLevel(int value)
     save();
 }
 
+QColor AppSettings::accelAabbColor() const
+{
+    return m_accelAabbColor;
+}
+
+void AppSettings::setAccelAabbColor(const QColor& color)
+{
+    if (!color.isValid() || m_accelAabbColor == color) {
+        return;
+    }
+
+    m_accelAabbColor = color;
+    save();
+}
+
+QColor AppSettings::accelOctreeColor() const
+{
+    return m_accelOctreeColor;
+}
+
+void AppSettings::setAccelOctreeColor(const QColor& color)
+{
+    if (!color.isValid() || m_accelOctreeColor == color) {
+        return;
+    }
+
+    m_accelOctreeColor = color;
+    save();
+}
+
 int AppSettings::clampDebounceMs(int value)
 {
     if (value < kMinDebounceMs) {
@@ -275,6 +311,40 @@ void AppSettings::load()
             m_previewStepsPerLevel = clampPreviewStepsPerLevel(previewSteps);
         }
     }
+
+    auto loadColor = [&settings](const char* redKey, const char* greenKey, const char* blueKey, const QColor& fallback) {
+        const QVariant redValue = settings.value(redKey);
+        const QVariant greenValue = settings.value(greenKey);
+        const QVariant blueValue = settings.value(blueKey);
+        if (!redValue.isValid() || !greenValue.isValid() || !blueValue.isValid()) {
+            return fallback;
+        }
+
+        bool redOk = false;
+        bool greenOk = false;
+        bool blueOk = false;
+        const int red = redValue.toInt(&redOk);
+        const int green = greenValue.toInt(&greenOk);
+        const int blue = blueValue.toInt(&blueOk);
+        if (redOk && greenOk && blueOk
+            && red >= 0 && red <= 255
+            && green >= 0 && green <= 255
+            && blue >= 0 && blue <= 255) {
+            return QColor(red, green, blue);
+        }
+        return fallback;
+    };
+
+    m_accelAabbColor = loadColor(
+        kAccelAabbColorRedKey,
+        kAccelAabbColorGreenKey,
+        kAccelAabbColorBlueKey,
+        m_accelAabbColor);
+    m_accelOctreeColor = loadColor(
+        kAccelOctreeColorRedKey,
+        kAccelOctreeColorGreenKey,
+        kAccelOctreeColorBlueKey,
+        m_accelOctreeColor);
 }
 
 void AppSettings::save()
@@ -295,5 +365,11 @@ void AppSettings::save()
     settings.setValue(kClearColorBlueKey, m_clearColor.blue());
     settings.setValue(kMaxSamplesPerPixelKey, m_maxSamplesPerPixel);
     settings.setValue(kPreviewStepsPerLevelKey, m_previewStepsPerLevel);
+    settings.setValue(kAccelAabbColorRedKey, m_accelAabbColor.red());
+    settings.setValue(kAccelAabbColorGreenKey, m_accelAabbColor.green());
+    settings.setValue(kAccelAabbColorBlueKey, m_accelAabbColor.blue());
+    settings.setValue(kAccelOctreeColorRedKey, m_accelOctreeColor.red());
+    settings.setValue(kAccelOctreeColorGreenKey, m_accelOctreeColor.green());
+    settings.setValue(kAccelOctreeColorBlueKey, m_accelOctreeColor.blue());
     settings.sync();
 }

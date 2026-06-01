@@ -41,10 +41,10 @@ void main()
 )";
 
 constexpr float kQuadVertices[] = {
-    -1.0f, -1.0f, 0.0f, 0.0f,
-     1.0f, -1.0f, 1.0f, 0.0f,
-    -1.0f,  1.0f, 0.0f, 1.0f,
-     1.0f,  1.0f, 1.0f, 1.0f,
+    -1.0f, -1.0f, 0.0f, 1.0f,
+     1.0f, -1.0f, 1.0f, 1.0f,
+    -1.0f,  1.0f, 0.0f, 0.0f,
+     1.0f,  1.0f, 1.0f, 0.0f,
 };
 
 constexpr unsigned int kQuadIndices[] = {
@@ -67,6 +67,32 @@ std::pair<float, float> aspectFitNdcScale(int widgetW, int widgetH, int renderW,
         return {renderAspect / widgetAspect, 1.0f};
     }
     return {1.0f, widgetAspect / renderAspect};
+}
+
+void letterboxViewportRect(int widgetW, int widgetH, int renderW, int renderH, int& outX, int& outY, int& outW, int& outH)
+{
+    if (widgetW <= 0 || widgetH <= 0 || renderW <= 0 || renderH <= 0) {
+        outX = 0;
+        outY = 0;
+        outW = widgetW;
+        outH = widgetH;
+        return;
+    }
+
+    const float widgetAspect = static_cast<float>(widgetW) / static_cast<float>(widgetH);
+    const float renderAspect = static_cast<float>(renderW) / static_cast<float>(renderH);
+
+    if (widgetAspect > renderAspect) {
+        outH = widgetH;
+        outW = static_cast<int>(static_cast<float>(widgetH) * renderAspect + 0.5f);
+        outX = (widgetW - outW) / 2;
+        outY = 0;
+    } else {
+        outW = widgetW;
+        outH = static_cast<int>(static_cast<float>(widgetW) / renderAspect + 0.5f);
+        outX = 0;
+        outY = (widgetH - outH) / 2;
+    }
 }
 
 } // namespace
@@ -107,6 +133,10 @@ void OpenGLViewportWidget::setClearColor(const QColor& color)
     }
 
     m_clearColor = color;
+    m_pathTracer.setClearColor(color);
+    if (m_glInitialized && m_pathTracer.isRunning()) {
+        m_pathTracer.resetAccumulation();
+    }
     if (m_glInitialized) {
         update();
     }
@@ -162,6 +192,20 @@ void OpenGLViewportWidget::setSceneModel(SceneModel* model)
         update();
     });
 
+    connect(m_model, &SceneModel::boundsOverlayModeChanged, this, [this](SdfAccelBoundsOverlayMode) {
+        update();
+    });
+
+    connect(m_model, &SceneModel::accelAabbColorChanged, this, [this](const QColor&) {
+        rebuildBoundsOverlay();
+        update();
+    });
+
+    connect(m_model, &SceneModel::accelOctreeColorChanged, this, [this](const QColor&) {
+        rebuildBoundsOverlay();
+        update();
+    });
+
     if (m_glInitialized) {
         makeCurrent();
         recreateGpuBuffers();
@@ -205,6 +249,7 @@ void OpenGLViewportWidget::initializeGL()
 
     glBindVertexArray(0);
 
+    m_boundsOverlay.initialize(this);
     m_glInitialized = true;
 
     if (m_model != nullptr) {
@@ -238,28 +283,80 @@ void OpenGLViewportWidget::paintGL()
         if (m_pathTracer.publishDisplayFrame(slot)) {
             uploadDisplayTexture(slot, !m_textureAllocated);
             m_textureAllocated = true;
+            m_showDisplayTexture = true;
             m_displaySlot = 1 - slot;
         }
     }
 
-    if (!m_textureAllocated || m_texture == 0) {
+    if (m_showDisplayTexture && m_textureAllocated && m_texture != 0) {
+        glUseProgram(m_program);
+
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, m_texture);
+        glUniform1i(glGetUniformLocation(m_program, "uTexture"), 0);
+
+        const int renderW = m_model->renderSize().width();
+        const int renderH = m_model->renderSize().height();
+        const auto [sx, sy] = aspectFitNdcScale(width(), height(), renderW, renderH);
+        glUniform2f(glGetUniformLocation(m_program, "uQuadScale"), sx, sy);
+
+        glBindVertexArray(m_vao);
+        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, nullptr);
+        glBindVertexArray(0);
+    }
+
+    drawBoundsOverlay();
+}
+
+void OpenGLViewportWidget::rebuildBoundsOverlay()
+{
+    if (m_model == nullptr || !m_glInitialized) {
         return;
     }
 
-    glUseProgram(m_program);
+    m_pathTracer.rebuildAccelBoundsMesh(m_model->accelAabbColor(), m_model->accelOctreeColor());
+    m_boundsOverlay.rebuild(this, m_pathTracer.accelBoundsMesh());
+}
 
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, m_texture);
-    glUniform1i(glGetUniformLocation(m_program, "uTexture"), 0);
+void OpenGLViewportWidget::drawBoundsOverlay()
+{
+    if (m_model == nullptr || m_model->boundsOverlayMode() == SdfAccelBoundsOverlayMode::Off) {
+        return;
+    }
 
     const int renderW = m_model->renderSize().width();
     const int renderH = m_model->renderSize().height();
-    const auto [sx, sy] = aspectFitNdcScale(width(), height(), renderW, renderH);
-    glUniform2f(glGetUniformLocation(m_program, "uQuadScale"), sx, sy);
+    if (renderW <= 0 || renderH <= 0) {
+        return;
+    }
 
-    glBindVertexArray(m_vao);
-    glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, nullptr);
-    glBindVertexArray(0);
+    int viewportX = 0;
+    int viewportY = 0;
+    int viewportW = width();
+    int viewportH = height();
+    letterboxViewportRect(width(), height(), renderW, renderH, viewportX, viewportY, viewportW, viewportH);
+
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_LEQUAL);
+    glViewport(viewportX, viewportY, viewportW, viewportH);
+    glEnable(GL_SCISSOR_TEST);
+    glScissor(viewportX, viewportY, viewportW, viewportH);
+    glClear(GL_DEPTH_BUFFER_BIT);
+
+    const CameraGpu sampleCamera = m_pathTracer.lastSampleCamera();
+    const glm::mat4 viewProj =
+        Camera3D::projMatrixFromGpu(sampleCamera, renderW, renderH)
+        * Camera3D::viewMatrixFromGpu(sampleCamera);
+    m_boundsOverlay.draw(
+        this,
+        viewProj,
+        m_model->boundsOverlayMode(),
+        m_model->accelAabbColor(),
+        m_model->accelOctreeColor());
+
+    glDisable(GL_SCISSOR_TEST);
+    glDisable(GL_DEPTH_TEST);
+    glViewport(0, 0, width(), height());
 }
 
 void OpenGLViewportWidget::mousePressEvent(QMouseEvent* event)
@@ -281,7 +378,7 @@ void OpenGLViewportWidget::mouseMoveEvent(QMouseEvent* event)
     const QPoint delta = event->pos() - m_lastMousePos;
     m_lastMousePos = event->pos();
 
-    const float deltaYaw = static_cast<float>(delta.x()) * kMouseSensitivity;
+    const float deltaYaw = static_cast<float>(-delta.x()) * kMouseSensitivity;
     const float deltaPitch = static_cast<float>(-delta.y()) * kMouseSensitivity;
     m_camera.yawPitch(glm::radians(deltaYaw), glm::radians(deltaPitch));
     onCameraChanged();
@@ -351,6 +448,8 @@ void OpenGLViewportWidget::notifyIterationChanged()
 void OpenGLViewportWidget::restartRender()
 {
     m_renderPaused = false;
+    m_showDisplayTexture = false;
+    m_hasNewFrame.store(false);
     m_pathTracer.resetAccumulation();
     if (!m_pathTracer.isRunning()) {
         m_pathTracer.start();
@@ -388,6 +487,7 @@ void OpenGLViewportWidget::recreateGpuBuffers()
     m_hasNewFrame.store(false);
     m_frameCallbackQueued.store(false);
     m_displaySlot = 0;
+    m_showDisplayTexture = false;
 
     if (m_texture != 0) {
         glDeleteTextures(1, &m_texture);
@@ -421,6 +521,10 @@ void OpenGLViewportWidget::recreateGpuBuffers()
         AppLog::instance().error(QStringLiteral("PathTracer configure failed for %1x%2").arg(w).arg(h));
         return;
     }
+
+    m_pathTracer.setClearColor(m_clearColor);
+
+    rebuildBoundsOverlay();
 
     m_pathTracer.setMaxSamplesPerPixel(m_model->maxSamplesPerPixel());
     m_pathTracer.setPreviewStepsPerLevel(m_model->previewStepsPerLevel());
@@ -479,6 +583,7 @@ void OpenGLViewportWidget::uploadDisplayTexture(int slot, bool initialUpload)
 void OpenGLViewportWidget::releaseGlResources()
 {
     m_pathTracer.releaseOutputSurfaces();
+    m_boundsOverlay.release(this);
 
     if (m_texture != 0) {
         glDeleteTextures(1, &m_texture);

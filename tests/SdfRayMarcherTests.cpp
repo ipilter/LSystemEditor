@@ -205,16 +205,23 @@ void testMissRecordsSteps()
 
 void testStepsToHeatmapSanity()
 {
-    const SdfFloat3 low = stepsToHeatmap(1, 256, true);
-    const SdfFloat3 high = stepsToHeatmap(200, 256, true);
+    SdfMarchParamsGpu params{};
+    params.backgroundR = 0.25f;
+    params.backgroundG = 0.5f;
+    params.backgroundB = 0.75f;
+
+    const SdfFloat3 low = stepsToHeatmap(1, 256, true, &params);
+    const SdfFloat3 high = stepsToHeatmap(200, 256, true, &params);
     expectTrue(low.x < high.x || low.y < high.y, "StepsToHeatmapLowVsHigh");
 
-    const SdfFloat3 missNoSteps = stepsToHeatmap(0, 256, false);
-    const SdfFloat3 missWithSteps = stepsToHeatmap(32, 256, false);
-    expectTrue(missNoSteps.x < 0.1f && missNoSteps.y < 0.1f, "StepsToHeatmapMissBackground");
+    const SdfFloat3 missNoSteps = stepsToHeatmap(0, 256, false, &params);
+    const SdfFloat3 missWithSteps = stepsToHeatmap(32, 256, false, &params);
+    expectNear(missNoSteps.x, params.backgroundR, 1.0e-5f, "StepsToHeatmapMissBackgroundR");
+    expectNear(missNoSteps.y, params.backgroundG, 1.0e-5f, "StepsToHeatmapMissBackgroundG");
+    expectNear(missNoSteps.z, params.backgroundB, 1.0e-5f, "StepsToHeatmapMissBackgroundB");
     expectTrue(missWithSteps.x > missNoSteps.x || missWithSteps.y > missNoSteps.y, "StepsToHeatmapMissNearGeometry");
 
-    const SdfFloat3 normalColor = normalToColor(sdfMakeFloat3(0.0f, 1.0f, 0.0f), true);
+    const SdfFloat3 normalColor = normalToColor(sdfMakeFloat3(0.0f, 1.0f, 0.0f), true, &params);
     expectNear(normalColor.x, 0.5f, 1.0e-5f, "NormalToColorX");
     expectNear(normalColor.y, 1.0f, 1.0e-5f, "NormalToColorY");
     expectNear(normalColor.z, 0.5f, 1.0e-5f, "NormalToColorZ");

@@ -126,6 +126,27 @@ CameraGpu Camera3D::toGpu() const
     return gpu;
 }
 
+glm::mat4 Camera3D::viewMatrixFromGpu(const CameraGpu& camera)
+{
+    const glm::quat orientation(
+        camera.orientation.x,
+        camera.orientation.y,
+        camera.orientation.z,
+        camera.orientation.w);
+    const glm::vec3 position(camera.position.x, camera.position.y, camera.position.z);
+    const glm::vec3 forward = orientation * glm::vec3(0.0f, 0.0f, -1.0f);
+    const glm::vec3 up = orientation * glm::vec3(0.0f, 1.0f, 0.0f);
+    return glm::lookAt(position, position + forward, up);
+}
+
+glm::mat4 Camera3D::projMatrixFromGpu(const CameraGpu& camera, int imageW, int imageH)
+{
+    const float aspect = imageW > 0 && imageH > 0
+        ? static_cast<float>(imageW) / static_cast<float>(imageH)
+        : camera.aspect;
+    return glm::perspective(camera.fovY, aspect, camera.nearPlane, camera.farPlane);
+}
+
 void Camera3D::rebuildOrientation()
 {
     const glm::quat yawQuat = glm::angleAxis(m_yawRad, glm::vec3(0.0f, 1.0f, 0.0f));

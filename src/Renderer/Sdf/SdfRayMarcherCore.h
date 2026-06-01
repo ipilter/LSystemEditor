@@ -87,15 +87,23 @@ SDF_CORE_FN SdfHit sdfRayMarch(SdfFloat3 ro, SdfFloat3 rd, const SdfSceneGpu* sc
     return result;
 }
 
-SDF_CORE_FN SdfFloat3 sdfMissBackground()
+SDF_CORE_FN SdfFloat3 sdfMissBackground(const SdfMarchParamsGpu* params)
 {
-    return sdfMakeFloat3(0.02f, 0.02f, 0.05f);
+    if (params == nullptr) {
+        return sdfMakeFloat3(10.0f / 255.0f, 10.0f / 255.0f, 10.0f / 255.0f);
+    }
+
+    return sdfMakeFloat3(params->backgroundR, params->backgroundG, params->backgroundB);
 }
 
-SDF_CORE_FN SdfFloat3 stepsToHeatmap(int steps, int maxSteps)
+SDF_CORE_FN SdfFloat3 stepsToHeatmap(int steps, int maxSteps, bool hit, const SdfMarchParamsGpu* params)
 {
+    if (!hit && steps <= 0) {
+        return sdfMissBackground(params);
+    }
+
     if (maxSteps <= 0) {
-        return sdfMissBackground();
+        return sdfMissBackground(params);
     }
 
     const float u = sdfClamp(static_cast<float>(steps) / static_cast<float>(maxSteps), 0.0f, 1.0f);
@@ -105,19 +113,10 @@ SDF_CORE_FN SdfFloat3 stepsToHeatmap(int steps, int maxSteps)
     return sdfMakeFloat3(r, g, b);
 }
 
-SDF_CORE_FN SdfFloat3 stepsToHeatmap(int steps, int maxSteps, bool hit)
-{
-    if (!hit && steps <= 0) {
-        return sdfMissBackground();
-    }
-
-    return stepsToHeatmap(steps, maxSteps);
-}
-
-SDF_CORE_FN SdfFloat3 normalToColor(SdfFloat3 normal, bool hit)
+SDF_CORE_FN SdfFloat3 normalToColor(SdfFloat3 normal, bool hit, const SdfMarchParamsGpu* params)
 {
     if (!hit) {
-        return sdfMissBackground();
+        return sdfMissBackground(params);
     }
 
     return sdfMakeFloat3(
@@ -126,10 +125,10 @@ SDF_CORE_FN SdfFloat3 normalToColor(SdfFloat3 normal, bool hit)
         normal.z * 0.5f + 0.5f);
 }
 
-SDF_CORE_FN SdfFloat3 distanceToHeatmap(float t, float maxDist, bool hit)
+SDF_CORE_FN SdfFloat3 distanceToHeatmap(float t, float maxDist, bool hit, const SdfMarchParamsGpu* params)
 {
     if (!hit) {
-        return sdfMissBackground();
+        return sdfMissBackground(params);
     }
 
     const float u = sdfMin2(t / maxDist, 1.0f);

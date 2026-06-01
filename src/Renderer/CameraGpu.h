@@ -5,7 +5,7 @@
 struct CameraGpu
 {
     float3 position;
-    float4 orientation;
+    float4 orientation; // (w, x, y, z) stored in (.x, .y, .z, .w)
     float fovY;
     float aspect;
     float nearPlane;

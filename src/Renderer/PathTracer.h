@@ -2,7 +2,9 @@
 
 #include "CameraGpu.h"
 #include "Sdf/SdfTypes.h"
+#include "SdfAccel/SdfAccelBoundsMesh.h"
 
+#include <QColor>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -57,8 +59,15 @@ public:
 
     void setCamera(const CameraGpu& camera);
 
+    CameraGpu lastSampleCamera() const;
+
     void setVisualMode(SdfVisualMode mode);
     SdfVisualMode visualMode() const;
+
+    void setClearColor(const QColor& color);
+
+    void rebuildAccelBoundsMesh(const QColor& aabbColor, const QColor& octreeColor);
+    const SdfAccelBoundsMesh& accelBoundsMesh() const;
 
 private:
     void renderLoop();

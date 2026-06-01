@@ -8,6 +8,7 @@
 
 #include <QColorDialog>
 #include <QComboBox>
+#include <QDialog>
 #include <QPushButton>
 #include <QSpinBox>
 
@@ -27,7 +28,7 @@ SdfVisualMode visualModeFromComboIndex(int index)
     case 1:
         return SdfVisualMode::HitDistance;
     case 2:
-        return SdfVisualMode::Normals;
+        return SdfVisualMode::Shaded;
     case 0:
     default:
         return SdfVisualMode::StepCount;
@@ -39,9 +40,39 @@ int comboIndexFromVisualMode(SdfVisualMode mode)
     switch (mode) {
     case SdfVisualMode::HitDistance:
         return 1;
-    case SdfVisualMode::Normals:
+    case SdfVisualMode::Shaded:
         return 2;
     case SdfVisualMode::StepCount:
+    default:
+        return 0;
+    }
+}
+
+SdfAccelBoundsOverlayMode boundsOverlayModeFromComboIndex(int index)
+{
+    switch (index) {
+    case 1:
+        return SdfAccelBoundsOverlayMode::Aabb;
+    case 2:
+        return SdfAccelBoundsOverlayMode::Octree;
+    case 3:
+        return SdfAccelBoundsOverlayMode::Both;
+    case 0:
+    default:
+        return SdfAccelBoundsOverlayMode::Off;
+    }
+}
+
+int comboIndexFromBoundsOverlayMode(SdfAccelBoundsOverlayMode mode)
+{
+    switch (mode) {
+    case SdfAccelBoundsOverlayMode::Aabb:
+        return 1;
+    case SdfAccelBoundsOverlayMode::Octree:
+        return 2;
+    case SdfAccelBoundsOverlayMode::Both:
+        return 3;
+    case SdfAccelBoundsOverlayMode::Off:
     default:
         return 0;
     }
@@ -65,6 +96,7 @@ SceneController::SceneController(SceneModel* model, MainView* view, QObject* par
     syncMaxSamplesSpinBox();
     syncPreviewStepsSpinBox();
     syncSdfVisualModeComboBox();
+    syncBoundsOverlayComboBox();
 
     connect(m_view->colorButton(), &QPushButton::clicked, this, &SceneController::onColorButtonClicked);
     connect(m_model, &SceneModel::clearColorChanged, this, &SceneController::onClearColorChanged);
@@ -72,6 +104,9 @@ SceneController::SceneController(SceneModel* model, MainView* view, QObject* par
     connect(m_model, &SceneModel::maxSamplesPerPixelChanged, this, [this](int) { syncMaxSamplesSpinBox(); });
     connect(m_model, &SceneModel::previewStepsPerLevelChanged, this, [this](int) { syncPreviewStepsSpinBox(); });
     connect(m_model, &SceneModel::sdfVisualModeChanged, this, [this](SdfVisualMode) { syncSdfVisualModeComboBox(); });
+    connect(m_model, &SceneModel::boundsOverlayModeChanged, this, [this](SdfAccelBoundsOverlayMode) {
+        syncBoundsOverlayComboBox();
+    });
 
     connect(m_view->renderWidthSpinBox(), &QSpinBox::valueChanged, this, &SceneController::onRenderSizeSpinBoxChanged);
     connect(m_view->renderHeightSpinBox(), &QSpinBox::valueChanged, this, &SceneController::onRenderSizeSpinBoxChanged);
@@ -82,6 +117,11 @@ SceneController::SceneController(SceneModel* model, MainView* view, QObject* par
         QOverload<int>::of(&QComboBox::currentIndexChanged),
         this,
         &SceneController::onSdfVisualModeComboBoxChanged);
+    connect(
+        m_view->boundsOverlayComboBox(),
+        QOverload<int>::of(&QComboBox::currentIndexChanged),
+        this,
+        &SceneController::onBoundsOverlayComboBoxChanged);
     connect(&m_renderSizeDebounce, &DebounceTimer::triggered, this, &SceneController::applyRenderSizeFromSpinBoxes);
     connect(&m_maxSamplesDebounce, &DebounceTimer::triggered, this, &SceneController::applyMaxSamplesFromSpinBox);
     connect(&m_previewStepsDebounce, &DebounceTimer::triggered, this, &SceneController::applyPreviewStepsFromSpinBox);
@@ -160,6 +200,12 @@ void SceneController::onSdfVisualModeComboBoxChanged()
     m_model->setSdfVisualMode(visualModeFromComboIndex(m_view->sdfVisualModeComboBox()->currentIndex()));
 }
 
+void SceneController::onBoundsOverlayComboBoxChanged()
+{
+    m_model->setBoundsOverlayMode(
+        boundsOverlayModeFromComboIndex(m_view->boundsOverlayComboBox()->currentIndex()));
+}
+
 void SceneController::onStartButtonClicked()
 {
     m_view->setIteration(0);
@@ -174,7 +220,10 @@ void SceneController::onStopButtonClicked()
 void SceneController::onSettingsButtonClicked()
 {
     SettingsDialog dialog(m_view);
-    dialog.exec();
+    if (dialog.exec() == QDialog::Accepted) {
+        m_model->setAccelAabbColor(AppSettings::instance().accelAabbColor());
+        m_model->setAccelOctreeColor(AppSettings::instance().accelOctreeColor());
+    }
 }
 
 void SceneController::syncColorButtonStyle()
@@ -212,4 +261,12 @@ void SceneController::syncSdfVisualModeComboBox()
     m_view->sdfVisualModeComboBox()->blockSignals(true);
     m_view->sdfVisualModeComboBox()->setCurrentIndex(comboIndexFromVisualMode(m_model->sdfVisualMode()));
     m_view->sdfVisualModeComboBox()->blockSignals(false);
+}
+
+void SceneController::syncBoundsOverlayComboBox()
+{
+    m_view->boundsOverlayComboBox()->blockSignals(true);
+    m_view->boundsOverlayComboBox()->setCurrentIndex(
+        comboIndexFromBoundsOverlayMode(m_model->boundsOverlayMode()));
+    m_view->boundsOverlayComboBox()->blockSignals(false);
 }

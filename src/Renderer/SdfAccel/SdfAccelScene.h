@@ -32,6 +32,10 @@ public:
     const SdfAccelSceneGpu* deviceScene() const { return m_dScene; }
     const SdfAccelSceneGpu* hostScene() const { return m_built ? &m_hostScene : nullptr; }
 
+    bool isBuilt() const { return m_built; }
+    const std::vector<SdfAccelObjectGpu>& objectsHost() const { return m_objects; }
+    const std::vector<SdfOctreeNode>& octreeNodesHost() const { return m_octreeNodes; }
+
     float evalSDF(SdfFloat3 p) const;
     SdfHit rayMarch(SdfFloat3 ro, SdfFloat3 rd, const SdfMarchParamsGpu& params) const;
 

@@ -103,6 +103,7 @@ target_include_directories(pathtracer PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Sampling"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Sdf"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/SdfAccel"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/View"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Controller"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Model"

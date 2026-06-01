@@ -2,6 +2,7 @@
 
 #include "Camera3D.h"
 #include "PathTracer.h"
+#include "SdfAccelBoundsOverlay.h"
 
 #include <QColor>
 #include <QOpenGLFunctions_4_5_Core>
@@ -49,12 +50,15 @@ private:
     void releaseGlResources();
     void syncCameraToPathTracer();
     void onCameraChanged();
+    void rebuildBoundsOverlay();
+    void drawBoundsOverlay();
     GLuint compileShader(GLenum type, const char* source);
     GLuint linkProgram(GLuint vertexShader, GLuint fragmentShader);
 
     SceneModel* m_model = nullptr;
     PathTracer m_pathTracer;
     Camera3D m_camera;
+    SdfAccelBoundsOverlay m_boundsOverlay;
 
     QColor m_clearColor;
     bool m_looking = false;
@@ -70,6 +74,7 @@ private:
     bool m_textureAllocated = false;
     int m_displaySlot = 0;
     bool m_renderPaused = false;
+    bool m_showDisplayTexture = false;
 
     std::atomic<bool> m_hasNewFrame{false};
     std::atomic<bool> m_frameCallbackQueued{false};

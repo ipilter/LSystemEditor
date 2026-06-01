@@ -19,6 +19,8 @@ SceneModel::SceneModel(QObject* parent)
     , m_renderSize(AppSettings::instance().renderSize())
     , m_maxSamplesPerPixel(AppSettings::instance().maxSamplesPerPixel())
     , m_previewStepsPerLevel(AppSettings::instance().previewStepsPerLevel())
+    , m_accelAabbColor(AppSettings::instance().accelAabbColor())
+    , m_accelOctreeColor(AppSettings::instance().accelOctreeColor())
 {
 }
 
@@ -111,6 +113,54 @@ void SceneModel::setSdfVisualMode(SdfVisualMode mode)
     emit sdfVisualModeChanged(m_sdfVisualMode);
 }
 
+SdfAccelBoundsOverlayMode SceneModel::boundsOverlayMode() const
+{
+    return m_boundsOverlayMode;
+}
+
+void SceneModel::setBoundsOverlayMode(SdfAccelBoundsOverlayMode mode)
+{
+    const SdfAccelBoundsOverlayMode clamped = clampBoundsOverlayMode(mode);
+    if (m_boundsOverlayMode == clamped) {
+        return;
+    }
+
+    m_boundsOverlayMode = clamped;
+    emit boundsOverlayModeChanged(m_boundsOverlayMode);
+}
+
+QColor SceneModel::accelAabbColor() const
+{
+    return m_accelAabbColor;
+}
+
+void SceneModel::setAccelAabbColor(const QColor& color)
+{
+    if (!color.isValid() || m_accelAabbColor == color) {
+        return;
+    }
+
+    m_accelAabbColor = color;
+    AppSettings::instance().setAccelAabbColor(color);
+    emit accelAabbColorChanged(m_accelAabbColor);
+}
+
+QColor SceneModel::accelOctreeColor() const
+{
+    return m_accelOctreeColor;
+}
+
+void SceneModel::setAccelOctreeColor(const QColor& color)
+{
+    if (!color.isValid() || m_accelOctreeColor == color) {
+        return;
+    }
+
+    m_accelOctreeColor = color;
+    AppSettings::instance().setAccelOctreeColor(color);
+    emit accelOctreeColorChanged(m_accelOctreeColor);
+}
+
 GLuint SceneModel::pboId(int index) const
 {
     if (index < 0 || index >= bufferCount) {
@@ -163,9 +213,22 @@ SdfVisualMode SceneModel::clampVisualMode(SdfVisualMode mode)
     switch (mode) {
     case SdfVisualMode::StepCount:
     case SdfVisualMode::HitDistance:
-    case SdfVisualMode::Normals:
+    case SdfVisualMode::Shaded:
         return mode;
     default:
         return SdfVisualMode::StepCount;
+    }
+}
+
+SdfAccelBoundsOverlayMode SceneModel::clampBoundsOverlayMode(SdfAccelBoundsOverlayMode mode)
+{
+    switch (mode) {
+    case SdfAccelBoundsOverlayMode::Off:
+    case SdfAccelBoundsOverlayMode::Aabb:
+    case SdfAccelBoundsOverlayMode::Octree:
+    case SdfAccelBoundsOverlayMode::Both:
+        return mode;
+    default:
+        return SdfAccelBoundsOverlayMode::Off;
     }
 }
