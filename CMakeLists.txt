@@ -66,8 +66,14 @@ set(PATHTRACER_SAMPLING_SOURCES
 set(PATHTRACER_SDF_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Sdf/SdfRayMarcher.cpp")
 
+set(PATHTRACER_SDF_ACCEL_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/SdfAccel/SdfOctreeBuilder.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/SdfAccel/SdfBvhBuilder.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/SdfAccel/SdfAccelScene.cpp")
+
 list(FILTER PATHTRACER_SOURCES EXCLUDE REGEX ".*/Renderer/Sampling/(SobolDirectionData|SobolTables|QmcGpuResources)\\.cpp$")
 list(FILTER PATHTRACER_SOURCES EXCLUDE REGEX ".*/Renderer/Sdf/SdfRayMarcher\\.cpp$")
+list(FILTER PATHTRACER_SOURCES EXCLUDE REGEX ".*/Renderer/SdfAccel/(SdfOctreeBuilder|SdfBvhBuilder|SdfAccelScene)\\.cpp$")
 
 add_library(pathtracer_sampling STATIC ${PATHTRACER_SAMPLING_SOURCES})
 target_include_directories(pathtracer_sampling PUBLIC
@@ -83,6 +89,14 @@ target_include_directories(pathtracer_sdf PUBLIC
 target_link_libraries(pathtracer_sdf PUBLIC CUDA::cudart)
 set_target_properties(pathtracer_sdf PROPERTIES FOLDER "src")
 
+add_library(pathtracer_sdf_accel STATIC ${PATHTRACER_SDF_ACCEL_SOURCES})
+target_include_directories(pathtracer_sdf_accel PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/SdfAccel"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Sdf")
+target_link_libraries(pathtracer_sdf_accel PUBLIC CUDA::cudart)
+set_target_properties(pathtracer_sdf_accel PROPERTIES FOLDER "src")
+
 add_executable(pathtracer WIN32 ${PATHTRACER_SOURCES})
 target_include_directories(pathtracer PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Application"
@@ -93,7 +107,7 @@ target_include_directories(pathtracer PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Controller"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Model"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Sdf")
-target_link_libraries(pathtracer PRIVATE pathtracer_sampling pathtracer_sdf Qt6::Widgets Qt6::OpenGL Qt6::OpenGLWidgets CUDA::cudart glm::glm)
+target_link_libraries(pathtracer PRIVATE pathtracer_sampling pathtracer_sdf pathtracer_sdf_accel Qt6::Widgets Qt6::OpenGL Qt6::OpenGLWidgets CUDA::cudart glm::glm)
 set_target_properties(pathtracer PROPERTIES
     OUTPUT_NAME pathtracer
     AUTOMOC ON
@@ -153,3 +167,13 @@ target_include_directories(sdf_raymarcher_tests PRIVATE
 set_target_properties(sdf_raymarcher_tests PROPERTIES FOLDER "tests")
 
 add_test(NAME SdfRayMarcher COMMAND sdf_raymarcher_tests)
+
+add_executable(sdf_accel_tests tests/SdfAccelTests.cpp)
+target_link_libraries(sdf_accel_tests PRIVATE pathtracer_sdf_accel pathtracer_sdf)
+target_include_directories(sdf_accel_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/SdfAccel"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Sdf"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests")
+set_target_properties(sdf_accel_tests PROPERTIES FOLDER "tests")
+
+add_test(NAME SdfAccel COMMAND sdf_accel_tests)
