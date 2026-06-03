@@ -5,6 +5,35 @@
 #include "Sdf/SdfMathCore.h"
 #include "Sdf/SdfPrimitiveType.h"
 
+SDF_ACCEL_CORE_FN bool sdfAccelPayloadIsAnalytical(const SdfAccelPayloadGpu* payload)
+{
+    if (payload == nullptr) {
+        return false;
+    }
+
+    switch (static_cast<SdfPrimitiveType>(payload->type)) {
+    case SdfPrimitiveType::Sphere:
+    case SdfPrimitiveType::Cylinder:
+    case SdfPrimitiveType::CappedCone:
+        return true;
+    default:
+        return false;
+    }
+}
+
+SDF_ACCEL_CORE_FN bool sdfAccelObjectIsAnalytical(
+    const SdfAccelObjectGpu* object,
+    const SdfAccelPayloadGpu* payloads)
+{
+    if (object == nullptr) {
+        return false;
+    }
+    if ((object->flags & SdfObjectFlagAnalytical) != 0) {
+        return true;
+    }
+    return payloads != nullptr && sdfAccelPayloadIsAnalytical(&payloads[object->payloadIndex]);
+}
+
 SDF_ACCEL_CORE_FN float sdfAccelEvalPayloadWorld(
     SdfFloat3 worldP,
     SdfFloat3 objectCenter,
@@ -27,88 +56,22 @@ SDF_ACCEL_CORE_FN float sdfAccelEvalPayloadWorld(
     }
 }
 
-SDF_ACCEL_CORE_FN int sdfAccelPopCountMaskBelow(uint8_t childMask, int octant)
-{
-    int count = 0;
-    for (int i = 0; i < octant; ++i) {
-        if ((childMask & (1 << i)) != 0) {
-            ++count;
-        }
-    }
-    return count;
-}
-
-SDF_ACCEL_CORE_FN bool sdfAccelOctreeDescendToLeaf(
-    SdfFloat3 localP,
-    const SdfOctreeNode* nodes,
-    uint32_t nodeIndex,
-    uint32_t* outLeafIndex)
-{
-    if (nodes == nullptr || outLeafIndex == nullptr) {
-        return false;
-    }
-
-    uint32_t current = nodeIndex;
-    while (true) {
-        const SdfOctreeNode& node = nodes[current];
-        if (node.firstChildIndex == 0) {
-            *outLeafIndex = current;
-            return true;
-        }
-
-        const uint8_t childMask = sdfAccelChildMaskFromPacked(node.childMaskAndFlags);
-        const int octant = sdfAccelOctantIndex(localP, node.center);
-        if ((childMask & (1 << octant)) == 0) {
-            return false;
-        }
-
-        const int childOffset = sdfAccelPopCountMaskBelow(childMask, octant);
-        current = node.firstChildIndex + static_cast<uint32_t>(childOffset);
-    }
-}
-
 SDF_ACCEL_CORE_FN float sdfAccelObjectConservativeMin(
     SdfFloat3 worldP,
     const SdfAccelObjectGpu* object,
-    const SdfOctreeNode* octreeNodes)
+    const SdfAccelPayloadGpu* payloads)
 {
-    if (object == nullptr || octreeNodes == nullptr) {
+    if (object == nullptr) {
         return 1.0e20f;
     }
 
-    const SdfFloat3 localP = sdfSub3(worldP, object->center);
-    const uint32_t rootIndex = object->octreeNodeOffset + object->octreeRootIndex;
-
-    uint32_t leafIndex = 0;
-    if (!sdfAccelOctreeDescendToLeaf(localP, octreeNodes, rootIndex, &leafIndex)) {
-        return sdfAccelPointAabbDistance(worldP, object->boundsMin, object->boundsMax);
+    if (sdfAccelObjectIsAnalytical(object, payloads)) {
+        return payloads != nullptr
+            ? sdfAccelEvalPayloadWorld(worldP, object->center, &payloads[object->payloadIndex])
+            : 1.0e20f;
     }
 
-    const SdfOctreeNode& leaf = octreeNodes[leafIndex];
-    const uint8_t flags = sdfAccelFlagsFromPacked(leaf.childMaskAndFlags);
-    const SdfAccelAabb leafAabb = sdfAccelAabbFromCenterHalfExtent(leaf.center, leaf.halfExtent);
-    const bool intervalStraddles = leaf.dMin <= 0.0f && leaf.dMax >= 0.0f;
-    const bool straddlesSurface =
-        (flags & SdfOctreeFlagStraddlesSurface) != 0 || intervalStraddles;
-
-    if (!sdfAccelPointInAabb(localP, leafAabb.min, leafAabb.max)) {
-        const float aabbDist = sdfAccelPointAabbDistance(localP, leafAabb.min, leafAabb.max);
-        return sdfMax2(leaf.dMin, aabbDist);
-    }
-
-    if (straddlesSurface) {
-        return sdfMin2(leaf.dMin, 0.0f);
-    }
-
-    if ((flags & SdfOctreeFlagInsideSolid) != 0 && leaf.dMax < 0.0f) {
-        return 0.0f;
-    }
-
-    if (leaf.dMin > 0.0f) {
-        return leaf.dMin;
-    }
-
-    return leaf.dMin;
+    return sdfAccelPointAabbDistance(worldP, object->boundsMin, object->boundsMax);
 }
 
 SDF_ACCEL_CORE_FN float sdfAccelObjectSDF(
@@ -123,7 +86,7 @@ SDF_ACCEL_CORE_FN float sdfAccelObjectSDF(
     return sdfAccelEvalPayloadWorld(worldP, object->center, &payloads[object->payloadIndex]);
 }
 
-SDF_ACCEL_CORE_FN void sdfAccelBvhQueryPoint(
+SDF_ACCEL_CORE_FN void sdfAccelBvhQueryPointExact(
     SdfFloat3 worldP,
     float* bestDistance,
     const SdfBvhNode* bvhNodes,
@@ -148,18 +111,80 @@ SDF_ACCEL_CORE_FN void sdfAccelBvhQueryPoint(
         return;
     }
 
-    sdfAccelBvhQueryPoint(worldP, bestDistance, bvhNodes, node.leftIndex, objects, payloads);
-    sdfAccelBvhQueryPoint(worldP, bestDistance, bvhNodes, node.rightIndex, objects, payloads);
+    sdfAccelBvhQueryPointExact(worldP, bestDistance, bvhNodes, node.leftIndex, objects, payloads);
+    sdfAccelBvhQueryPointExact(worldP, bestDistance, bvhNodes, node.rightIndex, objects, payloads);
 }
 
-SDF_ACCEL_CORE_FN float sdfAccelSceneSDF(SdfFloat3 worldP, const SdfAccelSceneGpu* scene)
+SDF_ACCEL_CORE_FN void sdfAccelBvhQueryPointConservative(
+    SdfFloat3 worldP,
+    float* bestDistance,
+    const SdfBvhNode* bvhNodes,
+    uint32_t nodeIndex,
+    const SdfAccelObjectGpu* objects,
+    const SdfAccelPayloadGpu* payloads)
+{
+    if (bvhNodes == nullptr || bestDistance == nullptr || objects == nullptr || payloads == nullptr) {
+        return;
+    }
+
+    const SdfBvhNode& node = bvhNodes[nodeIndex];
+    const float aabbDist = sdfAccelPointAabbDistance(worldP, node.boundsMin, node.boundsMax);
+    if (aabbDist >= *bestDistance) {
+        return;
+    }
+
+    if ((node.flags & SdfBvhFlagLeaf) != 0) {
+        const SdfAccelObjectGpu& object = objects[node.objectIndex];
+        const float conservative = sdfAccelObjectConservativeMin(worldP, &object, payloads);
+        *bestDistance = sdfMin2(*bestDistance, conservative);
+        return;
+    }
+
+    sdfAccelBvhQueryPointConservative(
+        worldP, bestDistance, bvhNodes, node.leftIndex, objects, payloads);
+    sdfAccelBvhQueryPointConservative(
+        worldP, bestDistance, bvhNodes, node.rightIndex, objects, payloads);
+}
+
+SDF_ACCEL_CORE_FN float sdfAccelSceneSDFBrute(SdfFloat3 worldP, const SdfAccelSceneGpu* scene)
+{
+    if (scene == nullptr || scene->objectCount == 0 || scene->objects == nullptr || scene->payloads == nullptr) {
+        return 1.0e20f;
+    }
+
+    float best = 1.0e20f;
+    for (uint32_t i = 0; i < scene->objectCount; ++i) {
+        const float d = sdfAccelObjectSDF(worldP, &scene->objects[i], scene->payloads);
+        best = sdfMin2(best, d);
+    }
+    return best;
+}
+
+SDF_ACCEL_CORE_FN float sdfAccelSceneSDFExact(SdfFloat3 worldP, const SdfAccelSceneGpu* scene)
 {
     if (scene == nullptr || scene->objectCount == 0 || scene->bvhNodeCount == 0) {
         return 1.0e20f;
     }
 
     float best = 1.0e20f;
-    sdfAccelBvhQueryPoint(
+    sdfAccelBvhQueryPointExact(
+        worldP,
+        &best,
+        scene->bvhNodes,
+        scene->bvhRootIndex,
+        scene->objects,
+        scene->payloads);
+    return best;
+}
+
+SDF_ACCEL_CORE_FN float sdfAccelSceneSDFConservative(SdfFloat3 worldP, const SdfAccelSceneGpu* scene)
+{
+    if (scene == nullptr || scene->objectCount == 0 || scene->bvhNodeCount == 0) {
+        return 1.0e20f;
+    }
+
+    float best = 1.0e20f;
+    sdfAccelBvhQueryPointConservative(
         worldP,
         &best,
         scene->bvhNodes,

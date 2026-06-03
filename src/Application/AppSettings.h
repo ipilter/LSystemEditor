@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Sdf/SdfTypes.h"
+
 #include <QColor>
 #include <QHash>
 #include <QObject>
@@ -41,14 +43,11 @@ public:
     int previewStepsPerLevel() const;
     void setPreviewStepsPerLevel(int value);
 
-    QColor accelAabbColor() const;
-    void setAccelAabbColor(const QColor& color);
+    QColor accelBvhColor() const;
+    void setAccelBvhColor(const QColor& color);
 
-    QColor accelOctreeColor() const;
-    void setAccelOctreeColor(const QColor& color);
-
-    int octreeMaxDepth() const;
-    void setOctreeMaxDepth(int value);
+    SdfTraversalMode sdfTraversalMode() const;
+    void setSdfTraversalMode(SdfTraversalMode mode);
 
     void load();
     void save();
@@ -61,7 +60,7 @@ private:
     static int clampRenderDimension(int value);
     static int clampMaxSamplesPerPixel(int value);
     static int clampPreviewStepsPerLevel(int value);
-    static int clampOctreeMaxDepth(int value);
+    static SdfTraversalMode clampSdfTraversalMode(SdfTraversalMode mode);
     void seedDefaultDebounceValues();
 
     static AppSettings* s_instance;
@@ -71,7 +70,6 @@ private:
     QColor m_clearColor = QColor(10, 10, 10);
     int m_maxSamplesPerPixel = 1024;
     int m_previewStepsPerLevel = 0;
-    QColor m_accelAabbColor = QColor(0, 200, 80);
-    QColor m_accelOctreeColor = QColor(230, 200, 0);
-    int m_octreeMaxDepth = 5;
+    QColor m_accelBvhColor = QColor(230, 200, 0);
+    SdfTraversalMode m_sdfTraversalMode = SdfTraversalMode::BvhAccel;
 };

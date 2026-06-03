@@ -72,13 +72,13 @@ public:
     void setVisualMode(SdfDebugVisualMode mode);
     SdfDebugVisualMode visualMode() const;
 
+    void setSdfTraversalMode(SdfTraversalMode mode);
+    SdfTraversalMode sdfTraversalMode() const;
+
     void setClearColor(const QColor& color);
 
-    void rebuildAccelBoundsMesh(const QColor& aabbColor, const QColor& octreeColor);
+    void rebuildAccelBoundsMesh(const QColor& boundsColor);
     const SdfAccelBoundsMesh& accelBoundsMesh() const;
-
-    void setOctreeMaxDepth(int depth);
-    int octreeMaxDepth() const;
 
     bool rebuildAccelScene(const std::vector<std::unique_ptr<SdfShape>>& shapes);
 

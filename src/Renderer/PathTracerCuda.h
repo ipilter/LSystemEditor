@@ -20,6 +20,16 @@ bool pathTracerClearAccumulator(
     float backgroundB,
     cudaStream_t stream);
 
+bool pathTracerInitRaySortBuffers(
+    uint32_t** keys,
+    uint32_t** indices,
+    int* pixelCount,
+    int width,
+    int height,
+    cudaStream_t stream);
+
+bool pathTracerFreeRaySortBuffers(uint32_t** keys, uint32_t** indices, int* pixelCount);
+
 bool pathTracerSample(
     float4* d_buffer,
     uint32_t* d_samples,
@@ -30,9 +40,13 @@ bool pathTracerSample(
     const SdfAccelSceneGpu* d_scene,
     const SdfMarchParamsGpu* d_marchParams,
     int visualMode,
+    int sdfTraversalMode,
     const uint32_t* sobolMatrices,
     const unsigned int* pixelScramble,
     int sobolDimensionCount,
+    int enableRaySort,
+    uint32_t* d_raySortKeys,
+    uint32_t* d_raySortIndices,
     cudaStream_t stream);
 
 bool pathTracerCopyToPbo(

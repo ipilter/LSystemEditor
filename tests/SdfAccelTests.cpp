@@ -27,15 +27,11 @@ std::vector<std::unique_ptr<SdfShape>> makeSingleShape(std::unique_ptr<SdfShape>
 
 void testGpuStructLayout()
 {
-    expectTrue(sizeof(SdfOctreeNode) == 48, "SdfOctreeNodeSize");
     expectTrue(sizeof(SdfAccelObjectGpu) == 64, "SdfAccelObjectGpuSize");
     expectTrue(sizeof(SdfAccelPayloadGpu) == 48, "SdfAccelPayloadGpuSize");
     expectTrue(sizeof(SdfBvhNode) == 48, "SdfBvhNodeSize");
     expectTrue(sizeof(SdfAccelSceneGpu) == 64, "SdfAccelSceneGpuSize");
 
-    expectTrue(offsetof(SdfOctreeNode, dMin) == 8, "SdfOctreeNodeDMinOffset");
-    expectTrue(offsetof(SdfOctreeNode, center) == 16, "SdfOctreeNodeCenterOffset");
-    expectTrue(offsetof(SdfOctreeNode, halfExtent) == 28, "SdfOctreeNodeHalfExtentOffset");
     expectTrue(offsetof(SdfAccelObjectGpu, center) == 16, "SdfAccelObjectCenterOffset");
     expectTrue(offsetof(SdfBvhNode, leftIndex) == 32, "SdfBvhNodeLeftIndexOffset");
 }
@@ -122,6 +118,110 @@ void testRayMarchParity()
     }
 }
 
+void testConservativeLowerBound()
+{
+    auto shapes = sdfDefaultSceneShapes();
+    SdfAccelScene scene;
+    sdfAccelPopulateScene(scene, shapes);
+    expectTrue(scene.build(), "ConservativeLowerBoundBuild");
+
+    std::mt19937 rng(0xC0FFEE01u);
+    std::uniform_real_distribution<float> dist(-4.0f, 4.0f);
+    for (int i = 0; i < 500; ++i) {
+        const SdfFloat3 p = sdfMakeFloat3(dist(rng), dist(rng), dist(rng));
+        const float exact = accelSceneEvalSDF(scene, p);
+        const float conservative = accelSceneEvalSDFConservative(scene, p);
+        if (exact > 0.0f) {
+            expectTrue(conservative <= exact + 1.0e-4f, "ConservativeLowerBoundDefault");
+        }
+    }
+
+    auto thinShapes = makeSingleShape(
+        std::make_unique<CylinderSdf>(sdfMakeFloat3(0.0f, 0.0f, 0.0f), sdfMakeFloat2(0.02f, 5.0f)));
+    SdfAccelScene thinScene;
+    sdfAccelPopulateScene(thinScene, thinShapes);
+    expectTrue(thinScene.build(), "ConservativeLowerBoundThinBuild");
+
+    std::mt19937 thinRng(0x71110001u);
+    std::uniform_real_distribution<float> thinDist(-5.0f, 5.0f);
+    for (int i = 0; i < 300; ++i) {
+        const SdfFloat3 p = sdfMakeFloat3(thinDist(thinRng), thinDist(thinRng), thinDist(thinRng));
+        const float exact = accelSceneEvalSDF(thinScene, p);
+        const float conservative = accelSceneEvalSDFConservative(thinScene, p);
+        if (exact > 0.0f) {
+            expectTrue(conservative <= exact + 1.0e-4f, "ConservativeLowerBoundThin");
+        }
+    }
+}
+
+void testStraddleConservativeOpenSpace()
+{
+    auto shapes = makeSingleShape(std::make_unique<SphereSdf>(sdfMakeFloat3(0.0f, 0.0f, 0.0f), 0.5f));
+    SdfAccelScene scene;
+    sdfAccelPopulateScene(scene, shapes);
+    expectTrue(scene.build(), "StraddleConservativeBuild");
+
+    const SdfFloat3 openPoint = sdfMakeFloat3(0.4f, 0.4f, 0.4f);
+    const float exact = accelSceneEvalSDF(scene, openPoint);
+    const float conservative = accelSceneEvalSDFConservative(scene, openPoint);
+    expectTrue(exact > 0.1f, "StraddleConservativeExactPositive");
+    expectTrue(conservative <= exact + 1.0e-4f, "StraddleConservativeLowerBound");
+    expectTrue(conservative > 1.0e-3f, "StraddleConservativeNotEpsilonCrawl");
+}
+
+void testAnalyticalObjectsFlagged()
+{
+    auto shapes = makeSingleShape(std::make_unique<SphereSdf>(sdfMakeFloat3(0.0f, 0.0f, 0.0f), 0.5f));
+    SdfAccelScene scene;
+    sdfAccelPopulateScene(scene, shapes);
+    expectTrue(scene.build(), "AnalyticalObjectsBuild");
+    expectTrue((scene.objectsHost()[0].flags & SdfObjectFlagAnalytical) != 0, "AnalyticalFlagSet");
+}
+
+void testBvhBuiltForScene()
+{
+    auto shapes = sdfDefaultSceneShapes();
+    SdfAccelScene scene;
+    sdfAccelPopulateScene(scene, shapes);
+    expectTrue(scene.build(), "BvhBuiltBuild");
+
+    const SdfAccelSceneGpu* hostScene = scene.hostScene();
+    expectTrue(hostScene != nullptr, "BvhBuiltHostScene");
+    expectTrue(hostScene->bvhNodeCount > 0, "BvhBuiltNodeCount");
+    expectTrue(hostScene->bvhRootIndex < hostScene->bvhNodeCount, "BvhBuiltValidRoot");
+    expectTrue(!scene.bvhNodesHost().empty(), "BvhBuiltHostVector");
+}
+
+void testAccelBruteMarchParity()
+{
+    auto shapes = sdfDefaultSceneShapes();
+    SdfAccelScene accelScene;
+    sdfAccelPopulateScene(accelScene, shapes);
+    expectTrue(accelScene.build(), "AccelBruteMarchParityBuild");
+
+    const SdfMarchParamsGpu params = defaultMarchParams();
+
+    struct Case
+    {
+        SdfFloat3 ro;
+        SdfFloat3 rd;
+        const char* name;
+    };
+
+    const Case cases[] = {
+        {sdfMakeFloat3(-8.0f, 0.0f, 0.0f), sdfMakeFloat3(1.0f, 0.0f, 0.0f), "AccelBruteSphereSide"},
+        {sdfMakeFloat3(0.0f, 5.0f, 0.0f), sdfMakeFloat3(0.0f, -1.0f, 0.0f), "AccelBruteSphereTop"},
+    };
+
+    for (const Case& testCase : cases) {
+        const SdfHit bvhHit = accelSceneRayMarch(accelScene, testCase.ro, testCase.rd, params);
+        const SdfHit bruteMarchHit = accelSceneRayMarchBrute(accelScene, testCase.ro, testCase.rd, params);
+        expectTrue(bvhHit.hit, testCase.name);
+        expectTrue(bruteMarchHit.hit, testCase.name);
+        expectNear(bvhHit.t, bruteMarchHit.t, 1.0e-2f, testCase.name);
+    }
+}
+
 void testThinCylinderCoverage()
 {
     const SdfFloat2 halfExtents = sdfMakeFloat2(0.02f, 5.0f);
@@ -192,125 +292,19 @@ void testTightBoundsNoPad()
     expectNear(object.boundsMax.x, 0.02f, 1.0e-5f, "TightBoundsMaxX");
     expectNear(object.boundsMin.y, -5.0f, 1.0e-5f, "TightBoundsMinY");
     expectNear(object.boundsMax.y, 5.0f, 1.0e-5f, "TightBoundsMaxY");
-
-    const SdfOctreeNode& root = hostScene->octreeNodes[object.octreeRootIndex];
-    expectNear(root.halfExtent.x, 0.02f + buildParams.boundsPadding, 1.0e-4f, "TightRootHalfX");
-    expectNear(root.halfExtent.y, 5.0f + buildParams.boundsPadding, 1.0e-4f, "TightRootHalfY");
-    expectNear(root.halfExtent.z, 0.02f + buildParams.boundsPadding, 1.0e-4f, "TightRootHalfZ");
 }
 
-void testNoFalsePrune()
+void testBvhBoundsMeshNonEmpty()
 {
-    auto shapes = makeSingleShape(
-        std::make_unique<CylinderSdf>(sdfMakeFloat3(0.0f, 0.0f, 0.0f), sdfMakeFloat2(0.02f, 5.0f)));
-
-    SdfAccelScene scene;
-    sdfAccelPopulateScene(scene, shapes);
-    expectTrue(scene.build(), "NoFalsePruneBuild");
-
-    const SdfAccelSceneGpu* hostScene = scene.hostScene();
-    expectTrue(hostScene != nullptr && hostScene->objectCount == 1, "NoFalsePruneHostScene");
-    const SdfAccelObjectGpu& object = hostScene->objects[0];
-    const uint32_t rootIndex = object.octreeNodeOffset + object.octreeRootIndex;
-
-    for (float y = -5.0f; y <= 5.0f; y += 0.1f) {
-        for (float a = 0.0f; a <= 6.28318f; a += 0.15f) {
-            const SdfFloat3 worldP = sdfMakeFloat3(0.02f * cosf(a), y, 0.02f * sinf(a));
-            const SdfFloat3 localP = sdfSub3(worldP, object.center);
-            const float d = sdCylinder(localP, sdfMakeFloat2(0.02f, 5.0f));
-            if (std::abs(d) < 0.1f) {
-                expectTrue(
-                    octreeDescentOk(localP, hostScene->octreeNodes, rootIndex),
-                    "NoFalsePruneNearSurfacePath");
-            }
-        }
-    }
-}
-
-void testOctreeDepthCap()
-{
-    SdfAccelBuildParams buildParams{};
-    buildParams.maxDepth = 4;
-
-    auto shapes = makeSingleShape(
-        std::make_unique<CylinderSdf>(sdfMakeFloat3(0.0f, 0.0f, 0.0f), sdfMakeFloat2(0.02f, 5.0f)));
-
-    SdfAccelScene scene;
-    scene.setBuildParams(buildParams);
-    sdfAccelPopulateScene(scene, shapes);
-    expectTrue(scene.build(), "OctreeDepthCapBuild");
-
-    const SdfAccelSceneGpu* hostScene = scene.hostScene();
-    expectTrue(hostScene != nullptr, "OctreeDepthCapHostScene");
-    expectTrue(hostScene->octreeNodeCount < 5000, "OctreeDepthCapNodeCount");
-
-    const SdfOctreeNode& root = hostScene->octreeNodes[hostScene->objects[0].octreeRootIndex];
-    const float minNodeSize = sdfAccelAutoMinNodeSize(root.halfExtent, buildParams.maxDepth);
-    expectTrue(minNodeSize > 0.0f, "OctreeAutoMinNodeSize");
-}
-
-void testOctreeExteriorMeshCoarsestShell()
-{
-    SdfAccelBuildParams buildParams{};
-    buildParams.maxDepth = 7;
-
     auto shapes = makeSingleShape(std::make_unique<SphereSdf>(sdfMakeFloat3(0.0f, 0.0f, 0.0f), 1.0f));
 
     SdfAccelScene scene;
-    scene.setBuildParams(buildParams);
     sdfAccelPopulateScene(scene, shapes);
-    expectTrue(scene.build(), "OctreeExteriorMeshBuild");
+    expectTrue(scene.build(), "BvhBoundsMeshBuild");
 
     constexpr size_t kWireframeVerticesPerBox = 24;
-    const SdfAccelBoundsMesh mesh =
-        sdfAccelBuildBoundsMesh(scene, QColor(Qt::white), QColor(Qt::yellow));
-    expectTrue(
-        mesh.octreeExteriorLines.size() == kWireframeVerticesPerBox,
-        "OctreeExteriorMeshSingleBox");
-    expectTrue(
-        mesh.octreeLeavesLines.size() > kWireframeVerticesPerBox,
-        "OctreeExteriorMeshLeavesFinerThanExterior");
-}
-
-void testOctreeExteriorStraddleFlags()
-{
-    SdfAccelBuildParams buildParams{};
-    buildParams.maxDepth = 6;
-
-    auto shapes = makeSingleShape(std::make_unique<SphereSdf>(sdfMakeFloat3(0.0f, 0.0f, 0.0f), 1.0f));
-
-    SdfAccelScene scene;
-    scene.setBuildParams(buildParams);
-    sdfAccelPopulateScene(scene, shapes);
-    expectTrue(scene.build(), "OctreeExteriorStraddleBuild");
-
-    const SdfAccelSceneGpu* hostScene = scene.hostScene();
-    expectTrue(hostScene != nullptr && hostScene->objectCount == 1, "OctreeExteriorStraddleHostScene");
-
-    const SdfAccelObjectGpu& object = hostScene->objects[0];
-    const uint32_t nodeStart = object.octreeNodeOffset;
-    const uint32_t nodeEnd = hostScene->octreeNodeCount;
-
-    int straddleCount = 0;
-    int insideSolidCount = 0;
-    for (uint32_t nodeIndex = nodeStart; nodeIndex < nodeEnd; ++nodeIndex) {
-        const SdfOctreeNode& node = hostScene->octreeNodes[nodeIndex];
-        const uint8_t flags = sdfAccelFlagsFromPacked(node.childMaskAndFlags);
-        if ((flags & SdfOctreeFlagStraddlesSurface) != 0) {
-            ++straddleCount;
-        }
-        if ((flags & SdfOctreeFlagInsideSolid) != 0) {
-            ++insideSolidCount;
-        }
-    }
-
-    const int totalCount = static_cast<int>(nodeEnd - nodeStart);
-    expectTrue(totalCount > 0, "OctreeExteriorStraddleTotalCount");
-    expectTrue(straddleCount > 0, "OctreeExteriorStraddleNonZero");
-    expectTrue(insideSolidCount > 0, "OctreeExteriorInsideSolidPresent");
-    expectTrue(
-        straddleCount + insideSolidCount < totalCount,
-        "OctreeExteriorOutsideNodesPresent");
+    const SdfAccelBoundsMesh mesh = sdfAccelBuildBoundsMesh(scene, QColor(Qt::yellow));
+    expectTrue(mesh.bvhLines.size() == kWireframeVerticesPerBox, "BvhBoundsMeshBvhLines");
 }
 
 void testManyObjects()
@@ -340,30 +334,6 @@ void testManyObjects()
     }
 }
 
-void testSurfaceLeafNodesPresent()
-{
-    auto shapes = makeSingleShape(std::make_unique<SphereSdf>(sdfMakeFloat3(0.0f, 0.0f, 0.0f), 1.0f));
-
-    SdfAccelScene scene;
-    sdfAccelPopulateScene(scene, shapes);
-    expectTrue(scene.build(), "SurfaceLeafNodesBuild");
-
-    const SdfAccelSceneGpu* hostScene = scene.hostScene();
-    expectTrue(hostScene != nullptr, "SurfaceLeafNodesHostScene");
-
-    const SdfAccelObjectGpu& object = hostScene->objects[0];
-    int surfaceLeafCount = 0;
-    const uint32_t nodeStart = object.octreeNodeOffset;
-    const uint32_t nodeEnd = hostScene->octreeNodeCount;
-    for (uint32_t nodeIndex = nodeStart; nodeIndex < nodeEnd; ++nodeIndex) {
-        const SdfOctreeNode& node = hostScene->octreeNodes[nodeIndex];
-        if (node.firstChildIndex == 0 && sdfAccelOctreeNodeIsSurfaceLeaf(node)) {
-            ++surfaceLeafCount;
-        }
-    }
-    expectTrue(surfaceLeafCount > 0, "SurfaceLeafNodesNonZero");
-}
-
 void testBuildUploadSmoke()
 {
     auto shapes = sdfDefaultSceneShapes();
@@ -376,6 +346,48 @@ void testBuildUploadSmoke()
     scene.release();
 }
 
+void testTraversalBenchmarkReport()
+{
+    constexpr int kRayCount = 128;
+    constexpr int kWarmupIters = 10;
+    constexpr int kMeasureIters = 150;
+    SphereGridConfig grid3x4x1{};
+    grid3x4x1.nx = 3;
+    grid3x4x1.ny = 4;
+    grid3x4x1.nz = 1;
+    runGridTraversalBenchmark(
+        grid3x4x1,
+        "3x4x1 spheres",
+        kRayCount,
+        kWarmupIters,
+        kMeasureIters,
+        true);
+
+    SphereGridConfig grid3x3x3{};
+    grid3x3x3.nx = 3;
+    grid3x3x3.ny = 3;
+    grid3x3x3.nz = 3;
+    runGridTraversalBenchmark(
+        grid3x3x3,
+        "3x3x3 spheres",
+        kRayCount,
+        kWarmupIters,
+        kMeasureIters,
+        true);
+
+    SphereGridConfig grid10x10x10{};
+    grid10x10x10.nx = 10;
+    grid10x10x10.ny = 10;
+    grid10x10x10.nz = 10;
+    runGridTraversalBenchmark(
+        grid10x10x10,
+        "10x10x10 spheres",
+        kRayCount,
+        kWarmupIters,
+        kMeasureIters,
+        true);
+}
+
 } // namespace
 
 int main()
@@ -385,16 +397,18 @@ int main()
     testSingleSphereEval();
     testDefaultLayoutParity();
     testRayMarchParity();
+    testConservativeLowerBound();
+    testStraddleConservativeOpenSpace();
+    testAnalyticalObjectsFlagged();
+    testBvhBuiltForScene();
+    testAccelBruteMarchParity();
     testThinCylinderCoverage();
     testCappedConeBuild();
     testTightBoundsNoPad();
-    testNoFalsePrune();
-    testOctreeDepthCap();
-    testOctreeExteriorMeshCoarsestShell();
-    testOctreeExteriorStraddleFlags();
+    testBvhBoundsMeshNonEmpty();
     testManyObjects();
-    testSurfaceLeafNodesPresent();
     testBuildUploadSmoke();
+    testTraversalBenchmarkReport();
 
     if (failureCount() == 0) {
         std::cout << "All SdfAccel tests passed.\n";

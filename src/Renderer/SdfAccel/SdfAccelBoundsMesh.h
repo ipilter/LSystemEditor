@@ -1,7 +1,6 @@
 #pragma once
 
 #include "SdfAccelScene.h"
-#include "SdfAccelTraverseCore.h"
 #include "SdfAccelTypes.h"
 #include "SdfMathCore.h"
 
@@ -20,23 +19,8 @@ struct SdfAccelBoundsLineVertex
 
 struct SdfAccelBoundsMesh
 {
-    std::vector<SdfAccelBoundsLineVertex> aabbLines;
-    std::vector<SdfAccelBoundsLineVertex> octreeFullLines;
-    std::vector<SdfAccelBoundsLineVertex> octreeExteriorLines;
-    std::vector<SdfAccelBoundsLineVertex> octreeLeavesLines;
+    std::vector<SdfAccelBoundsLineVertex> bvhLines;
 };
-
-inline bool sdfAccelOctreeNodeStraddles(const SdfOctreeNode& node)
-{
-    const uint8_t flags = sdfAccelFlagsFromPacked(node.childMaskAndFlags);
-    return (flags & SdfOctreeFlagStraddlesSurface) != 0;
-}
-
-inline bool sdfAccelOctreeNodeIsSurfaceLeaf(const SdfOctreeNode& node)
-{
-    const uint8_t flags = sdfAccelFlagsFromPacked(node.childMaskAndFlags);
-    return node.firstChildIndex == 0 && (flags & SdfOctreeFlagStraddlesSurface) != 0;
-}
 
 inline void sdfAccelAppendAabbWireframe(
     std::vector<SdfAccelBoundsLineVertex>& out,
@@ -71,57 +55,7 @@ inline void sdfAccelAppendAabbWireframe(
     }
 }
 
-inline void sdfAccelAppendCoarsestExteriorWireframes(
-    const std::vector<SdfOctreeNode>& octreeNodes,
-    const SdfAccelObjectGpu& object,
-    uint32_t nodeIndex,
-    bool parentStraddles,
-    float r,
-    float g,
-    float b,
-    std::vector<SdfAccelBoundsLineVertex>& out)
-{
-    if (nodeIndex >= octreeNodes.size()) {
-        return;
-    }
-
-    const SdfOctreeNode& node = octreeNodes[nodeIndex];
-    const bool nodeStraddles = sdfAccelOctreeNodeStraddles(node);
-    if (nodeStraddles && !parentStraddles) {
-        const SdfFloat3 worldCenter = sdfAdd3(node.center, object.center);
-        const SdfFloat3 boundsMin = sdfSub3(worldCenter, node.halfExtent);
-        const SdfFloat3 boundsMax = sdfAdd3(worldCenter, node.halfExtent);
-        sdfAccelAppendAabbWireframe(out, boundsMin, boundsMax, r, g, b);
-    }
-
-    if (node.firstChildIndex == 0) {
-        return;
-    }
-
-    const uint8_t childMask = sdfAccelChildMaskFromPacked(node.childMaskAndFlags);
-    for (int octant = 0; octant < 8; ++octant) {
-        if ((childMask & (1 << octant)) == 0) {
-            continue;
-        }
-
-        const uint32_t childIndex =
-            node.firstChildIndex + static_cast<uint32_t>(sdfAccelPopCountMaskBelow(childMask, octant));
-        sdfAccelAppendCoarsestExteriorWireframes(
-            octreeNodes,
-            object,
-            childIndex,
-            nodeStraddles,
-            r,
-            g,
-            b,
-            out);
-    }
-}
-
-inline SdfAccelBoundsMesh sdfAccelBuildBoundsMesh(
-    const SdfAccelScene& scene,
-    const QColor& aabbColor,
-    const QColor& octreeColor)
+inline SdfAccelBoundsMesh sdfAccelBuildBoundsMesh(const SdfAccelScene& scene, const QColor& boundsColor)
 {
     SdfAccelBoundsMesh mesh{};
 
@@ -129,67 +63,18 @@ inline SdfAccelBoundsMesh sdfAccelBuildBoundsMesh(
         return mesh;
     }
 
-    const float aabbR = static_cast<float>(aabbColor.redF());
-    const float aabbG = static_cast<float>(aabbColor.greenF());
-    const float aabbB = static_cast<float>(aabbColor.blueF());
-    const float octreeR = static_cast<float>(octreeColor.redF());
-    const float octreeG = static_cast<float>(octreeColor.greenF());
-    const float octreeB = static_cast<float>(octreeColor.blueF());
+    const float r = static_cast<float>(boundsColor.redF());
+    const float g = static_cast<float>(boundsColor.greenF());
+    const float b = static_cast<float>(boundsColor.blueF());
 
-    for (const SdfAccelObjectGpu& object : scene.objectsHost()) {
+    for (const SdfBvhNode& node : scene.bvhNodesHost()) {
         sdfAccelAppendAabbWireframe(
-            mesh.aabbLines,
-            object.boundsMin,
-            object.boundsMax,
-            aabbR,
-            aabbG,
-            aabbB);
-    }
-
-    const std::vector<SdfAccelObjectGpu>& objects = scene.objectsHost();
-    const std::vector<SdfOctreeNode>& octreeNodes = scene.octreeNodesHost();
-    for (size_t objectIndex = 0; objectIndex < objects.size(); ++objectIndex) {
-        const SdfAccelObjectGpu& object = objects[objectIndex];
-        const uint32_t nodeStart = object.octreeNodeOffset;
-        const uint32_t nodeEnd = objectIndex + 1 < objects.size()
-            ? objects[objectIndex + 1].octreeNodeOffset
-            : static_cast<uint32_t>(octreeNodes.size());
-
-        const uint32_t rootIndex = object.octreeNodeOffset + object.octreeRootIndex;
-        sdfAccelAppendCoarsestExteriorWireframes(
-            octreeNodes,
-            object,
-            rootIndex,
-            false,
-            octreeR,
-            octreeG,
-            octreeB,
-            mesh.octreeExteriorLines);
-
-        for (uint32_t nodeIndex = nodeStart; nodeIndex < nodeEnd; ++nodeIndex) {
-            const SdfOctreeNode& node = octreeNodes[nodeIndex];
-            const SdfFloat3 worldCenter = sdfAdd3(node.center, object.center);
-            const SdfFloat3 boundsMin = sdfSub3(worldCenter, node.halfExtent);
-            const SdfFloat3 boundsMax = sdfAdd3(worldCenter, node.halfExtent);
-
-            sdfAccelAppendAabbWireframe(
-                mesh.octreeFullLines,
-                boundsMin,
-                boundsMax,
-                octreeR,
-                octreeG,
-                octreeB);
-
-            if (sdfAccelOctreeNodeIsSurfaceLeaf(node)) {
-                sdfAccelAppendAabbWireframe(
-                    mesh.octreeLeavesLines,
-                    boundsMin,
-                    boundsMax,
-                    octreeR,
-                    octreeG,
-                    octreeB);
-            }
-        }
+            mesh.bvhLines,
+            node.boundsMin,
+            node.boundsMax,
+            r,
+            g,
+            b);
     }
 
     return mesh;

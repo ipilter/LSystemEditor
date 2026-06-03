@@ -4,6 +4,8 @@
 #include "SdfVisualCore.h"
 
 #include <cuda_runtime.h>
+#include <thrust/device_ptr.h>
+#include <thrust/sort.h>
 #include <vector_types.h>
 
 #include <cmath>
@@ -21,7 +23,27 @@ __device__ float3 toFloat3(SdfFloat3 v)
     return make_float3(v.x, v.y, v.z);
 }
 
-__global__ void sampleKernel(
+__device__ uint32_t expandBits16(uint32_t v)
+{
+    v = (v | (v << 8)) & 0x00FF00FFu;
+    v = (v | (v << 4)) & 0x0F0F0F0Fu;
+    v = (v | (v << 2)) & 0x33333333u;
+    v = (v | (v << 1)) & 0x55555555u;
+    return v;
+}
+
+__device__ uint32_t mortonCode2D(uint32_t x, uint32_t y)
+{
+    return expandBits16(x) | (expandBits16(y) << 1);
+}
+
+__device__ void samplePixel(
+    int idx,
+    int x,
+    int y,
+    int width,
+    int height,
+    int stride,
     float4* acc,
     uint32_t* counts,
     const CameraGpu* camera,
@@ -30,26 +52,13 @@ __global__ void sampleKernel(
     const uint32_t* sobolMatrices,
     const unsigned int* pixelScramble,
     int sobolDimensionCount,
-    int width,
-    int height,
-    int stride,
-    int visualMode)
+    int visualMode,
+    int sdfTraversalMode)
 {
-    const int x = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
-    const int y = static_cast<int>(blockIdx.y * blockDim.y + threadIdx.y);
-    if (x >= width || y >= height) {
-        return;
-    }
-
     if (x % stride != 0 || y % stride != 0) {
         return;
     }
 
-    if (camera == nullptr || scene == nullptr || marchParams == nullptr) {
-        return;
-    }
-
-    const int idx = y * width + x;
     const uint32_t n = counts[idx];
     SampleContext ctx{};
     ctx.pixelIndex = idx;
@@ -68,7 +77,12 @@ __global__ void sampleKernel(
     float3 rdFloat{};
     cameraPrimaryRay(camera, u, v, roFloat, rdFloat);
 
-    const SdfHit hit = sdfAccelRayMarch(toSdfFloat3(roFloat), toSdfFloat3(rdFloat), scene, marchParams);
+    const SdfHit hit = sdfAccelRayMarch(
+        toSdfFloat3(roFloat),
+        toSdfFloat3(rdFloat),
+        scene,
+        marchParams,
+        sdfTraversalMode);
 
     SdfFloat3 rgbSdf{};
     switch (visualMode) {
@@ -95,6 +109,116 @@ __global__ void sampleKernel(
         (prev.z * static_cast<float>(n) + sample.z) * invN,
         1.0f);
     counts[idx] = n + 1;
+}
+
+__global__ void sampleKernel(
+    float4* acc,
+    uint32_t* counts,
+    const CameraGpu* camera,
+    const SdfAccelSceneGpu* scene,
+    const SdfMarchParamsGpu* marchParams,
+    const uint32_t* sobolMatrices,
+    const unsigned int* pixelScramble,
+    int sobolDimensionCount,
+    int width,
+    int height,
+    int stride,
+    int visualMode,
+    int sdfTraversalMode)
+{
+    const int x = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
+    const int y = static_cast<int>(blockIdx.y * blockDim.y + threadIdx.y);
+    if (x >= width || y >= height) {
+        return;
+    }
+
+    if (camera == nullptr || scene == nullptr || marchParams == nullptr) {
+        return;
+    }
+
+    const int idx = y * width + x;
+    samplePixel(
+        idx,
+        x,
+        y,
+        width,
+        height,
+        stride,
+        acc,
+        counts,
+        camera,
+        scene,
+        marchParams,
+        sobolMatrices,
+        pixelScramble,
+        sobolDimensionCount,
+        visualMode,
+        sdfTraversalMode);
+}
+
+__global__ void raySortFillKernel(
+    uint32_t* keys,
+    uint32_t* indices,
+    int width,
+    int height)
+{
+    const int x = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
+    const int y = static_cast<int>(blockIdx.y * blockDim.y + threadIdx.y);
+    if (x >= width || y >= height) {
+        return;
+    }
+
+    const int idx = y * width + x;
+    keys[idx] = mortonCode2D(static_cast<uint32_t>(x), static_cast<uint32_t>(y));
+    indices[idx] = static_cast<uint32_t>(idx);
+}
+
+__global__ void sampleKernelSorted(
+    float4* acc,
+    uint32_t* counts,
+    const CameraGpu* camera,
+    const SdfAccelSceneGpu* scene,
+    const SdfMarchParamsGpu* marchParams,
+    const uint32_t* sobolMatrices,
+    const unsigned int* pixelScramble,
+    const uint32_t* sortedIndices,
+    int sobolDimensionCount,
+    int width,
+    int height,
+    int stride,
+    int visualMode,
+    int sdfTraversalMode)
+{
+    const int rank = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
+    const int pixelCount = width * height;
+    if (rank >= pixelCount) {
+        return;
+    }
+
+    if (camera == nullptr || scene == nullptr || marchParams == nullptr || sortedIndices == nullptr) {
+        return;
+    }
+
+    const int idx = static_cast<int>(sortedIndices[rank]);
+    const int x = idx % width;
+    const int y = idx / width;
+    samplePixel(
+        idx,
+        x,
+        y,
+        width,
+        height,
+        stride,
+        acc,
+        counts,
+        camera,
+        scene,
+        marchParams,
+        sobolMatrices,
+        pixelScramble,
+        sobolDimensionCount,
+        visualMode,
+        sdfTraversalMode);
 }
 
 __global__ void clearAccumulatorKernel(float4* acc, uint32_t* counts, int width, int height, float4 background)
@@ -145,6 +269,58 @@ bool checkLaunch(cudaError_t error)
 
 } // namespace
 
+bool pathTracerFreeRaySortBuffers(uint32_t** keys, uint32_t** indices, int* pixelCount)
+{
+    if (keys == nullptr || indices == nullptr || pixelCount == nullptr) {
+        return false;
+    }
+
+    if (*keys != nullptr) {
+        cudaFree(*keys);
+        *keys = nullptr;
+    }
+    if (*indices != nullptr) {
+        cudaFree(*indices);
+        *indices = nullptr;
+    }
+    *pixelCount = 0;
+    return true;
+}
+
+bool pathTracerInitRaySortBuffers(
+    uint32_t** keys,
+    uint32_t** indices,
+    int* pixelCount,
+    int width,
+    int height,
+    cudaStream_t stream)
+{
+    if (keys == nullptr || indices == nullptr || pixelCount == nullptr || width <= 0 || height <= 0) {
+        return false;
+    }
+
+    const int newCount = width * height;
+    if (*pixelCount == newCount && *keys != nullptr && *indices != nullptr) {
+        return true;
+    }
+
+    pathTracerFreeRaySortBuffers(keys, indices, pixelCount);
+
+    const std::size_t bytes = static_cast<std::size_t>(newCount) * sizeof(uint32_t);
+    if (cudaMalloc(keys, bytes) != cudaSuccess) {
+        pathTracerFreeRaySortBuffers(keys, indices, pixelCount);
+        return false;
+    }
+    if (cudaMalloc(indices, bytes) != cudaSuccess) {
+        pathTracerFreeRaySortBuffers(keys, indices, pixelCount);
+        return false;
+    }
+
+    *pixelCount = newCount;
+    (void)stream;
+    return true;
+}
+
 bool pathTracerClearAccumulator(
     float4* d_buffer,
     uint32_t* d_samples,
@@ -176,9 +352,13 @@ bool pathTracerSample(
     const SdfAccelSceneGpu* d_scene,
     const SdfMarchParamsGpu* d_marchParams,
     int visualMode,
+    int sdfTraversalMode,
     const uint32_t* sobolMatrices,
     const unsigned int* pixelScramble,
     int sobolDimensionCount,
+    int enableRaySort,
+    uint32_t* d_raySortKeys,
+    uint32_t* d_raySortIndices,
     cudaStream_t stream)
 {
     if (d_buffer == nullptr || d_samples == nullptr || d_camera == nullptr || d_scene == nullptr ||
@@ -190,6 +370,40 @@ bool pathTracerSample(
     const int clampedStride = stride < 1 ? 1 : stride;
     const dim3 block(16, 16);
     const dim3 grid = grid2d(width, height, block);
+    const int pixelCount = width * height;
+    const bool useRaySort =
+        enableRaySort != 0 && d_raySortKeys != nullptr && d_raySortIndices != nullptr;
+
+    if (useRaySort) {
+        raySortFillKernel<<<grid, block, 0, stream>>>(d_raySortKeys, d_raySortIndices, width, height);
+        if (!checkLaunch(cudaSuccess)) {
+            return false;
+        }
+
+        thrust::device_ptr<uint32_t> keysPtr(d_raySortKeys);
+        thrust::device_ptr<uint32_t> indicesPtr(d_raySortIndices);
+        thrust::sort_by_key(keysPtr, keysPtr + pixelCount, indicesPtr);
+
+        const int threadsPerBlock = 256;
+        const int blocks = (pixelCount + threadsPerBlock - 1) / threadsPerBlock;
+        sampleKernelSorted<<<blocks, threadsPerBlock, 0, stream>>>(
+            d_buffer,
+            d_samples,
+            d_camera,
+            d_scene,
+            d_marchParams,
+            sobolMatrices,
+            pixelScramble,
+            d_raySortIndices,
+            sobolDimensionCount,
+            width,
+            height,
+            clampedStride,
+            visualMode,
+            sdfTraversalMode);
+        return checkLaunch(cudaSuccess);
+    }
+
     sampleKernel<<<grid, block, 0, stream>>>(
         d_buffer,
         d_samples,
@@ -202,7 +416,8 @@ bool pathTracerSample(
         width,
         height,
         clampedStride,
-        visualMode);
+        visualMode,
+        sdfTraversalMode);
     return checkLaunch(cudaSuccess);
 }
 

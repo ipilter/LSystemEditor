@@ -53,34 +53,40 @@ SdfAccelBoundsOverlayMode boundsOverlayModeFromComboIndex(int index)
 {
     switch (index) {
     case 1:
-        return SdfAccelBoundsOverlayMode::Aabb;
-    case 2:
-        return SdfAccelBoundsOverlayMode::Octree;
-    case 3:
-        return SdfAccelBoundsOverlayMode::OctreeExterior;
-    case 4:
-        return SdfAccelBoundsOverlayMode::OctreeLeaves;
-    case 5:
-        return SdfAccelBoundsOverlayMode::Both;
+        return SdfAccelBoundsOverlayMode::Bvh;
     case 0:
     default:
         return SdfAccelBoundsOverlayMode::Off;
     }
 }
 
+SdfTraversalMode traversalModeFromComboIndex(int index)
+{
+    switch (index) {
+    case 0:
+        return SdfTraversalMode::BruteForce;
+    case 1:
+    default:
+        return SdfTraversalMode::BvhAccel;
+    }
+}
+
+int comboIndexFromTraversalMode(SdfTraversalMode mode)
+{
+    switch (mode) {
+    case SdfTraversalMode::BruteForce:
+        return 0;
+    case SdfTraversalMode::BvhAccel:
+    default:
+        return 1;
+    }
+}
+
 int comboIndexFromBoundsOverlayMode(SdfAccelBoundsOverlayMode mode)
 {
     switch (mode) {
-    case SdfAccelBoundsOverlayMode::Aabb:
+    case SdfAccelBoundsOverlayMode::Bvh:
         return 1;
-    case SdfAccelBoundsOverlayMode::Octree:
-        return 2;
-    case SdfAccelBoundsOverlayMode::OctreeExterior:
-        return 3;
-    case SdfAccelBoundsOverlayMode::OctreeLeaves:
-        return 4;
-    case SdfAccelBoundsOverlayMode::Both:
-        return 5;
     case SdfAccelBoundsOverlayMode::Off:
     default:
         return 0;
@@ -105,8 +111,8 @@ SceneController::SceneController(SceneModel* model, MainView* view, QObject* par
     syncMaxSamplesSpinBox();
     syncPreviewStepsSpinBox();
     syncSdfVisualModeComboBox();
+    syncSdfTraversalModeComboBox();
     syncBoundsOverlayComboBox();
-    syncOctreeMaxDepthSpinBox();
 
     connect(m_view->colorButton(), &QPushButton::clicked, this, &SceneController::onColorButtonClicked);
     connect(m_model, &SceneModel::clearColorChanged, this, &SceneController::onClearColorChanged);
@@ -114,11 +120,12 @@ SceneController::SceneController(SceneModel* model, MainView* view, QObject* par
     connect(m_model, &SceneModel::maxSamplesPerPixelChanged, this, [this](int) { syncMaxSamplesSpinBox(); });
     connect(m_model, &SceneModel::previewStepsPerLevelChanged, this, [this](int) { syncPreviewStepsSpinBox(); });
     connect(m_model, &SceneModel::sdfVisualModeChanged, this, [this](SdfDebugVisualMode) { syncSdfVisualModeComboBox(); });
+    connect(m_model, &SceneModel::sdfTraversalModeChanged, this, [this](SdfTraversalMode) {
+        syncSdfTraversalModeComboBox();
+    });
     connect(m_model, &SceneModel::boundsOverlayModeChanged, this, [this](SdfAccelBoundsOverlayMode) {
         syncBoundsOverlayComboBox();
     });
-    connect(m_model, &SceneModel::octreeMaxDepthChanged, this, [this](int) { syncOctreeMaxDepthSpinBox(); });
-
     connect(m_view->renderWidthSpinBox(), &QSpinBox::valueChanged, this, &SceneController::onRenderSizeSpinBoxChanged);
     connect(m_view->renderHeightSpinBox(), &QSpinBox::valueChanged, this, &SceneController::onRenderSizeSpinBoxChanged);
     connect(m_view->maxSamplesSpinBox(), &QSpinBox::valueChanged, this, &SceneController::onMaxSamplesSpinBoxChanged);
@@ -129,15 +136,15 @@ SceneController::SceneController(SceneModel* model, MainView* view, QObject* par
         this,
         &SceneController::onSdfVisualModeComboBoxChanged);
     connect(
+        m_view->sdfTraversalModeComboBox(),
+        QOverload<int>::of(&QComboBox::currentIndexChanged),
+        this,
+        &SceneController::onSdfTraversalModeComboBoxChanged);
+    connect(
         m_view->boundsOverlayComboBox(),
         QOverload<int>::of(&QComboBox::currentIndexChanged),
         this,
         &SceneController::onBoundsOverlayComboBoxChanged);
-    connect(
-        m_view->octreeMaxDepthSpinBox(),
-        QOverload<int>::of(&QSpinBox::valueChanged),
-        this,
-        &SceneController::onOctreeMaxDepthSpinBoxChanged);
     connect(&m_renderSizeDebounce, &DebounceTimer::triggered, this, &SceneController::applyRenderSizeFromSpinBoxes);
     connect(&m_maxSamplesDebounce, &DebounceTimer::triggered, this, &SceneController::applyMaxSamplesFromSpinBox);
     connect(&m_previewStepsDebounce, &DebounceTimer::triggered, this, &SceneController::applyPreviewStepsFromSpinBox);
@@ -217,15 +224,15 @@ void SceneController::onSdfVisualModeComboBoxChanged()
     m_model->setSdfVisualMode(visualModeFromComboIndex(m_view->sdfVisualModeComboBox()->currentIndex()));
 }
 
+void SceneController::onSdfTraversalModeComboBoxChanged()
+{
+    m_model->setSdfTraversalMode(traversalModeFromComboIndex(m_view->sdfTraversalModeComboBox()->currentIndex()));
+}
+
 void SceneController::onBoundsOverlayComboBoxChanged()
 {
     m_model->setBoundsOverlayMode(
         boundsOverlayModeFromComboIndex(m_view->boundsOverlayComboBox()->currentIndex()));
-}
-
-void SceneController::onOctreeMaxDepthSpinBoxChanged()
-{
-    m_model->setOctreeMaxDepth(m_view->octreeMaxDepthSpinBox()->value());
 }
 
 void SceneController::onStartButtonClicked()
@@ -243,8 +250,7 @@ void SceneController::onSettingsButtonClicked()
 {
     SettingsDialog dialog(m_view);
     if (dialog.exec() == QDialog::Accepted) {
-        m_model->setAccelAabbColor(AppSettings::instance().accelAabbColor());
-        m_model->setAccelOctreeColor(AppSettings::instance().accelOctreeColor());
+        m_model->setAccelBvhColor(AppSettings::instance().accelBvhColor());
     }
 }
 
@@ -293,17 +299,17 @@ void SceneController::syncSdfVisualModeComboBox()
     m_view->sdfVisualModeComboBox()->blockSignals(false);
 }
 
+void SceneController::syncSdfTraversalModeComboBox()
+{
+    m_view->sdfTraversalModeComboBox()->blockSignals(true);
+    m_view->sdfTraversalModeComboBox()->setCurrentIndex(comboIndexFromTraversalMode(m_model->sdfTraversalMode()));
+    m_view->sdfTraversalModeComboBox()->blockSignals(false);
+}
+
 void SceneController::syncBoundsOverlayComboBox()
 {
     m_view->boundsOverlayComboBox()->blockSignals(true);
     m_view->boundsOverlayComboBox()->setCurrentIndex(
         comboIndexFromBoundsOverlayMode(m_model->boundsOverlayMode()));
     m_view->boundsOverlayComboBox()->blockSignals(false);
-}
-
-void SceneController::syncOctreeMaxDepthSpinBox()
-{
-    m_view->octreeMaxDepthSpinBox()->blockSignals(true);
-    m_view->octreeMaxDepthSpinBox()->setValue(m_model->octreeMaxDepth());
-    m_view->octreeMaxDepthSpinBox()->blockSignals(false);
 }

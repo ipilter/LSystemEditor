@@ -38,17 +38,14 @@ public:
     SdfDebugVisualMode sdfVisualMode() const;
     void setSdfVisualMode(SdfDebugVisualMode mode);
 
+    SdfTraversalMode sdfTraversalMode() const;
+    void setSdfTraversalMode(SdfTraversalMode mode);
+
     SdfAccelBoundsOverlayMode boundsOverlayMode() const;
     void setBoundsOverlayMode(SdfAccelBoundsOverlayMode mode);
 
-    QColor accelAabbColor() const;
-    void setAccelAabbColor(const QColor& color);
-
-    QColor accelOctreeColor() const;
-    void setAccelOctreeColor(const QColor& color);
-
-    int octreeMaxDepth() const;
-    void setOctreeMaxDepth(int value);
+    QColor accelBvhColor() const;
+    void setAccelBvhColor(const QColor& color);
 
     const std::vector<std::unique_ptr<SdfShape>>& sdfShapes() const;
     void addSdfShape(std::unique_ptr<SdfShape> shape);
@@ -62,29 +59,27 @@ signals:
     void maxSamplesPerPixelChanged(int value);
     void previewStepsPerLevelChanged(int value);
     void sdfVisualModeChanged(SdfDebugVisualMode mode);
+    void sdfTraversalModeChanged(SdfTraversalMode mode);
     void boundsOverlayModeChanged(SdfAccelBoundsOverlayMode mode);
-    void accelAabbColorChanged(const QColor& color);
-    void accelOctreeColorChanged(const QColor& color);
-    void octreeMaxDepthChanged(int value);
+    void accelBvhColorChanged(const QColor& color);
     void sdfSceneChanged();
 
 private:
     static SdfDebugVisualMode clampVisualMode(SdfDebugVisualMode mode);
+    static SdfTraversalMode clampTraversalMode(SdfTraversalMode mode);
     static SdfAccelBoundsOverlayMode clampBoundsOverlayMode(SdfAccelBoundsOverlayMode mode);
     static int clampDimension(int value);
     static int clampMaxSamples(int value);
     static int clampPreviewSteps(int value);
-    static int clampOctreeMaxDepth(int value);
 
     QColor m_clearColor;
     QSize m_renderSize;
     int m_maxSamplesPerPixel = 8;
     int m_previewStepsPerLevel = 2;
     SdfDebugVisualMode m_sdfVisualMode = SdfDebugVisualMode::Off;
+    SdfTraversalMode m_sdfTraversalMode = SdfTraversalMode::BvhAccel;
     SdfAccelBoundsOverlayMode m_boundsOverlayMode = SdfAccelBoundsOverlayMode::Off;
-    QColor m_accelAabbColor = QColor(0, 200, 80);
-    QColor m_accelOctreeColor = QColor(230, 200, 0);
-    int m_octreeMaxDepth = 5;
+    QColor m_accelBvhColor = QColor(230, 200, 0);
     std::vector<std::unique_ptr<SdfShape>> m_sdfShapes;
     GLuint m_pboIds[bufferCount] = {0, 0};
 };

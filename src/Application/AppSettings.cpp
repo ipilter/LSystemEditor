@@ -19,10 +19,6 @@ constexpr int kMinMaxSamplesPerPixel = 0;
 constexpr int kMaxMaxSamplesPerPixel = 1'000'000;
 constexpr int kMinPreviewStepsPerLevel = 0;
 constexpr int kMaxPreviewStepsPerLevel = 128;
-constexpr int kDefaultOctreeMaxDepth = 5;
-constexpr int kMinOctreeMaxDepth = 1;
-constexpr int kMaxOctreeMaxDepth = 10;
-
 constexpr const char* kSettingsOrg = "PathTracer";
 constexpr const char* kSettingsApp = "pathtracer";
 constexpr const char* kDebounceGroup = "debounce";
@@ -33,13 +29,16 @@ constexpr const char* kClearColorGreenKey = "clearColorGreen";
 constexpr const char* kClearColorBlueKey = "clearColorBlue";
 constexpr const char* kMaxSamplesPerPixelKey = "maxSamplesPerPixel";
 constexpr const char* kPreviewStepsPerLevelKey = "previewStepsPerLevel";
-constexpr const char* kAccelAabbColorRedKey = "accelAabbColorRed";
-constexpr const char* kAccelAabbColorGreenKey = "accelAabbColorGreen";
-constexpr const char* kAccelAabbColorBlueKey = "accelAabbColorBlue";
-constexpr const char* kAccelOctreeColorRedKey = "accelOctreeColorRed";
-constexpr const char* kAccelOctreeColorGreenKey = "accelOctreeColorGreen";
-constexpr const char* kAccelOctreeColorBlueKey = "accelOctreeColorBlue";
-constexpr const char* kOctreeMaxDepthKey = "octreeMaxDepth";
+constexpr const char* kAccelBvhColorRedKey = "accelBvhColorRed";
+constexpr const char* kAccelBvhColorGreenKey = "accelBvhColorGreen";
+constexpr const char* kAccelBvhColorBlueKey = "accelBvhColorBlue";
+constexpr const char* kLegacyAccelAabbColorRedKey = "accelAabbColorRed";
+constexpr const char* kLegacyAccelAabbColorGreenKey = "accelAabbColorGreen";
+constexpr const char* kLegacyAccelAabbColorBlueKey = "accelAabbColorBlue";
+constexpr const char* kLegacyAccelOctreeColorRedKey = "accelOctreeColorRed";
+constexpr const char* kLegacyAccelOctreeColorGreenKey = "accelOctreeColorGreen";
+constexpr const char* kLegacyAccelOctreeColorBlueKey = "accelOctreeColorBlue";
+constexpr const char* kSdfTraversalModeKey = "sdfTraversalMode";
 
 bool isKnownDebounceElementId(const QString& elementId)
 {
@@ -67,7 +66,6 @@ AppSettings::AppSettings(QObject* parent)
     , m_renderSize(kDefaultRenderDimension, kDefaultRenderDimension)
     , m_clearColor(kDefaultClearColorComponent, kDefaultClearColorComponent, kDefaultClearColorComponent)
     , m_maxSamplesPerPixel(kDefaultMaxSamplesPerPixel)
-    , m_octreeMaxDepth(kDefaultOctreeMaxDepth)
 {
     seedDefaultDebounceValues();
     load();
@@ -177,49 +175,34 @@ void AppSettings::setPreviewStepsPerLevel(int value)
     save();
 }
 
-QColor AppSettings::accelAabbColor() const
+QColor AppSettings::accelBvhColor() const
 {
-    return m_accelAabbColor;
+    return m_accelBvhColor;
 }
 
-void AppSettings::setAccelAabbColor(const QColor& color)
+void AppSettings::setAccelBvhColor(const QColor& color)
 {
-    if (!color.isValid() || m_accelAabbColor == color) {
+    if (!color.isValid() || m_accelBvhColor == color) {
         return;
     }
 
-    m_accelAabbColor = color;
+    m_accelBvhColor = color;
     save();
 }
 
-QColor AppSettings::accelOctreeColor() const
+SdfTraversalMode AppSettings::sdfTraversalMode() const
 {
-    return m_accelOctreeColor;
+    return m_sdfTraversalMode;
 }
 
-void AppSettings::setAccelOctreeColor(const QColor& color)
+void AppSettings::setSdfTraversalMode(SdfTraversalMode mode)
 {
-    if (!color.isValid() || m_accelOctreeColor == color) {
+    const SdfTraversalMode clamped = clampSdfTraversalMode(mode);
+    if (m_sdfTraversalMode == clamped) {
         return;
     }
 
-    m_accelOctreeColor = color;
-    save();
-}
-
-int AppSettings::octreeMaxDepth() const
-{
-    return m_octreeMaxDepth;
-}
-
-void AppSettings::setOctreeMaxDepth(int value)
-{
-    const int clamped = clampOctreeMaxDepth(value);
-    if (m_octreeMaxDepth == clamped) {
-        return;
-    }
-
-    m_octreeMaxDepth = clamped;
+    m_sdfTraversalMode = clamped;
     save();
 }
 
@@ -267,15 +250,15 @@ int AppSettings::clampPreviewStepsPerLevel(int value)
     return value;
 }
 
-int AppSettings::clampOctreeMaxDepth(int value)
+SdfTraversalMode AppSettings::clampSdfTraversalMode(SdfTraversalMode mode)
 {
-    if (value < kMinOctreeMaxDepth) {
-        return kMinOctreeMaxDepth;
+    switch (mode) {
+    case SdfTraversalMode::BruteForce:
+    case SdfTraversalMode::BvhAccel:
+        return mode;
+    default:
+        return SdfTraversalMode::BvhAccel;
     }
-    if (value > kMaxOctreeMaxDepth) {
-        return kMaxOctreeMaxDepth;
-    }
-    return value;
 }
 
 void AppSettings::load()
@@ -367,23 +350,32 @@ void AppSettings::load()
         return fallback;
     };
 
-    m_accelAabbColor = loadColor(
-        kAccelAabbColorRedKey,
-        kAccelAabbColorGreenKey,
-        kAccelAabbColorBlueKey,
-        m_accelAabbColor);
-    m_accelOctreeColor = loadColor(
-        kAccelOctreeColorRedKey,
-        kAccelOctreeColorGreenKey,
-        kAccelOctreeColorBlueKey,
-        m_accelOctreeColor);
+    m_accelBvhColor = loadColor(
+        kAccelBvhColorRedKey,
+        kAccelBvhColorGreenKey,
+        kAccelBvhColorBlueKey,
+        m_accelBvhColor);
+    if (!settings.contains(kAccelBvhColorRedKey)) {
+        m_accelBvhColor = loadColor(
+            kLegacyAccelOctreeColorRedKey,
+            kLegacyAccelOctreeColorGreenKey,
+            kLegacyAccelOctreeColorBlueKey,
+            m_accelBvhColor);
+    }
+    if (!settings.contains(kAccelBvhColorRedKey)) {
+        m_accelBvhColor = loadColor(
+            kLegacyAccelAabbColorRedKey,
+            kLegacyAccelAabbColorGreenKey,
+            kLegacyAccelAabbColorBlueKey,
+            m_accelBvhColor);
+    }
 
-    const QVariant octreeMaxDepthValue = settings.value(kOctreeMaxDepthKey);
-    if (octreeMaxDepthValue.isValid()) {
+    const QVariant sdfTraversalModeValue = settings.value(kSdfTraversalModeKey);
+    if (sdfTraversalModeValue.isValid()) {
         bool ok = false;
-        const int octreeMaxDepth = octreeMaxDepthValue.toInt(&ok);
+        const int mode = sdfTraversalModeValue.toInt(&ok);
         if (ok) {
-            m_octreeMaxDepth = clampOctreeMaxDepth(octreeMaxDepth);
+            m_sdfTraversalMode = clampSdfTraversalMode(static_cast<SdfTraversalMode>(mode));
         }
     }
 }
@@ -406,12 +398,9 @@ void AppSettings::save()
     settings.setValue(kClearColorBlueKey, m_clearColor.blue());
     settings.setValue(kMaxSamplesPerPixelKey, m_maxSamplesPerPixel);
     settings.setValue(kPreviewStepsPerLevelKey, m_previewStepsPerLevel);
-    settings.setValue(kAccelAabbColorRedKey, m_accelAabbColor.red());
-    settings.setValue(kAccelAabbColorGreenKey, m_accelAabbColor.green());
-    settings.setValue(kAccelAabbColorBlueKey, m_accelAabbColor.blue());
-    settings.setValue(kAccelOctreeColorRedKey, m_accelOctreeColor.red());
-    settings.setValue(kAccelOctreeColorGreenKey, m_accelOctreeColor.green());
-    settings.setValue(kAccelOctreeColorBlueKey, m_accelOctreeColor.blue());
-    settings.setValue(kOctreeMaxDepthKey, m_octreeMaxDepth);
+    settings.setValue(kAccelBvhColorRedKey, m_accelBvhColor.red());
+    settings.setValue(kAccelBvhColorGreenKey, m_accelBvhColor.green());
+    settings.setValue(kAccelBvhColorBlueKey, m_accelBvhColor.blue());
+    settings.setValue(kSdfTraversalModeKey, static_cast<int>(m_sdfTraversalMode));
     settings.sync();
 }

@@ -59,12 +59,16 @@ struct PathTracerDetail::PathTracerImpl
     std::atomic<int> sampleCount{0};
     std::atomic<int> lastSamplingStride{1};
     std::atomic<int> visualMode{static_cast<int>(SdfDebugVisualMode::StepCount)};
+    std::atomic<int> sdfTraversalMode{static_cast<int>(SdfTraversalMode::BvhAccel)};
 
     SdfAccelScene accelScene;
     SdfMarchParamsGpu hostMarchParams{};
     SdfMarchParamsGpu* d_marchParams = nullptr;
     SdfAccelBoundsMesh boundsMesh;
-    int octreeMaxDepth = 5;
+
+    uint32_t* d_raySortKeys = nullptr;
+    uint32_t* d_raySortIndices = nullptr;
+    int raySortPixelCount = 0;
 
     CameraGpu lastSampleCamera{};
     std::mutex lastSampleCameraMutex;
@@ -74,20 +78,6 @@ namespace {
 
 constexpr int kMaxSamplesUpperBound = 1'000'000;
 constexpr int kMaxPreviewStepsPerLevel = 128;
-constexpr int kMinOctreeMaxDepth = 1;
-constexpr int kMaxOctreeMaxDepth = 10;
-
-int clampOctreeMaxDepth(int value)
-{
-    if (value < kMinOctreeMaxDepth) {
-        return kMinOctreeMaxDepth;
-    }
-    if (value > kMaxOctreeMaxDepth) {
-        return kMaxOctreeMaxDepth;
-    }
-    return value;
-}
-
 int clampMaxSamples(int value)
 {
     if (value < 0) {
@@ -621,6 +611,8 @@ bool initMarchParams(PathTracerDetail::PathTracerImpl* impl, cudaStream_t stream
     impl->hostMarchParams.normalEpsilon = 1.0e-4f;
     impl->hostMarchParams.maxSteps = 256;
     impl->hostMarchParams.refineIterations = 10;
+    impl->hostMarchParams.exactSwitchThreshold = 0.1f;
+    impl->hostMarchParams.enableRaySort = 1;
     impl->hostMarchParams.backgroundR = backgroundR;
     impl->hostMarchParams.backgroundG = backgroundG;
     impl->hostMarchParams.backgroundB = backgroundB;
@@ -674,9 +666,7 @@ bool buildAndUploadAccelScene(
     }
 
     sdfAccelPopulateScene(impl->accelScene, shapes);
-    SdfAccelBuildParams buildParams{};
-    buildParams.maxDepth = impl->octreeMaxDepth;
-    impl->accelScene.setBuildParams(buildParams);
+    impl->accelScene.setBuildParams(SdfAccelBuildParams{});
     if (!impl->accelScene.build()) {
         if (outError != nullptr) {
             *outError = QStringLiteral("SDF accel scene build failed");
@@ -716,6 +706,7 @@ PathTracer::~PathTracer()
     freeCameraGpu(m_impl.get());
     freeQmcGpuResources(&m_impl->qmc);
     freeAccumulator(&m_impl->acc);
+    pathTracerFreeRaySortBuffers(&m_impl->d_raySortKeys, &m_impl->d_raySortIndices, &m_impl->raySortPixelCount);
     releaseAccelScene(m_impl.get());
     destroySampleEvent(m_impl.get());
     destroyStream(m_impl.get());
@@ -747,6 +738,7 @@ bool PathTracer::configure(
     freeCameraGpu(m_impl.get());
     freeQmcGpuResources(&m_impl->qmc);
     freeAccumulator(&m_impl->acc);
+    pathTracerFreeRaySortBuffers(&m_impl->d_raySortKeys, &m_impl->d_raySortIndices, &m_impl->raySortPixelCount);
     releaseAccelScene(m_impl.get());
 
     if (m_impl->stream == nullptr) {
@@ -785,6 +777,19 @@ bool PathTracer::configure(
         AppLog::instance().error(
             QStringLiteral("PathTracer configure: accumulator allocation failed: %1").arg(error));
         unregisterPboResources(m_impl.get());
+        return false;
+    }
+
+    if (!pathTracerInitRaySortBuffers(
+            &m_impl->d_raySortKeys,
+            &m_impl->d_raySortIndices,
+            &m_impl->raySortPixelCount,
+            width,
+            height,
+            m_impl->stream)) {
+        AppLog::instance().error(QStringLiteral("PathTracer configure: ray sort buffer allocation failed"));
+        unregisterPboResources(m_impl.get());
+        freeAccumulator(&m_impl->acc);
         return false;
     }
 
@@ -1032,6 +1037,20 @@ SdfDebugVisualMode PathTracer::visualMode() const
     return static_cast<SdfDebugVisualMode>(m_impl->visualMode.load());
 }
 
+void PathTracer::setSdfTraversalMode(SdfTraversalMode mode)
+{
+    const int clamped = mode == SdfTraversalMode::BruteForce
+        ? static_cast<int>(SdfTraversalMode::BruteForce)
+        : static_cast<int>(SdfTraversalMode::BvhAccel);
+    m_impl->sdfTraversalMode.store(clamped);
+    notifyWorker();
+}
+
+SdfTraversalMode PathTracer::sdfTraversalMode() const
+{
+    return static_cast<SdfTraversalMode>(m_impl->sdfTraversalMode.load());
+}
+
 void PathTracer::setClearColor(const QColor& color)
 {
     if (!color.isValid()) {
@@ -1061,24 +1080,14 @@ void PathTracer::setClearColor(const QColor& color)
     }
 }
 
-void PathTracer::rebuildAccelBoundsMesh(const QColor& aabbColor, const QColor& octreeColor)
+void PathTracer::rebuildAccelBoundsMesh(const QColor& boundsColor)
 {
-    m_impl->boundsMesh = sdfAccelBuildBoundsMesh(m_impl->accelScene, aabbColor, octreeColor);
+    m_impl->boundsMesh = sdfAccelBuildBoundsMesh(m_impl->accelScene, boundsColor);
 }
 
 const SdfAccelBoundsMesh& PathTracer::accelBoundsMesh() const
 {
     return m_impl->boundsMesh;
-}
-
-void PathTracer::setOctreeMaxDepth(int depth)
-{
-    m_impl->octreeMaxDepth = clampOctreeMaxDepth(depth);
-}
-
-int PathTracer::octreeMaxDepth() const
-{
-    return m_impl->octreeMaxDepth;
 }
 
 bool PathTracer::rebuildAccelScene(const std::vector<std::unique_ptr<SdfShape>>& shapes)
@@ -1185,9 +1194,13 @@ void PathTracer::renderLoop()
                 m_impl->accelScene.deviceScene(),
                 m_impl->d_marchParams,
                 static_cast<int>(m_impl->visualMode.load()),
+                static_cast<int>(m_impl->sdfTraversalMode.load()),
                 m_impl->qmc.sobolMatrices,
                 m_impl->qmc.pixelScramble,
                 kMaxSobolDimensions,
+                m_impl->hostMarchParams.enableRaySort,
+                m_impl->d_raySortKeys,
+                m_impl->d_raySortIndices,
                 m_impl->stream)) {
             AppLog::instance().error(QStringLiteral("PathTracer sample kernel launch failed"));
             continue;

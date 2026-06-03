@@ -18,8 +18,6 @@ private:
 
     QSpinBox* m_renderSizeSpinDebounceSpinBox = nullptr;
     QSpinBox* m_maxSamplesSpinDebounceSpinBox = nullptr;
-    QPushButton* m_accelAabbColorButton = nullptr;
-    QPushButton* m_accelOctreeColorButton = nullptr;
-    QColor m_accelAabbColor;
-    QColor m_accelOctreeColor;
+    QPushButton* m_accelBvhColorButton = nullptr;
+    QColor m_accelBvhColor;
 };

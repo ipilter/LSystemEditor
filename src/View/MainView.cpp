@@ -27,9 +27,6 @@ constexpr int kDefaultMaxSamplesPerPixel = 1024;
 constexpr int kMinPreviewStepsPerLevel = 0;
 constexpr int kMaxPreviewStepsPerLevel = 128;
 constexpr int kDefaultPreviewStepsPerLevel = 0;
-constexpr int kMinOctreeMaxDepth = 1;
-constexpr int kMaxOctreeMaxDepth = 10;
-constexpr int kDefaultOctreeMaxDepth = 5;
 constexpr int kLogPanelHeight = 120;
 constexpr int kLogMaxBlockCount = 500;
 
@@ -115,32 +112,27 @@ MainView::MainView(QWidget* parent)
     visualModeRow->addWidget(m_sdfVisualModeComboBox, 1);
     renderLayout->addLayout(visualModeRow);
 
+    auto* traversalModeRow = new QHBoxLayout();
+    traversalModeRow->addWidget(new QLabel(QStringLiteral("Traversal:"), renderGroup));
+    m_sdfTraversalModeComboBox = new QComboBox(renderGroup);
+    m_sdfTraversalModeComboBox->addItem(QStringLiteral("Brute Force"));
+    m_sdfTraversalModeComboBox->addItem(QStringLiteral("BVH"));
+    m_sdfTraversalModeComboBox->setToolTip(
+        QStringLiteral(
+            "Brute Force: evaluate every object each march step. "
+            "BVH: object-level BVH culling with analytical conservative bounds; exact SDF near surfaces."));
+    traversalModeRow->addWidget(m_sdfTraversalModeComboBox, 1);
+    renderLayout->addLayout(traversalModeRow);
+
     auto* boundsOverlayRow = new QHBoxLayout();
     boundsOverlayRow->addWidget(new QLabel(QStringLiteral("Bounds:"), renderGroup));
     m_boundsOverlayComboBox = new QComboBox(renderGroup);
     m_boundsOverlayComboBox->addItem(QStringLiteral("Off"));
-    m_boundsOverlayComboBox->addItem(QStringLiteral("AABB"));
-    m_boundsOverlayComboBox->addItem(QStringLiteral("Octree"));
-    m_boundsOverlayComboBox->addItem(QStringLiteral("Octree Exterior"));
-    m_boundsOverlayComboBox->addItem(QStringLiteral("Octree Leaves"));
-    m_boundsOverlayComboBox->addItem(QStringLiteral("Both"));
+    m_boundsOverlayComboBox->addItem(QStringLiteral("BVH"));
     m_boundsOverlayComboBox->setToolTip(
-        QStringLiteral(
-            "Debug wireframe overlay for object AABBs and/or octree node bounds. "
-            "Octree Exterior: coarsest cells crossing the surface (straddle, parent does not). "
-            "Octree Leaves: leaf cells straddling the surface only."));
+        QStringLiteral("Debug wireframe overlay for BVH node bounds."));
     boundsOverlayRow->addWidget(m_boundsOverlayComboBox, 1);
     renderLayout->addLayout(boundsOverlayRow);
-
-    auto* octreeDepthRow = new QHBoxLayout();
-    octreeDepthRow->addWidget(new QLabel(QStringLiteral("Max depth:"), renderGroup));
-    m_octreeMaxDepthSpinBox = new QSpinBox(renderGroup);
-    m_octreeMaxDepthSpinBox->setRange(kMinOctreeMaxDepth, kMaxOctreeMaxDepth);
-    m_octreeMaxDepthSpinBox->setValue(kDefaultOctreeMaxDepth);
-    m_octreeMaxDepthSpinBox->setToolTip(
-        QStringLiteral("Maximum octree subdivision depth for SDF acceleration (rebuilds scene)"));
-    octreeDepthRow->addWidget(m_octreeMaxDepthSpinBox);
-    renderLayout->addLayout(octreeDepthRow);
 
     auto* iterationRow = new QHBoxLayout();
     iterationRow->addWidget(new QLabel(QStringLiteral("Iteration:"), renderGroup));
@@ -237,14 +229,14 @@ QComboBox* MainView::sdfVisualModeComboBox() const
     return m_sdfVisualModeComboBox;
 }
 
+QComboBox* MainView::sdfTraversalModeComboBox() const
+{
+    return m_sdfTraversalModeComboBox;
+}
+
 QComboBox* MainView::boundsOverlayComboBox() const
 {
     return m_boundsOverlayComboBox;
-}
-
-QSpinBox* MainView::octreeMaxDepthSpinBox() const
-{
-    return m_octreeMaxDepthSpinBox;
 }
 
 QPushButton* MainView::startButton() const

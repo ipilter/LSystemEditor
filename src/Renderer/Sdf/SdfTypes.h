@@ -18,8 +18,10 @@ struct SdfMarchParamsGpu
     float maxDistance = 100.0f;
     float surfaceEpsilon = 1.0e-4f;
     float normalEpsilon = 1.0e-4f;
+    float exactSwitchThreshold = 0.1f;
     int maxSteps = 256;
     int refineIterations = 10;
+    int enableRaySort = 1;
     float backgroundR = 10.0f / 255.0f;
     float backgroundG = 10.0f / 255.0f;
     float backgroundB = 10.0f / 255.0f;
@@ -43,12 +45,14 @@ enum class SdfDebugVisualMode : int
     HitDistance = 2,
 };
 
+enum class SdfTraversalMode : int
+{
+    BruteForce = 0,
+    BvhAccel = 1,
+};
+
 enum class SdfAccelBoundsOverlayMode : int
 {
     Off = 0,
-    Aabb = 1,
-    Octree = 2,
-    Both = 3,
-    OctreeExterior = 4,
-    OctreeLeaves = 5,
+    Bvh = 1,
 };

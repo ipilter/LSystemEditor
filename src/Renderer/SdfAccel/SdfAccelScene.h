@@ -33,7 +33,7 @@ public:
 
     bool isBuilt() const { return m_built; }
     const std::vector<SdfAccelObjectGpu>& objectsHost() const { return m_objects; }
-    const std::vector<SdfOctreeNode>& octreeNodesHost() const { return m_octreeNodes; }
+    const std::vector<SdfBvhNode>& bvhNodesHost() const { return m_bvhNodes; }
 
 private:
     struct PendingObject
@@ -44,7 +44,6 @@ private:
     SdfAccelBuildParams m_buildParams{};
     std::vector<PendingObject> m_pendingObjects;
 
-    std::vector<SdfOctreeNode> m_octreeNodes;
     std::vector<SdfBvhNode> m_bvhNodes;
     std::vector<SdfAccelObjectGpu> m_objects;
     std::vector<SdfAccelPayloadGpu> m_payloads;
@@ -53,7 +52,6 @@ private:
 
     SdfAccelSceneGpu* m_dScene = nullptr;
     SdfBvhNode* m_dBvhNodes = nullptr;
-    SdfOctreeNode* m_dOctreeNodes = nullptr;
     SdfAccelObjectGpu* m_dObjects = nullptr;
     SdfAccelPayloadGpu* m_dPayloads = nullptr;
 

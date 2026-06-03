@@ -10,9 +10,6 @@ constexpr int kMinMaxSamplesPerPixel = 0;
 constexpr int kMaxMaxSamplesPerPixel = 1'000'000;
 constexpr int kMinPreviewStepsPerLevel = 0;
 constexpr int kMaxPreviewStepsPerLevel = 128;
-constexpr int kMinOctreeMaxDepth = 1;
-constexpr int kMaxOctreeMaxDepth = 10;
-
 } // namespace
 
 SceneModel::SceneModel(QObject* parent)
@@ -21,9 +18,8 @@ SceneModel::SceneModel(QObject* parent)
     , m_renderSize(AppSettings::instance().renderSize())
     , m_maxSamplesPerPixel(AppSettings::instance().maxSamplesPerPixel())
     , m_previewStepsPerLevel(AppSettings::instance().previewStepsPerLevel())
-    , m_accelAabbColor(AppSettings::instance().accelAabbColor())
-    , m_accelOctreeColor(AppSettings::instance().accelOctreeColor())
-    , m_octreeMaxDepth(AppSettings::instance().octreeMaxDepth())
+    , m_accelBvhColor(AppSettings::instance().accelBvhColor())
+    , m_sdfTraversalMode(AppSettings::instance().sdfTraversalMode())
     , m_sdfShapes(sdfDefaultSceneShapes())
 {
 }
@@ -117,6 +113,23 @@ void SceneModel::setSdfVisualMode(SdfDebugVisualMode mode)
     emit sdfVisualModeChanged(m_sdfVisualMode);
 }
 
+SdfTraversalMode SceneModel::sdfTraversalMode() const
+{
+    return m_sdfTraversalMode;
+}
+
+void SceneModel::setSdfTraversalMode(SdfTraversalMode mode)
+{
+    const SdfTraversalMode clamped = clampTraversalMode(mode);
+    if (m_sdfTraversalMode == clamped) {
+        return;
+    }
+
+    m_sdfTraversalMode = clamped;
+    AppSettings::instance().setSdfTraversalMode(clamped);
+    emit sdfTraversalModeChanged(m_sdfTraversalMode);
+}
+
 SdfAccelBoundsOverlayMode SceneModel::boundsOverlayMode() const
 {
     return m_boundsOverlayMode;
@@ -133,53 +146,20 @@ void SceneModel::setBoundsOverlayMode(SdfAccelBoundsOverlayMode mode)
     emit boundsOverlayModeChanged(m_boundsOverlayMode);
 }
 
-QColor SceneModel::accelAabbColor() const
+QColor SceneModel::accelBvhColor() const
 {
-    return m_accelAabbColor;
+    return m_accelBvhColor;
 }
 
-void SceneModel::setAccelAabbColor(const QColor& color)
+void SceneModel::setAccelBvhColor(const QColor& color)
 {
-    if (!color.isValid() || m_accelAabbColor == color) {
+    if (!color.isValid() || m_accelBvhColor == color) {
         return;
     }
 
-    m_accelAabbColor = color;
-    AppSettings::instance().setAccelAabbColor(color);
-    emit accelAabbColorChanged(m_accelAabbColor);
-}
-
-QColor SceneModel::accelOctreeColor() const
-{
-    return m_accelOctreeColor;
-}
-
-void SceneModel::setAccelOctreeColor(const QColor& color)
-{
-    if (!color.isValid() || m_accelOctreeColor == color) {
-        return;
-    }
-
-    m_accelOctreeColor = color;
-    AppSettings::instance().setAccelOctreeColor(color);
-    emit accelOctreeColorChanged(m_accelOctreeColor);
-}
-
-int SceneModel::octreeMaxDepth() const
-{
-    return m_octreeMaxDepth;
-}
-
-void SceneModel::setOctreeMaxDepth(int value)
-{
-    const int clamped = clampOctreeMaxDepth(value);
-    if (m_octreeMaxDepth == clamped) {
-        return;
-    }
-
-    m_octreeMaxDepth = clamped;
-    AppSettings::instance().setOctreeMaxDepth(clamped);
-    emit octreeMaxDepthChanged(m_octreeMaxDepth);
+    m_accelBvhColor = color;
+    AppSettings::instance().setAccelBvhColor(color);
+    emit accelBvhColorChanged(m_accelBvhColor);
 }
 
 const std::vector<std::unique_ptr<SdfShape>>& SceneModel::sdfShapes() const
@@ -243,17 +223,6 @@ int SceneModel::clampPreviewSteps(int value)
     return value;
 }
 
-int SceneModel::clampOctreeMaxDepth(int value)
-{
-    if (value < kMinOctreeMaxDepth) {
-        return kMinOctreeMaxDepth;
-    }
-    if (value > kMaxOctreeMaxDepth) {
-        return kMaxOctreeMaxDepth;
-    }
-    return value;
-}
-
 SdfDebugVisualMode SceneModel::clampVisualMode(SdfDebugVisualMode mode)
 {
     switch (mode) {
@@ -266,17 +235,29 @@ SdfDebugVisualMode SceneModel::clampVisualMode(SdfDebugVisualMode mode)
     }
 }
 
+SdfTraversalMode SceneModel::clampTraversalMode(SdfTraversalMode mode)
+{
+    switch (mode) {
+    case SdfTraversalMode::BruteForce:
+    case SdfTraversalMode::BvhAccel:
+        return mode;
+    default:
+        return SdfTraversalMode::BvhAccel;
+    }
+}
+
 SdfAccelBoundsOverlayMode SceneModel::clampBoundsOverlayMode(SdfAccelBoundsOverlayMode mode)
 {
     switch (mode) {
     case SdfAccelBoundsOverlayMode::Off:
-    case SdfAccelBoundsOverlayMode::Aabb:
-    case SdfAccelBoundsOverlayMode::Octree:
-    case SdfAccelBoundsOverlayMode::Both:
-    case SdfAccelBoundsOverlayMode::OctreeExterior:
-    case SdfAccelBoundsOverlayMode::OctreeLeaves:
+    case SdfAccelBoundsOverlayMode::Bvh:
         return mode;
-    default:
+    default: {
+        const int raw = static_cast<int>(mode);
+        if (raw == 1 || raw == 2 || raw == 3) {
+            return SdfAccelBoundsOverlayMode::Bvh;
+        }
         return SdfAccelBoundsOverlayMode::Off;
+    }
     }
 }

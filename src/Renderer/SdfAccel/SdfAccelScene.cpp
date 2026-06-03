@@ -1,7 +1,7 @@
 #include "SdfAccelScene.h"
 
+#include "SdfAccelTraverseCore.h"
 #include "SdfBvhBuilder.h"
-#include "SdfOctreeBuilder.h"
 #include "SdfSceneContent.h"
 
 #include <cuda_runtime.h>
@@ -17,7 +17,6 @@ SdfAccelScene::~SdfAccelScene()
 void SdfAccelScene::clear()
 {
     m_pendingObjects.clear();
-    m_octreeNodes.clear();
     m_bvhNodes.clear();
     m_objects.clear();
     m_payloads.clear();
@@ -52,7 +51,6 @@ bool SdfAccelScene::build()
         return false;
     }
 
-    m_octreeNodes.clear();
     m_bvhNodes.clear();
     m_objects.clear();
     m_payloads.clear();
@@ -67,22 +65,18 @@ bool SdfAccelScene::build()
         const SdfAccelField& field = m_pendingObjects[i].field;
         m_payloads.push_back(field.payload);
 
-        std::vector<SdfOctreeNode> objectNodes;
-        uint32_t objectRootIndex = 0;
-        if (!sdfAccelBuildOctreeForField(field, m_buildParams, objectNodes, objectRootIndex)) {
-            return false;
-        }
-
         SdfAccelObjectGpu objectGpu{};
         objectGpu.payloadIndex = static_cast<uint32_t>(i);
-        objectGpu.octreeNodeOffset = static_cast<uint32_t>(m_octreeNodes.size());
-        objectGpu.octreeRootIndex = objectRootIndex;
         objectGpu.center = field.worldCenter;
         objectGpu.boundsMin = field.localBoundsMin;
         objectGpu.boundsMax = field.localBoundsMax;
-        m_objects.push_back(objectGpu);
 
-        m_octreeNodes.insert(m_octreeNodes.end(), objectNodes.begin(), objectNodes.end());
+        const SdfAccelPayloadGpu& payload = m_payloads.back();
+        if (sdfAccelPayloadIsAnalytical(&payload)) {
+            objectGpu.flags = SdfObjectFlagAnalytical;
+        }
+
+        m_objects.push_back(objectGpu);
     }
 
     uint32_t bvhRootIndex = 0;
@@ -92,11 +86,9 @@ bool SdfAccelScene::build()
 
     m_hostScene = SdfAccelSceneGpu{};
     m_hostScene.bvhNodes = m_bvhNodes.data();
-    m_hostScene.octreeNodes = m_octreeNodes.data();
     m_hostScene.objects = m_objects.data();
     m_hostScene.payloads = m_payloads.data();
     m_hostScene.bvhNodeCount = static_cast<uint32_t>(m_bvhNodes.size());
-    m_hostScene.octreeNodeCount = static_cast<uint32_t>(m_octreeNodes.size());
     m_hostScene.objectCount = static_cast<uint32_t>(m_objects.size());
     m_hostScene.payloadCount = static_cast<uint32_t>(m_payloads.size());
     m_hostScene.bvhRootIndex = bvhRootIndex;
@@ -124,10 +116,6 @@ void SdfAccelScene::release()
     if (m_dBvhNodes != nullptr) {
         cudaFree(m_dBvhNodes);
         m_dBvhNodes = nullptr;
-    }
-    if (m_dOctreeNodes != nullptr) {
-        cudaFree(m_dOctreeNodes);
-        m_dOctreeNodes = nullptr;
     }
     if (m_dObjects != nullptr) {
         cudaFree(m_dObjects);
@@ -158,10 +146,6 @@ bool SdfAccelScene::upload(cudaStream_t stream)
         cudaFree(m_dBvhNodes);
         m_dBvhNodes = nullptr;
     }
-    if (m_dOctreeNodes != nullptr) {
-        cudaFree(m_dOctreeNodes);
-        m_dOctreeNodes = nullptr;
-    }
     if (m_dObjects != nullptr) {
         cudaFree(m_dObjects);
         m_dObjects = nullptr;
@@ -189,10 +173,6 @@ bool SdfAccelScene::upload(cudaStream_t stream)
         release();
         return false;
     }
-    if (!allocAndCopy(&m_dOctreeNodes, m_octreeNodes)) {
-        release();
-        return false;
-    }
     if (!allocAndCopy(&m_dObjects, m_objects)) {
         release();
         return false;
@@ -204,11 +184,9 @@ bool SdfAccelScene::upload(cudaStream_t stream)
 
     SdfAccelSceneGpu deviceScene{};
     deviceScene.bvhNodes = m_dBvhNodes;
-    deviceScene.octreeNodes = m_dOctreeNodes;
     deviceScene.objects = m_dObjects;
     deviceScene.payloads = m_dPayloads;
     deviceScene.bvhNodeCount = static_cast<uint32_t>(m_bvhNodes.size());
-    deviceScene.octreeNodeCount = static_cast<uint32_t>(m_octreeNodes.size());
     deviceScene.objectCount = static_cast<uint32_t>(m_objects.size());
     deviceScene.payloadCount = static_cast<uint32_t>(m_payloads.size());
     deviceScene.bvhRootIndex = m_hostScene.bvhRootIndex;
@@ -218,10 +196,6 @@ bool SdfAccelScene::upload(cudaStream_t stream)
         if (m_dBvhNodes != nullptr) {
             cudaFree(m_dBvhNodes);
             m_dBvhNodes = nullptr;
-        }
-        if (m_dOctreeNodes != nullptr) {
-            cudaFree(m_dOctreeNodes);
-            m_dOctreeNodes = nullptr;
         }
         if (m_dObjects != nullptr) {
             cudaFree(m_dObjects);

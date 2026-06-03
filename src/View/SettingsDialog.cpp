@@ -28,8 +28,7 @@ QString colorButtonStyleSheet(const QColor& color)
 
 SettingsDialog::SettingsDialog(QWidget* parent)
     : QDialog(parent)
-    , m_accelAabbColor(AppSettings::instance().accelAabbColor())
-    , m_accelOctreeColor(AppSettings::instance().accelOctreeColor())
+    , m_accelBvhColor(AppSettings::instance().accelBvhColor())
 {
     setWindowTitle(QStringLiteral("Settings"));
     setModal(true);
@@ -56,33 +55,19 @@ SettingsDialog::SettingsDialog(QWidget* parent)
         AppSettings::instance().debounceMsFor(DebounceElementIds::kMaxSamples));
     formLayout->addRow(QStringLiteral("Samples spin debounce:"), m_maxSamplesSpinDebounceSpinBox);
 
-    m_accelAabbColorButton = new QPushButton(this);
-    m_accelAabbColorButton->setToolTip(QStringLiteral("Wireframe color for object AABB overlay"));
-    connect(m_accelAabbColorButton, &QPushButton::clicked, this, [this]() {
+    m_accelBvhColorButton = new QPushButton(this);
+    m_accelBvhColorButton->setToolTip(QStringLiteral("Wireframe color for BVH bounds overlay"));
+    connect(m_accelBvhColorButton, &QPushButton::clicked, this, [this]() {
         const QColor chosen = QColorDialog::getColor(
-            m_accelAabbColor,
+            m_accelBvhColor,
             this,
-            QStringLiteral("AABB overlay color"));
+            QStringLiteral("BVH overlay color"));
         if (chosen.isValid()) {
-            m_accelAabbColor = chosen;
+            m_accelBvhColor = chosen;
             syncColorButtonStyles();
         }
     });
-    formLayout->addRow(QStringLiteral("AABB overlay color:"), m_accelAabbColorButton);
-
-    m_accelOctreeColorButton = new QPushButton(this);
-    m_accelOctreeColorButton->setToolTip(QStringLiteral("Wireframe color for octree node overlay"));
-    connect(m_accelOctreeColorButton, &QPushButton::clicked, this, [this]() {
-        const QColor chosen = QColorDialog::getColor(
-            m_accelOctreeColor,
-            this,
-            QStringLiteral("Octree overlay color"));
-        if (chosen.isValid()) {
-            m_accelOctreeColor = chosen;
-            syncColorButtonStyles();
-        }
-    });
-    formLayout->addRow(QStringLiteral("Octree overlay color:"), m_accelOctreeColorButton);
+    formLayout->addRow(QStringLiteral("BVH overlay color:"), m_accelBvhColorButton);
 
     syncColorButtonStyles();
     rootLayout->addLayout(formLayout);
@@ -95,8 +80,7 @@ SettingsDialog::SettingsDialog(QWidget* parent)
         AppSettings::instance().setDebounceMs(
             DebounceElementIds::kMaxSamples,
             m_maxSamplesSpinDebounceSpinBox->value());
-        AppSettings::instance().setAccelAabbColor(m_accelAabbColor);
-        AppSettings::instance().setAccelOctreeColor(m_accelOctreeColor);
+        AppSettings::instance().setAccelBvhColor(m_accelBvhColor);
         accept();
     });
     connect(buttonBox, &QDialogButtonBox::rejected, this, &QDialog::reject);
@@ -105,6 +89,5 @@ SettingsDialog::SettingsDialog(QWidget* parent)
 
 void SettingsDialog::syncColorButtonStyles()
 {
-    m_accelAabbColorButton->setStyleSheet(colorButtonStyleSheet(m_accelAabbColor));
-    m_accelOctreeColorButton->setStyleSheet(colorButtonStyleSheet(m_accelOctreeColor));
+    m_accelBvhColorButton->setStyleSheet(colorButtonStyleSheet(m_accelBvhColor));
 }

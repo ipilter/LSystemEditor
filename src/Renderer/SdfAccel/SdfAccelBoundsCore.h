@@ -50,46 +50,6 @@ SDF_ACCEL_CORE_FN float sdfAccelMaxAxisHalfExtent(SdfFloat3 halfExtent)
     return sdfMax3(halfExtent.x, halfExtent.y, halfExtent.z);
 }
 
-SDF_ACCEL_CORE_FN float sdfAccelAutoMinNodeSize(SdfFloat3 halfExtent, int maxDepth)
-{
-    const float maxAxisExtent = 2.0f * sdfAccelMaxAxisHalfExtent(halfExtent);
-    const int depth = maxDepth > 0 ? maxDepth : 1;
-    const int divisor = 1 << depth;
-    return maxAxisExtent / static_cast<float>(divisor);
-}
-
-SDF_ACCEL_CORE_FN SdfFloat3 sdfAccelAabbCorner(const SdfAccelAabb& aabb, int cornerIndex)
-{
-    return sdfMakeFloat3(
-        (cornerIndex & 1) ? aabb.max.x : aabb.min.x,
-        (cornerIndex & 2) ? aabb.max.y : aabb.min.y,
-        (cornerIndex & 4) ? aabb.max.z : aabb.min.z);
-}
-
-SDF_ACCEL_CORE_FN SdfAccelNodeInterval sdfAccelComputeNodeInterval(
-    SdfFloat3 center,
-    SdfFloat3 halfExtent,
-    float (*evalFn)(SdfFloat3, void*),
-    void* evalContext)
-{
-    const SdfAccelAabb aabb = sdfAccelAabbFromCenterHalfExtent(center, halfExtent);
-    const float boundRadius = sdfAccelBoundRadius(halfExtent);
-    const float dCenter = evalFn(center, evalContext);
-
-    float dCornerMin = dCenter;
-    float dCornerMax = dCenter;
-    for (int i = 0; i < 8; ++i) {
-        const float dCorner = evalFn(sdfAccelAabbCorner(aabb, i), evalContext);
-        dCornerMin = sdfMin2(dCornerMin, dCorner);
-        dCornerMax = sdfMax2(dCornerMax, dCorner);
-    }
-
-    SdfAccelNodeInterval interval{};
-    interval.dMin = sdfMin2(dCenter - boundRadius, dCornerMin);
-    interval.dMax = sdfMax2(dCenter + boundRadius, dCornerMax);
-    return interval;
-}
-
 SDF_ACCEL_CORE_FN bool sdfAccelPointInAabb(SdfFloat3 p, SdfFloat3 boundsMin, SdfFloat3 boundsMax)
 {
     return p.x >= boundsMin.x && p.x <= boundsMax.x && p.y >= boundsMin.y && p.y <= boundsMax.y
@@ -102,37 +62,6 @@ SDF_ACCEL_CORE_FN float sdfAccelPointAabbDistance(SdfFloat3 p, SdfFloat3 boundsM
     const float dy = sdfMax3(boundsMin.y - p.y, 0.0f, p.y - boundsMax.y);
     const float dz = sdfMax3(boundsMin.z - p.z, 0.0f, p.z - boundsMax.z);
     return sdfLength3(sdfMakeFloat3(dx, dy, dz));
-}
-
-SDF_ACCEL_CORE_FN int sdfAccelOctantIndex(SdfFloat3 p, SdfFloat3 center)
-{
-    int octant = 0;
-    if (p.x >= center.x) {
-        octant |= 1;
-    }
-    if (p.y >= center.y) {
-        octant |= 2;
-    }
-    if (p.z >= center.z) {
-        octant |= 4;
-    }
-    return octant;
-}
-
-SDF_ACCEL_CORE_FN SdfFloat3 sdfAccelChildCenter(SdfFloat3 parentCenter, SdfFloat3 parentHalfExtent, int octant)
-{
-    const float sx = (octant & 1) ? 1.0f : -1.0f;
-    const float sy = (octant & 2) ? 1.0f : -1.0f;
-    const float sz = (octant & 4) ? 1.0f : -1.0f;
-    return sdfMakeFloat3(
-        parentCenter.x + sx * parentHalfExtent.x * 0.5f,
-        parentCenter.y + sy * parentHalfExtent.y * 0.5f,
-        parentCenter.z + sz * parentHalfExtent.z * 0.5f);
-}
-
-SDF_ACCEL_CORE_FN SdfFloat3 sdfAccelChildHalfExtent(SdfFloat3 parentHalfExtent)
-{
-    return sdfScale3(parentHalfExtent, 0.5f);
 }
 
 SDF_ACCEL_CORE_FN SdfAccelAabb sdfAccelSphereBounds(SdfFloat3 center, float radius)

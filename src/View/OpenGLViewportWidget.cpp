@@ -192,28 +192,18 @@ void OpenGLViewportWidget::setSceneModel(SceneModel* model)
         update();
     });
 
+    connect(m_model, &SceneModel::sdfTraversalModeChanged, this, [this](SdfTraversalMode mode) {
+        m_pathTracer.setSdfTraversalMode(mode);
+        m_pathTracer.resetAccumulation();
+        update();
+    });
+
     connect(m_model, &SceneModel::boundsOverlayModeChanged, this, [this](SdfAccelBoundsOverlayMode) {
         update();
     });
 
-    connect(m_model, &SceneModel::accelAabbColorChanged, this, [this](const QColor&) {
+    connect(m_model, &SceneModel::accelBvhColorChanged, this, [this](const QColor&) {
         rebuildBoundsOverlay();
-        update();
-    });
-
-    connect(m_model, &SceneModel::accelOctreeColorChanged, this, [this](const QColor&) {
-        rebuildBoundsOverlay();
-        update();
-    });
-
-    connect(m_model, &SceneModel::octreeMaxDepthChanged, this, [this](int depth) {
-        m_pathTracer.setOctreeMaxDepth(depth);
-        if (!m_glInitialized) {
-            return;
-        }
-        makeCurrent();
-        recreateGpuBuffers();
-        doneCurrent();
         update();
     });
 
@@ -340,7 +330,7 @@ void OpenGLViewportWidget::rebuildBoundsOverlay()
         return;
     }
 
-    m_pathTracer.rebuildAccelBoundsMesh(m_model->accelAabbColor(), m_model->accelOctreeColor());
+    m_pathTracer.rebuildAccelBoundsMesh(m_model->accelBvhColor());
     m_boundsOverlay.rebuild(this, m_pathTracer.accelBoundsMesh());
 }
 
@@ -377,8 +367,7 @@ void OpenGLViewportWidget::drawBoundsOverlay()
         this,
         viewProj,
         m_model->boundsOverlayMode(),
-        m_model->accelAabbColor(),
-        m_model->accelOctreeColor());
+        m_model->accelBvhColor());
 
     glDisable(GL_SCISSOR_TEST);
     glDisable(GL_DEPTH_TEST);
@@ -543,8 +532,6 @@ void OpenGLViewportWidget::recreateGpuBuffers()
     }
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
-    m_pathTracer.setOctreeMaxDepth(m_model->octreeMaxDepth());
-
     if (!m_pathTracer.configure(w, h, m_pbos[0], m_pbos[1], m_model->sdfShapes())) {
         AppLog::instance().error(QStringLiteral("PathTracer configure failed for %1x%2").arg(w).arg(h));
         return;
@@ -557,6 +544,7 @@ void OpenGLViewportWidget::recreateGpuBuffers()
     m_pathTracer.setMaxSamplesPerPixel(m_model->maxSamplesPerPixel());
     m_pathTracer.setPreviewStepsPerLevel(m_model->previewStepsPerLevel());
     m_pathTracer.setVisualMode(m_model->sdfVisualMode());
+    m_pathTracer.setSdfTraversalMode(m_model->sdfTraversalMode());
 
     m_model->setPboIds(m_pbos[0], m_pbos[1]);
 

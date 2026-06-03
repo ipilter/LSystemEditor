@@ -24,8 +24,8 @@ public:
     QSpinBox* maxSamplesSpinBox() const;
     QSpinBox* previewStepsSpinBox() const;
     QComboBox* sdfVisualModeComboBox() const;
+    QComboBox* sdfTraversalModeComboBox() const;
     QComboBox* boundsOverlayComboBox() const;
-    QSpinBox* octreeMaxDepthSpinBox() const;
     QPushButton* startButton() const;
     QPushButton* stopButton() const;
     QPushButton* settingsButton() const;
@@ -47,8 +47,8 @@ private:
     QSpinBox* m_maxSamplesSpinBox = nullptr;
     QSpinBox* m_previewStepsSpinBox = nullptr;
     QComboBox* m_sdfVisualModeComboBox = nullptr;
+    QComboBox* m_sdfTraversalModeComboBox = nullptr;
     QComboBox* m_boundsOverlayComboBox = nullptr;
-    QSpinBox* m_octreeMaxDepthSpinBox = nullptr;
     QLabel* m_iterationLabel = nullptr;
     QPushButton* m_startButton = nullptr;
     QPushButton* m_stopButton = nullptr;

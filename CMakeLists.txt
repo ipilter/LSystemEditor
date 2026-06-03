@@ -70,14 +70,13 @@ set(PATHTRACER_SDF_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Sdf/Shapes/CappedConeSdf.cpp")
 
 set(PATHTRACER_SDF_ACCEL_SOURCES
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/SdfAccel/SdfOctreeBuilder.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/SdfAccel/SdfBvhBuilder.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/SdfAccel/SdfAccelScene.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/SdfAccel/SdfSceneContent.cpp")
 
 list(FILTER PATHTRACER_SOURCES EXCLUDE REGEX ".*/Renderer/Sampling/(SobolDirectionData|SobolTables|QmcGpuResources)\\.cpp$")
 list(FILTER PATHTRACER_SOURCES EXCLUDE REGEX ".*/Renderer/Sdf/Shapes/(SdfShape|SphereSdf|CylinderSdf|CappedConeSdf)\\.cpp$")
-list(FILTER PATHTRACER_SOURCES EXCLUDE REGEX ".*/Renderer/SdfAccel/(SdfOctreeBuilder|SdfBvhBuilder|SdfAccelScene|SdfSceneContent)\\.cpp$")
+list(FILTER PATHTRACER_SOURCES EXCLUDE REGEX ".*/Renderer/SdfAccel/(SdfBvhBuilder|SdfAccelScene|SdfSceneContent)\\.cpp$")
 
 add_library(pathtracer_sampling STATIC ${PATHTRACER_SAMPLING_SOURCES})
 target_include_directories(pathtracer_sampling PUBLIC
