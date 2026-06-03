@@ -28,7 +28,7 @@ if(DEFINED ENV{QTDIR})
     list(PREPEND CMAKE_PREFIX_PATH "$ENV{QTDIR}")
 endif()
 
-find_package(Qt6 REQUIRED COMPONENTS Widgets OpenGL OpenGLWidgets)
+find_package(Qt6 REQUIRED COMPONENTS Gui Widgets OpenGL OpenGLWidgets)
 find_package(CUDAToolkit REQUIRED)
 
 enable_language(CUDA)
@@ -64,16 +64,20 @@ set(PATHTRACER_SAMPLING_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Sampling/QmcGpuResources.cpp")
 
 set(PATHTRACER_SDF_SOURCES
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Sdf/SdfRayMarcher.cpp")
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Sdf/Shapes/SdfShape.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Sdf/Shapes/SphereSdf.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Sdf/Shapes/CylinderSdf.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Sdf/Shapes/CappedConeSdf.cpp")
 
 set(PATHTRACER_SDF_ACCEL_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/SdfAccel/SdfOctreeBuilder.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/SdfAccel/SdfBvhBuilder.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/SdfAccel/SdfAccelScene.cpp")
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/SdfAccel/SdfAccelScene.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/SdfAccel/SdfSceneContent.cpp")
 
 list(FILTER PATHTRACER_SOURCES EXCLUDE REGEX ".*/Renderer/Sampling/(SobolDirectionData|SobolTables|QmcGpuResources)\\.cpp$")
-list(FILTER PATHTRACER_SOURCES EXCLUDE REGEX ".*/Renderer/Sdf/SdfRayMarcher\\.cpp$")
-list(FILTER PATHTRACER_SOURCES EXCLUDE REGEX ".*/Renderer/SdfAccel/(SdfOctreeBuilder|SdfBvhBuilder|SdfAccelScene)\\.cpp$")
+list(FILTER PATHTRACER_SOURCES EXCLUDE REGEX ".*/Renderer/Sdf/Shapes/(SdfShape|SphereSdf|CylinderSdf|CappedConeSdf)\\.cpp$")
+list(FILTER PATHTRACER_SOURCES EXCLUDE REGEX ".*/Renderer/SdfAccel/(SdfOctreeBuilder|SdfBvhBuilder|SdfAccelScene|SdfSceneContent)\\.cpp$")
 
 add_library(pathtracer_sampling STATIC ${PATHTRACER_SAMPLING_SOURCES})
 target_include_directories(pathtracer_sampling PUBLIC
@@ -85,7 +89,8 @@ set_target_properties(pathtracer_sampling PROPERTIES FOLDER "src")
 add_library(pathtracer_sdf STATIC ${PATHTRACER_SDF_SOURCES})
 target_include_directories(pathtracer_sdf PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Sdf")
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Sdf"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/SdfAccel")
 target_link_libraries(pathtracer_sdf PUBLIC CUDA::cudart)
 set_target_properties(pathtracer_sdf PROPERTIES FOLDER "src")
 
@@ -160,17 +165,8 @@ set_target_properties(qmc_sampling_tests PROPERTIES FOLDER "tests")
 
 add_test(NAME QmcSampling COMMAND qmc_sampling_tests)
 
-add_executable(sdf_raymarcher_tests tests/SdfRayMarcherTests.cpp)
-target_link_libraries(sdf_raymarcher_tests PRIVATE pathtracer_sdf)
-target_include_directories(sdf_raymarcher_tests PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Sdf"
-    "${CMAKE_CURRENT_SOURCE_DIR}/tests")
-set_target_properties(sdf_raymarcher_tests PROPERTIES FOLDER "tests")
-
-add_test(NAME SdfRayMarcher COMMAND sdf_raymarcher_tests)
-
 add_executable(sdf_accel_tests tests/SdfAccelTests.cpp)
-target_link_libraries(sdf_accel_tests PRIVATE pathtracer_sdf_accel pathtracer_sdf)
+target_link_libraries(sdf_accel_tests PRIVATE pathtracer_sdf_accel pathtracer_sdf Qt6::Gui)
 target_include_directories(sdf_accel_tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/SdfAccel"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Sdf"

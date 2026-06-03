@@ -1,19 +1,11 @@
 #include "SdfAccelScene.h"
 
-#include "SdfAccelRayMarchCore.h"
 #include "SdfBvhBuilder.h"
 #include "SdfOctreeBuilder.h"
+#include "SdfSceneContent.h"
 
 #include <cuda_runtime.h>
 #include <type_traits>
-
-namespace {
-
-constexpr float kPrimitiveRadius = 0.5f;
-constexpr float kPrimitiveHalfHeight = 1.0f;
-constexpr float kLayoutSpacing = 2.5f;
-
-} // namespace
 
 SdfAccelScene::SdfAccelScene() = default;
 
@@ -41,38 +33,13 @@ void SdfAccelScene::setBuildParams(const SdfAccelBuildParams& params)
 
 void SdfAccelScene::setDefaultLayout()
 {
-    clear();
-    addCylinder(sdfMakeFloat3(-kLayoutSpacing, 0.0f, 0.0f), sdfMakeFloat2(kPrimitiveRadius, kPrimitiveHalfHeight));
-    addSphere(sdfMakeFloat3(0.0f, 0.0f, 0.0f), kPrimitiveRadius);
-    addCappedCone(
-        sdfMakeFloat3(kLayoutSpacing, 0.0f, 0.0f),
-        kPrimitiveHalfHeight,
-        kPrimitiveRadius,
-        kPrimitiveRadius * 0.25f);
+    sdfAccelPopulateScene(*this, sdfDefaultSceneShapes());
 }
 
-void SdfAccelScene::addSphere(SdfFloat3 center, float radius)
+void SdfAccelScene::addShape(const SdfShape& shape)
 {
     PendingObject object{};
-    object.field = sdfAccelMakeSphereField(center, radius);
-    m_pendingObjects.push_back(object);
-    m_built = false;
-    m_deviceDirty = true;
-}
-
-void SdfAccelScene::addCylinder(SdfFloat3 center, SdfFloat2 halfExtents)
-{
-    PendingObject object{};
-    object.field = sdfAccelMakeCylinderField(center, halfExtents);
-    m_pendingObjects.push_back(object);
-    m_built = false;
-    m_deviceDirty = true;
-}
-
-void SdfAccelScene::addCappedCone(SdfFloat3 center, float halfHeight, float radiusBottom, float radiusTop)
-{
-    PendingObject object{};
-    object.field = sdfAccelMakeCappedConeField(center, halfHeight, radiusBottom, radiusTop);
+    object.field = shape.buildAccelField();
     m_pendingObjects.push_back(object);
     m_built = false;
     m_deviceDirty = true;
@@ -107,7 +74,6 @@ bool SdfAccelScene::build()
         }
 
         SdfAccelObjectGpu objectGpu{};
-        objectGpu.evalKind = static_cast<uint32_t>(SdfAccelEvalKind::AnalyticPrimitive);
         objectGpu.payloadIndex = static_cast<uint32_t>(i);
         objectGpu.octreeNodeOffset = static_cast<uint32_t>(m_octreeNodes.size());
         objectGpu.octreeRootIndex = objectRootIndex;
@@ -270,20 +236,4 @@ bool SdfAccelScene::upload(cudaStream_t stream)
 
     m_deviceDirty = false;
     return true;
-}
-
-float SdfAccelScene::evalSDF(SdfFloat3 p) const
-{
-    if (!m_built) {
-        return 1.0e20f;
-    }
-    return sdfAccelSceneSDF(p, &m_hostScene);
-}
-
-SdfHit SdfAccelScene::rayMarch(SdfFloat3 ro, SdfFloat3 rd, const SdfMarchParamsGpu& params) const
-{
-    if (!m_built) {
-        return SdfHit{};
-    }
-    return sdfAccelRayMarch(ro, rd, &m_hostScene, &params);
 }

@@ -186,7 +186,7 @@ void OpenGLViewportWidget::setSceneModel(SceneModel* model)
         m_pathTracer.setPreviewStepsPerLevel(steps);
     });
 
-    connect(m_model, &SceneModel::sdfVisualModeChanged, this, [this](SdfVisualMode mode) {
+    connect(m_model, &SceneModel::sdfVisualModeChanged, this, [this](SdfDebugVisualMode mode) {
         m_pathTracer.setVisualMode(mode);
         m_pathTracer.resetAccumulation();
         update();
@@ -203,6 +203,32 @@ void OpenGLViewportWidget::setSceneModel(SceneModel* model)
 
     connect(m_model, &SceneModel::accelOctreeColorChanged, this, [this](const QColor&) {
         rebuildBoundsOverlay();
+        update();
+    });
+
+    connect(m_model, &SceneModel::octreeMaxDepthChanged, this, [this](int depth) {
+        m_pathTracer.setOctreeMaxDepth(depth);
+        if (!m_glInitialized) {
+            return;
+        }
+        makeCurrent();
+        recreateGpuBuffers();
+        doneCurrent();
+        update();
+    });
+
+    connect(m_model, &SceneModel::sdfSceneChanged, this, [this]() {
+        if (!m_glInitialized || m_model == nullptr) {
+            return;
+        }
+        makeCurrent();
+        if (!m_pathTracer.rebuildAccelScene(m_model->sdfShapes())) {
+            doneCurrent();
+            return;
+        }
+        rebuildBoundsOverlay();
+        restartRender();
+        doneCurrent();
         update();
     });
 
@@ -517,7 +543,9 @@ void OpenGLViewportWidget::recreateGpuBuffers()
     }
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
-    if (!m_pathTracer.configure(w, h, m_pbos[0], m_pbos[1])) {
+    m_pathTracer.setOctreeMaxDepth(m_model->octreeMaxDepth());
+
+    if (!m_pathTracer.configure(w, h, m_pbos[0], m_pbos[1], m_model->sdfShapes())) {
         AppLog::instance().error(QStringLiteral("PathTracer configure failed for %1x%2").arg(w).arg(h));
         return;
     }

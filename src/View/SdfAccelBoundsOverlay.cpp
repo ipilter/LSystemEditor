@@ -88,8 +88,12 @@ void SdfAccelBoundsOverlay::release(QOpenGLFunctions_4_5_Core* gl)
     }
 
     m_aabbVertexCount = 0;
-    m_octreeVertexCount = 0;
-    m_aabbByteOffset = 0;
+    m_octreeFullFirstVertex = 0;
+    m_octreeFullVertexCount = 0;
+    m_octreeExteriorFirstVertex = 0;
+    m_octreeExteriorVertexCount = 0;
+    m_octreeLeavesFirstVertex = 0;
+    m_octreeLeavesVertexCount = 0;
     m_initialized = false;
     m_gl = nullptr;
 }
@@ -101,13 +105,23 @@ void SdfAccelBoundsOverlay::rebuild(QOpenGLFunctions_4_5_Core* gl, const SdfAcce
     }
 
     std::vector<SdfAccelBoundsLineVertex> combined;
-    combined.reserve(mesh.aabbLines.size() + mesh.octreeLines.size());
+    combined.reserve(
+        mesh.aabbLines.size() + mesh.octreeFullLines.size() + mesh.octreeExteriorLines.size()
+        + mesh.octreeLeavesLines.size());
     combined.insert(combined.end(), mesh.aabbLines.begin(), mesh.aabbLines.end());
-    m_aabbByteOffset = mesh.aabbLines.size() * sizeof(SdfAccelBoundsLineVertex);
-    combined.insert(combined.end(), mesh.octreeLines.begin(), mesh.octreeLines.end());
 
     m_aabbVertexCount = static_cast<int>(mesh.aabbLines.size());
-    m_octreeVertexCount = static_cast<int>(mesh.octreeLines.size());
+    m_octreeFullFirstVertex = m_aabbVertexCount;
+    combined.insert(combined.end(), mesh.octreeFullLines.begin(), mesh.octreeFullLines.end());
+    m_octreeFullVertexCount = static_cast<int>(mesh.octreeFullLines.size());
+
+    m_octreeExteriorFirstVertex = m_octreeFullFirstVertex + m_octreeFullVertexCount;
+    combined.insert(combined.end(), mesh.octreeExteriorLines.begin(), mesh.octreeExteriorLines.end());
+    m_octreeExteriorVertexCount = static_cast<int>(mesh.octreeExteriorLines.size());
+
+    m_octreeLeavesFirstVertex = m_octreeExteriorFirstVertex + m_octreeExteriorVertexCount;
+    combined.insert(combined.end(), mesh.octreeLeavesLines.begin(), mesh.octreeLeavesLines.end());
+    m_octreeLeavesVertexCount = static_cast<int>(mesh.octreeLeavesLines.size());
 
     gl->glBindVertexArray(m_vao);
     gl->glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
@@ -157,10 +171,30 @@ void SdfAccelBoundsOverlay::draw(
 
     const bool drawAabb =
         mode == SdfAccelBoundsOverlayMode::Aabb || mode == SdfAccelBoundsOverlayMode::Both;
-    const bool drawOctree =
-        mode == SdfAccelBoundsOverlayMode::Octree || mode == SdfAccelBoundsOverlayMode::Both;
 
-    if ((drawAabb && m_aabbVertexCount <= 0) && (drawOctree && m_octreeVertexCount <= 0)) {
+    int octreeFirstVertex = 0;
+    int octreeVertexCount = 0;
+    switch (mode) {
+    case SdfAccelBoundsOverlayMode::Octree:
+    case SdfAccelBoundsOverlayMode::Both:
+        octreeFirstVertex = m_octreeFullFirstVertex;
+        octreeVertexCount = m_octreeFullVertexCount;
+        break;
+    case SdfAccelBoundsOverlayMode::OctreeExterior:
+        octreeFirstVertex = m_octreeExteriorFirstVertex;
+        octreeVertexCount = m_octreeExteriorVertexCount;
+        break;
+    case SdfAccelBoundsOverlayMode::OctreeLeaves:
+        octreeFirstVertex = m_octreeLeavesFirstVertex;
+        octreeVertexCount = m_octreeLeavesVertexCount;
+        break;
+    default:
+        break;
+    }
+
+    const bool drawOctree = octreeVertexCount > 0;
+
+    if ((drawAabb && m_aabbVertexCount <= 0) && !drawOctree) {
         return;
     }
 
@@ -173,9 +207,8 @@ void SdfAccelBoundsOverlay::draw(
         gl->glDrawArrays(GL_LINES, 0, m_aabbVertexCount);
     }
 
-    if (drawOctree && m_octreeVertexCount > 0) {
-        const int firstOctreeVertex = static_cast<int>(m_aabbByteOffset / sizeof(SdfAccelBoundsLineVertex));
-        gl->glDrawArrays(GL_LINES, firstOctreeVertex, m_octreeVertexCount);
+    if (drawOctree) {
+        gl->glDrawArrays(GL_LINES, octreeFirstVertex, octreeVertexCount);
     }
 
     gl->glBindVertexArray(0);

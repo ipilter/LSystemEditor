@@ -19,6 +19,9 @@ constexpr int kMinMaxSamplesPerPixel = 0;
 constexpr int kMaxMaxSamplesPerPixel = 1'000'000;
 constexpr int kMinPreviewStepsPerLevel = 0;
 constexpr int kMaxPreviewStepsPerLevel = 128;
+constexpr int kDefaultOctreeMaxDepth = 5;
+constexpr int kMinOctreeMaxDepth = 1;
+constexpr int kMaxOctreeMaxDepth = 10;
 
 constexpr const char* kSettingsOrg = "PathTracer";
 constexpr const char* kSettingsApp = "pathtracer";
@@ -36,6 +39,7 @@ constexpr const char* kAccelAabbColorBlueKey = "accelAabbColorBlue";
 constexpr const char* kAccelOctreeColorRedKey = "accelOctreeColorRed";
 constexpr const char* kAccelOctreeColorGreenKey = "accelOctreeColorGreen";
 constexpr const char* kAccelOctreeColorBlueKey = "accelOctreeColorBlue";
+constexpr const char* kOctreeMaxDepthKey = "octreeMaxDepth";
 
 bool isKnownDebounceElementId(const QString& elementId)
 {
@@ -63,6 +67,7 @@ AppSettings::AppSettings(QObject* parent)
     , m_renderSize(kDefaultRenderDimension, kDefaultRenderDimension)
     , m_clearColor(kDefaultClearColorComponent, kDefaultClearColorComponent, kDefaultClearColorComponent)
     , m_maxSamplesPerPixel(kDefaultMaxSamplesPerPixel)
+    , m_octreeMaxDepth(kDefaultOctreeMaxDepth)
 {
     seedDefaultDebounceValues();
     load();
@@ -202,6 +207,22 @@ void AppSettings::setAccelOctreeColor(const QColor& color)
     save();
 }
 
+int AppSettings::octreeMaxDepth() const
+{
+    return m_octreeMaxDepth;
+}
+
+void AppSettings::setOctreeMaxDepth(int value)
+{
+    const int clamped = clampOctreeMaxDepth(value);
+    if (m_octreeMaxDepth == clamped) {
+        return;
+    }
+
+    m_octreeMaxDepth = clamped;
+    save();
+}
+
 int AppSettings::clampDebounceMs(int value)
 {
     if (value < kMinDebounceMs) {
@@ -242,6 +263,17 @@ int AppSettings::clampPreviewStepsPerLevel(int value)
     }
     if (value > kMaxPreviewStepsPerLevel) {
         return kMaxPreviewStepsPerLevel;
+    }
+    return value;
+}
+
+int AppSettings::clampOctreeMaxDepth(int value)
+{
+    if (value < kMinOctreeMaxDepth) {
+        return kMinOctreeMaxDepth;
+    }
+    if (value > kMaxOctreeMaxDepth) {
+        return kMaxOctreeMaxDepth;
     }
     return value;
 }
@@ -345,6 +377,15 @@ void AppSettings::load()
         kAccelOctreeColorGreenKey,
         kAccelOctreeColorBlueKey,
         m_accelOctreeColor);
+
+    const QVariant octreeMaxDepthValue = settings.value(kOctreeMaxDepthKey);
+    if (octreeMaxDepthValue.isValid()) {
+        bool ok = false;
+        const int octreeMaxDepth = octreeMaxDepthValue.toInt(&ok);
+        if (ok) {
+            m_octreeMaxDepth = clampOctreeMaxDepth(octreeMaxDepth);
+        }
+    }
 }
 
 void AppSettings::save()
@@ -371,5 +412,6 @@ void AppSettings::save()
     settings.setValue(kAccelOctreeColorRedKey, m_accelOctreeColor.red());
     settings.setValue(kAccelOctreeColorGreenKey, m_accelOctreeColor.green());
     settings.setValue(kAccelOctreeColorBlueKey, m_accelOctreeColor.blue());
+    settings.setValue(kOctreeMaxDepthKey, m_octreeMaxDepth);
     settings.sync();
 }

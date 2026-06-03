@@ -4,9 +4,17 @@
 
 namespace {
 
-constexpr int kMaxOctreeBuildNodes = 262144;
+constexpr int kMaxOctreeBuildNodes = 26214400;
 
-SdfAccelNodeInterval computeNodeInterval(
+struct NodeIntervalData
+{
+    SdfAccelNodeInterval conservative{};
+    float cornerMin = 0.0f;
+    float cornerMax = 0.0f;
+    float cornerD[8] = {};
+};
+
+NodeIntervalData computeNodeIntervalData(
     const SdfAccelField& field,
     SdfFloat3 localCenter,
     SdfFloat3 localHalfExtent)
@@ -16,29 +24,32 @@ SdfAccelNodeInterval computeNodeInterval(
     const SdfFloat3 worldCenter = sdfAdd3(field.worldCenter, localCenter);
     const float dCenter = field.evalLocal(worldCenter);
 
+    NodeIntervalData data{};
     float dCornerMin = dCenter;
     float dCornerMax = dCenter;
     for (int i = 0; i < 8; ++i) {
         const SdfFloat3 corner = sdfAccelAabbCorner(aabb, i);
         const SdfFloat3 worldCorner = sdfAdd3(field.worldCenter, corner);
         const float dCorner = field.evalLocal(worldCorner);
+        data.cornerD[i] = dCorner;
         dCornerMin = sdfMin2(dCornerMin, dCorner);
         dCornerMax = sdfMax2(dCornerMax, dCorner);
     }
 
-    SdfAccelNodeInterval interval{};
-    interval.dMin = sdfMin2(dCenter - boundRadius, dCornerMin);
-    interval.dMax = sdfMax2(dCenter + boundRadius, dCornerMax);
-    return interval;
+    data.conservative.dMin = sdfMin2(dCenter - boundRadius, dCornerMin);
+    data.conservative.dMax = sdfMax2(dCenter + boundRadius, dCornerMax);
+    data.cornerMin = dCornerMin;
+    data.cornerMax = dCornerMax;
+    return data;
 }
 
-uint8_t buildNodeFlags(const SdfAccelNodeInterval& interval, float pruneEpsilon)
+uint8_t buildNodeFlags(float cornerMin, float cornerMax, float pruneEpsilon)
 {
     uint8_t flags = SdfOctreeFlagLeaf;
-    if (interval.dMin <= 0.0f && interval.dMax >= 0.0f) {
+    if (cornerMin <= 0.0f && cornerMax >= 0.0f) {
         flags |= SdfOctreeFlagStraddlesSurface;
     }
-    if (interval.dMax < -pruneEpsilon) {
+    if (cornerMax < -pruneEpsilon) {
         flags |= SdfOctreeFlagInsideSolid;
     }
     return flags;
@@ -76,7 +87,9 @@ int buildRecursive(
     int depth,
     std::vector<SdfOctreeBuildNode>& buildNodes)
 {
-    const SdfAccelNodeInterval interval = computeNodeInterval(field, localCenter, localHalfExtent);
+    const NodeIntervalData intervalData =
+        computeNodeIntervalData(field, localCenter, localHalfExtent);
+    const SdfAccelNodeInterval& interval = intervalData.conservative;
     if (interval.dMin > params.pruneEpsilon) {
         return -1;
     }
@@ -88,7 +101,10 @@ int buildRecursive(
         node.halfExtent = localHalfExtent;
         node.dMin = interval.dMin;
         node.dMax = interval.dMax;
-        node.flags = buildNodeFlags(interval, params.pruneEpsilon);
+        for (int i = 0; i < 8; ++i) {
+            node.cornerD[i] = intervalData.cornerD[i];
+        }
+        node.flags = buildNodeFlags(intervalData.cornerMin, intervalData.cornerMax, params.pruneEpsilon);
         buildNodes.push_back(node);
         return nodeIndex;
     }
@@ -98,7 +114,10 @@ int buildRecursive(
     node.halfExtent = localHalfExtent;
     node.dMin = interval.dMin;
     node.dMax = interval.dMax;
-    node.flags = buildNodeFlags(interval, params.pruneEpsilon);
+    for (int i = 0; i < 8; ++i) {
+        node.cornerD[i] = intervalData.cornerD[i];
+    }
+    node.flags = buildNodeFlags(intervalData.cornerMin, intervalData.cornerMax, params.pruneEpsilon);
 
     const int nodeIndex = static_cast<int>(buildNodes.size());
     buildNodes.push_back(node);

@@ -10,6 +10,8 @@ constexpr int kMinMaxSamplesPerPixel = 0;
 constexpr int kMaxMaxSamplesPerPixel = 1'000'000;
 constexpr int kMinPreviewStepsPerLevel = 0;
 constexpr int kMaxPreviewStepsPerLevel = 128;
+constexpr int kMinOctreeMaxDepth = 1;
+constexpr int kMaxOctreeMaxDepth = 10;
 
 } // namespace
 
@@ -21,6 +23,8 @@ SceneModel::SceneModel(QObject* parent)
     , m_previewStepsPerLevel(AppSettings::instance().previewStepsPerLevel())
     , m_accelAabbColor(AppSettings::instance().accelAabbColor())
     , m_accelOctreeColor(AppSettings::instance().accelOctreeColor())
+    , m_octreeMaxDepth(AppSettings::instance().octreeMaxDepth())
+    , m_sdfShapes(sdfDefaultSceneShapes())
 {
 }
 
@@ -97,14 +101,14 @@ void SceneModel::setPreviewStepsPerLevel(int value)
     emit previewStepsPerLevelChanged(m_previewStepsPerLevel);
 }
 
-SdfVisualMode SceneModel::sdfVisualMode() const
+SdfDebugVisualMode SceneModel::sdfVisualMode() const
 {
     return m_sdfVisualMode;
 }
 
-void SceneModel::setSdfVisualMode(SdfVisualMode mode)
+void SceneModel::setSdfVisualMode(SdfDebugVisualMode mode)
 {
-    const SdfVisualMode clamped = clampVisualMode(mode);
+    const SdfDebugVisualMode clamped = clampVisualMode(mode);
     if (m_sdfVisualMode == clamped) {
         return;
     }
@@ -161,6 +165,37 @@ void SceneModel::setAccelOctreeColor(const QColor& color)
     emit accelOctreeColorChanged(m_accelOctreeColor);
 }
 
+int SceneModel::octreeMaxDepth() const
+{
+    return m_octreeMaxDepth;
+}
+
+void SceneModel::setOctreeMaxDepth(int value)
+{
+    const int clamped = clampOctreeMaxDepth(value);
+    if (m_octreeMaxDepth == clamped) {
+        return;
+    }
+
+    m_octreeMaxDepth = clamped;
+    AppSettings::instance().setOctreeMaxDepth(clamped);
+    emit octreeMaxDepthChanged(m_octreeMaxDepth);
+}
+
+const std::vector<std::unique_ptr<SdfShape>>& SceneModel::sdfShapes() const
+{
+    return m_sdfShapes;
+}
+
+void SceneModel::addSdfShape(std::unique_ptr<SdfShape> shape)
+{
+    if (shape == nullptr) {
+        return;
+    }
+    m_sdfShapes.push_back(std::move(shape));
+    emit sdfSceneChanged();
+}
+
 GLuint SceneModel::pboId(int index) const
 {
     if (index < 0 || index >= bufferCount) {
@@ -208,15 +243,26 @@ int SceneModel::clampPreviewSteps(int value)
     return value;
 }
 
-SdfVisualMode SceneModel::clampVisualMode(SdfVisualMode mode)
+int SceneModel::clampOctreeMaxDepth(int value)
+{
+    if (value < kMinOctreeMaxDepth) {
+        return kMinOctreeMaxDepth;
+    }
+    if (value > kMaxOctreeMaxDepth) {
+        return kMaxOctreeMaxDepth;
+    }
+    return value;
+}
+
+SdfDebugVisualMode SceneModel::clampVisualMode(SdfDebugVisualMode mode)
 {
     switch (mode) {
-    case SdfVisualMode::StepCount:
-    case SdfVisualMode::HitDistance:
-    case SdfVisualMode::Shaded:
+    case SdfDebugVisualMode::StepCount:
+    case SdfDebugVisualMode::HitDistance:
+    case SdfDebugVisualMode::Off:
         return mode;
     default:
-        return SdfVisualMode::StepCount;
+        return SdfDebugVisualMode::Off;
     }
 }
 
@@ -227,6 +273,8 @@ SdfAccelBoundsOverlayMode SceneModel::clampBoundsOverlayMode(SdfAccelBoundsOverl
     case SdfAccelBoundsOverlayMode::Aabb:
     case SdfAccelBoundsOverlayMode::Octree:
     case SdfAccelBoundsOverlayMode::Both:
+    case SdfAccelBoundsOverlayMode::OctreeExterior:
+    case SdfAccelBoundsOverlayMode::OctreeLeaves:
         return mode;
     default:
         return SdfAccelBoundsOverlayMode::Off;

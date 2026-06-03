@@ -6,6 +6,7 @@
 #include "QmcGpuResources.h"
 #include "SdfAccel/SdfAccelBoundsMesh.h"
 #include "SdfAccel/SdfAccelScene.h"
+#include "SdfAccel/SdfSceneContent.h"
 
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
@@ -53,16 +54,17 @@ struct PathTracerDetail::PathTracerImpl
     std::mutex workerMutex;
     std::condition_variable workerCv;
 
-    std::atomic<int> maxSamplesPerPixel{1024};
+    std::atomic<int> maxSamplesPerPixel{8};
     std::atomic<int> previewStepsPerLevel{0};
     std::atomic<int> sampleCount{0};
     std::atomic<int> lastSamplingStride{1};
-    std::atomic<int> visualMode{static_cast<int>(SdfVisualMode::StepCount)};
+    std::atomic<int> visualMode{static_cast<int>(SdfDebugVisualMode::StepCount)};
 
     SdfAccelScene accelScene;
     SdfMarchParamsGpu hostMarchParams{};
     SdfMarchParamsGpu* d_marchParams = nullptr;
     SdfAccelBoundsMesh boundsMesh;
+    int octreeMaxDepth = 5;
 
     CameraGpu lastSampleCamera{};
     std::mutex lastSampleCameraMutex;
@@ -72,6 +74,19 @@ namespace {
 
 constexpr int kMaxSamplesUpperBound = 1'000'000;
 constexpr int kMaxPreviewStepsPerLevel = 128;
+constexpr int kMinOctreeMaxDepth = 1;
+constexpr int kMaxOctreeMaxDepth = 10;
+
+int clampOctreeMaxDepth(int value)
+{
+    if (value < kMinOctreeMaxDepth) {
+        return kMinOctreeMaxDepth;
+    }
+    if (value > kMaxOctreeMaxDepth) {
+        return kMaxOctreeMaxDepth;
+    }
+    return value;
+}
 
 int clampMaxSamples(int value)
 {
@@ -646,6 +661,47 @@ void releaseAccelScene(PathTracerDetail::PathTracerImpl* impl)
     impl->boundsMesh = SdfAccelBoundsMesh{};
 }
 
+bool buildAndUploadAccelScene(
+    PathTracerDetail::PathTracerImpl* impl,
+    const std::vector<std::unique_ptr<SdfShape>>& shapes,
+    QString* outError)
+{
+    if (impl == nullptr || impl->stream == nullptr) {
+        if (outError != nullptr) {
+            *outError = QStringLiteral("PathTracer not initialized");
+        }
+        return false;
+    }
+
+    sdfAccelPopulateScene(impl->accelScene, shapes);
+    SdfAccelBuildParams buildParams{};
+    buildParams.maxDepth = impl->octreeMaxDepth;
+    impl->accelScene.setBuildParams(buildParams);
+    if (!impl->accelScene.build()) {
+        if (outError != nullptr) {
+            *outError = QStringLiteral("SDF accel scene build failed");
+        }
+        return false;
+    }
+
+    impl->accelScene.release();
+    if (!impl->accelScene.allocate()) {
+        if (outError != nullptr) {
+            *outError = QStringLiteral("SDF accel scene allocation failed");
+        }
+        return false;
+    }
+
+    if (!impl->accelScene.upload(impl->stream)) {
+        if (outError != nullptr) {
+            *outError = QStringLiteral("SDF accel scene upload failed");
+        }
+        return false;
+    }
+
+    return true;
+}
+
 } // namespace
 
 PathTracer::PathTracer()
@@ -671,7 +727,12 @@ void PathTracer::setFrameReadyCallback(FrameReadyCallback callback)
     m_frameReadyCallback = std::move(callback);
 }
 
-bool PathTracer::configure(int width, int height, uint32_t pbo0, uint32_t pbo1)
+bool PathTracer::configure(
+    int width,
+    int height,
+    uint32_t pbo0,
+    uint32_t pbo1,
+    const std::vector<std::unique_ptr<SdfShape>>& shapes)
 {
     if (width <= 0 || height <= 0 || pbo0 == 0 || pbo1 == 0) {
         AppLog::instance().error(QStringLiteral("PathTracer configure: invalid dimensions or PBO ids"));
@@ -745,29 +806,10 @@ bool PathTracer::configure(int width, int height, uint32_t pbo0, uint32_t pbo1)
         return false;
     }
 
-    m_impl->accelScene.setDefaultLayout();
-    if (!m_impl->accelScene.build()) {
-        AppLog::instance().error(QStringLiteral("PathTracer configure: SDF accel scene build failed"));
-        unregisterPboResources(m_impl.get());
-        freeQmcGpuResources(&m_impl->qmc);
-        freeCameraGpu(m_impl.get());
-        freeAccumulator(&m_impl->acc);
-        releaseAccelScene(m_impl.get());
-        return false;
-    }
-
-    if (!m_impl->accelScene.allocate()) {
-        AppLog::instance().error(QStringLiteral("PathTracer configure: SDF accel scene allocation failed"));
-        unregisterPboResources(m_impl.get());
-        freeQmcGpuResources(&m_impl->qmc);
-        freeCameraGpu(m_impl.get());
-        freeAccumulator(&m_impl->acc);
-        releaseAccelScene(m_impl.get());
-        return false;
-    }
-
-    if (!m_impl->accelScene.upload(m_impl->stream)) {
-        AppLog::instance().error(QStringLiteral("PathTracer configure: SDF accel scene upload failed"));
+    QString accelError;
+    if (!buildAndUploadAccelScene(m_impl.get(), shapes, &accelError)) {
+        AppLog::instance().error(
+            QStringLiteral("PathTracer configure: %1").arg(accelError));
         unregisterPboResources(m_impl.get());
         freeQmcGpuResources(&m_impl->qmc);
         freeCameraGpu(m_impl.get());
@@ -979,15 +1021,15 @@ CameraGpu PathTracer::lastSampleCamera() const
     return m_impl->lastSampleCamera;
 }
 
-void PathTracer::setVisualMode(SdfVisualMode mode)
+void PathTracer::setVisualMode(SdfDebugVisualMode mode)
 {
     m_impl->visualMode.store(static_cast<int>(mode));
     notifyWorker();
 }
 
-SdfVisualMode PathTracer::visualMode() const
+SdfDebugVisualMode PathTracer::visualMode() const
 {
-    return static_cast<SdfVisualMode>(m_impl->visualMode.load());
+    return static_cast<SdfDebugVisualMode>(m_impl->visualMode.load());
 }
 
 void PathTracer::setClearColor(const QColor& color)
@@ -1027,6 +1069,39 @@ void PathTracer::rebuildAccelBoundsMesh(const QColor& aabbColor, const QColor& o
 const SdfAccelBoundsMesh& PathTracer::accelBoundsMesh() const
 {
     return m_impl->boundsMesh;
+}
+
+void PathTracer::setOctreeMaxDepth(int depth)
+{
+    m_impl->octreeMaxDepth = clampOctreeMaxDepth(depth);
+}
+
+int PathTracer::octreeMaxDepth() const
+{
+    return m_impl->octreeMaxDepth;
+}
+
+bool PathTracer::rebuildAccelScene(const std::vector<std::unique_ptr<SdfShape>>& shapes)
+{
+    if (!m_impl->configured.load()) {
+        return false;
+    }
+
+    QString error;
+    if (!buildAndUploadAccelScene(m_impl.get(), shapes, &error)) {
+        AppLog::instance().error(QStringLiteral("PathTracer rebuild accel scene: %1").arg(error));
+        return false;
+    }
+
+    const cudaError_t syncError = cudaStreamSynchronize(m_impl->stream);
+    if (syncError != cudaSuccess) {
+        AppLog::instance().error(
+            QStringLiteral("PathTracer rebuild accel scene: stream sync failed: %1")
+                .arg(cudaErrorString(syncError)));
+        return false;
+    }
+
+    return true;
 }
 
 void PathTracer::notifyWorker()

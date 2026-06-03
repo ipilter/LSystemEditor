@@ -27,6 +27,9 @@ constexpr int kDefaultMaxSamplesPerPixel = 1024;
 constexpr int kMinPreviewStepsPerLevel = 0;
 constexpr int kMaxPreviewStepsPerLevel = 128;
 constexpr int kDefaultPreviewStepsPerLevel = 0;
+constexpr int kMinOctreeMaxDepth = 1;
+constexpr int kMaxOctreeMaxDepth = 10;
+constexpr int kDefaultOctreeMaxDepth = 5;
 constexpr int kLogPanelHeight = 120;
 constexpr int kLogMaxBlockCount = 500;
 
@@ -106,9 +109,9 @@ MainView::MainView(QWidget* parent)
     m_sdfVisualModeComboBox = new QComboBox(renderGroup);
     m_sdfVisualModeComboBox->addItem(QStringLiteral("Step Count"));
     m_sdfVisualModeComboBox->addItem(QStringLiteral("Distance"));
-    m_sdfVisualModeComboBox->addItem(QStringLiteral("Shaded"));
+    m_sdfVisualModeComboBox->addItem(QStringLiteral("Off"));
     m_sdfVisualModeComboBox->setToolTip(
-        QStringLiteral("Step Count: march iteration heatmap. Distance: hit distance heatmap. Shaded: shaded SDF surface."));
+        QStringLiteral("Step Count: march iteration heatmap. Distance: hit distance heatmap. Off: no debug visualization."));
     visualModeRow->addWidget(m_sdfVisualModeComboBox, 1);
     renderLayout->addLayout(visualModeRow);
 
@@ -118,11 +121,26 @@ MainView::MainView(QWidget* parent)
     m_boundsOverlayComboBox->addItem(QStringLiteral("Off"));
     m_boundsOverlayComboBox->addItem(QStringLiteral("AABB"));
     m_boundsOverlayComboBox->addItem(QStringLiteral("Octree"));
+    m_boundsOverlayComboBox->addItem(QStringLiteral("Octree Exterior"));
+    m_boundsOverlayComboBox->addItem(QStringLiteral("Octree Leaves"));
     m_boundsOverlayComboBox->addItem(QStringLiteral("Both"));
     m_boundsOverlayComboBox->setToolTip(
-        QStringLiteral("Debug wireframe overlay for object AABBs and/or octree node bounds"));
+        QStringLiteral(
+            "Debug wireframe overlay for object AABBs and/or octree node bounds. "
+            "Octree Exterior: coarsest cells crossing the surface (straddle, parent does not). "
+            "Octree Leaves: leaf cells straddling the surface only."));
     boundsOverlayRow->addWidget(m_boundsOverlayComboBox, 1);
     renderLayout->addLayout(boundsOverlayRow);
+
+    auto* octreeDepthRow = new QHBoxLayout();
+    octreeDepthRow->addWidget(new QLabel(QStringLiteral("Max depth:"), renderGroup));
+    m_octreeMaxDepthSpinBox = new QSpinBox(renderGroup);
+    m_octreeMaxDepthSpinBox->setRange(kMinOctreeMaxDepth, kMaxOctreeMaxDepth);
+    m_octreeMaxDepthSpinBox->setValue(kDefaultOctreeMaxDepth);
+    m_octreeMaxDepthSpinBox->setToolTip(
+        QStringLiteral("Maximum octree subdivision depth for SDF acceleration (rebuilds scene)"));
+    octreeDepthRow->addWidget(m_octreeMaxDepthSpinBox);
+    renderLayout->addLayout(octreeDepthRow);
 
     auto* iterationRow = new QHBoxLayout();
     iterationRow->addWidget(new QLabel(QStringLiteral("Iteration:"), renderGroup));
@@ -148,6 +166,13 @@ MainView::MainView(QWidget* parent)
     renderLayout->addWidget(closeButton);
 
     controlLayout->addWidget(renderGroup, 1);
+
+    auto* userGroup = new QGroupBox(QStringLiteral("User"), controlBar);
+    auto* userLayout = new QVBoxLayout(userGroup);
+    m_addSdfButton = new QPushButton(QStringLiteral("Add"), userGroup);
+    m_addSdfButton->setToolTip(QStringLiteral("Add a new SDF primitive to the scene"));
+    userLayout->addWidget(m_addSdfButton);
+    controlLayout->addWidget(userGroup);
 
     auto* backgroundRow = new QHBoxLayout();
     auto* backgroundLabel = new QLabel(QStringLiteral("Background: "), controlBar);
@@ -217,6 +242,11 @@ QComboBox* MainView::boundsOverlayComboBox() const
     return m_boundsOverlayComboBox;
 }
 
+QSpinBox* MainView::octreeMaxDepthSpinBox() const
+{
+    return m_octreeMaxDepthSpinBox;
+}
+
 QPushButton* MainView::startButton() const
 {
     return m_startButton;
@@ -230,6 +260,11 @@ QPushButton* MainView::stopButton() const
 QPushButton* MainView::settingsButton() const
 {
     return m_settingsButton;
+}
+
+QPushButton* MainView::addSdfButton() const
+{
+    return m_addSdfButton;
 }
 
 void MainView::setIteration(int value)

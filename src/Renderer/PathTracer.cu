@@ -1,7 +1,7 @@
 #include "CameraDevice.cuh"
 #include "QmcSampler.cuh"
 #include "SdfAccelScene.cuh"
-#include "SdfRayMarcherCore.h"
+#include "SdfVisualCore.h"
 
 #include <cuda_runtime.h>
 #include <vector_types.h>
@@ -72,13 +72,13 @@ __global__ void sampleKernel(
 
     SdfFloat3 rgbSdf{};
     switch (visualMode) {
-    case static_cast<int>(SdfVisualMode::HitDistance):
+    case static_cast<int>(SdfDebugVisualMode::HitDistance):
         rgbSdf = distanceToHeatmap(hit.t, marchParams->maxDistance, hit.hit, marchParams);
         break;
-    case static_cast<int>(SdfVisualMode::Shaded):
+    case static_cast<int>(SdfDebugVisualMode::Off):
         rgbSdf = normalToColor(hit.normal, hit.hit, marchParams);
         break;
-    case static_cast<int>(SdfVisualMode::StepCount):
+    case static_cast<int>(SdfDebugVisualMode::StepCount):
     default:
         rgbSdf = stepsToHeatmap(hit.steps, marchParams->maxSteps, hit.hit, marchParams);
         break;

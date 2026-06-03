@@ -2,6 +2,8 @@
 
 #include "SdfAccelBoundsCore.h"
 #include "SdfAccelField.h"
+#include "Sdf/SdfMathCore.h"
+#include "Sdf/SdfPrimitiveType.h"
 
 SDF_ACCEL_CORE_FN float sdfAccelEvalPayloadWorld(
     SdfFloat3 worldP,
@@ -13,12 +15,12 @@ SDF_ACCEL_CORE_FN float sdfAccelEvalPayloadWorld(
     }
 
     const SdfFloat3 localP = sdfSub3(worldP, objectCenter);
-    switch (static_cast<SdfAccelPrimitiveType>(payload->type)) {
-    case SdfAccelPrimitiveType::Sphere:
+    switch (static_cast<SdfPrimitiveType>(payload->type)) {
+    case SdfPrimitiveType::Sphere:
         return sdSphere(localP, payload->param0);
-    case SdfAccelPrimitiveType::Cylinder:
+    case SdfPrimitiveType::Cylinder:
         return sdCylinder(localP, payload->halfExtents);
-    case SdfAccelPrimitiveType::CappedCone:
+    case SdfPrimitiveType::CappedCone:
         return sdCappedCone(localP, payload->param0, payload->param1, payload->param2);
     default:
         return 1.0e20f;
@@ -65,13 +67,12 @@ SDF_ACCEL_CORE_FN bool sdfAccelOctreeDescendToLeaf(
     }
 }
 
-SDF_ACCEL_CORE_FN float sdfAccelObjectSDF(
+SDF_ACCEL_CORE_FN float sdfAccelObjectConservativeMin(
     SdfFloat3 worldP,
     const SdfAccelObjectGpu* object,
-    const SdfOctreeNode* octreeNodes,
-    const SdfAccelPayloadGpu* payloads)
+    const SdfOctreeNode* octreeNodes)
 {
-    if (object == nullptr || octreeNodes == nullptr || payloads == nullptr) {
+    if (object == nullptr || octreeNodes == nullptr) {
         return 1.0e20f;
     }
 
@@ -80,10 +81,45 @@ SDF_ACCEL_CORE_FN float sdfAccelObjectSDF(
 
     uint32_t leafIndex = 0;
     if (!sdfAccelOctreeDescendToLeaf(localP, octreeNodes, rootIndex, &leafIndex)) {
-        return sdfAccelEvalPayloadWorld(worldP, object->center, &payloads[object->payloadIndex]);
+        return sdfAccelPointAabbDistance(worldP, object->boundsMin, object->boundsMax);
     }
 
-    (void)leafIndex;
+    const SdfOctreeNode& leaf = octreeNodes[leafIndex];
+    const uint8_t flags = sdfAccelFlagsFromPacked(leaf.childMaskAndFlags);
+    const SdfAccelAabb leafAabb = sdfAccelAabbFromCenterHalfExtent(leaf.center, leaf.halfExtent);
+    const bool intervalStraddles = leaf.dMin <= 0.0f && leaf.dMax >= 0.0f;
+    const bool straddlesSurface =
+        (flags & SdfOctreeFlagStraddlesSurface) != 0 || intervalStraddles;
+
+    if (!sdfAccelPointInAabb(localP, leafAabb.min, leafAabb.max)) {
+        const float aabbDist = sdfAccelPointAabbDistance(localP, leafAabb.min, leafAabb.max);
+        return sdfMax2(leaf.dMin, aabbDist);
+    }
+
+    if (straddlesSurface) {
+        return sdfMin2(leaf.dMin, 0.0f);
+    }
+
+    if ((flags & SdfOctreeFlagInsideSolid) != 0 && leaf.dMax < 0.0f) {
+        return 0.0f;
+    }
+
+    if (leaf.dMin > 0.0f) {
+        return leaf.dMin;
+    }
+
+    return leaf.dMin;
+}
+
+SDF_ACCEL_CORE_FN float sdfAccelObjectSDF(
+    SdfFloat3 worldP,
+    const SdfAccelObjectGpu* object,
+    const SdfAccelPayloadGpu* payloads)
+{
+    if (object == nullptr || payloads == nullptr) {
+        return 1.0e20f;
+    }
+
     return sdfAccelEvalPayloadWorld(worldP, object->center, &payloads[object->payloadIndex]);
 }
 
@@ -93,11 +129,9 @@ SDF_ACCEL_CORE_FN void sdfAccelBvhQueryPoint(
     const SdfBvhNode* bvhNodes,
     uint32_t nodeIndex,
     const SdfAccelObjectGpu* objects,
-    const SdfOctreeNode* octreeNodes,
     const SdfAccelPayloadGpu* payloads)
 {
-    if (bvhNodes == nullptr || bestDistance == nullptr || objects == nullptr || octreeNodes == nullptr
-        || payloads == nullptr) {
+    if (bvhNodes == nullptr || bestDistance == nullptr || objects == nullptr || payloads == nullptr) {
         return;
     }
 
@@ -109,13 +143,13 @@ SDF_ACCEL_CORE_FN void sdfAccelBvhQueryPoint(
 
     if ((node.flags & SdfBvhFlagLeaf) != 0) {
         const SdfAccelObjectGpu& object = objects[node.objectIndex];
-        const float d = sdfAccelObjectSDF(worldP, &object, octreeNodes, payloads);
+        const float d = sdfAccelObjectSDF(worldP, &object, payloads);
         *bestDistance = sdfMin2(*bestDistance, d);
         return;
     }
 
-    sdfAccelBvhQueryPoint(worldP, bestDistance, bvhNodes, node.leftIndex, objects, octreeNodes, payloads);
-    sdfAccelBvhQueryPoint(worldP, bestDistance, bvhNodes, node.rightIndex, objects, octreeNodes, payloads);
+    sdfAccelBvhQueryPoint(worldP, bestDistance, bvhNodes, node.leftIndex, objects, payloads);
+    sdfAccelBvhQueryPoint(worldP, bestDistance, bvhNodes, node.rightIndex, objects, payloads);
 }
 
 SDF_ACCEL_CORE_FN float sdfAccelSceneSDF(SdfFloat3 worldP, const SdfAccelSceneGpu* scene)
@@ -131,7 +165,6 @@ SDF_ACCEL_CORE_FN float sdfAccelSceneSDF(SdfFloat3 worldP, const SdfAccelSceneGp
         scene->bvhNodes,
         scene->bvhRootIndex,
         scene->objects,
-        scene->octreeNodes,
         scene->payloads);
     return best;
 }

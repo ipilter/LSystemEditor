@@ -11,6 +11,7 @@ struct SdfOctreeBuildNode
     SdfFloat3 halfExtent{};
     float dMin = 0.0f;
     float dMax = 0.0f;
+    float cornerD[8] = {};
     uint8_t childMask = 0;
     uint8_t flags = 0;
     int childBuildIndices[8] = {-1, -1, -1, -1, -1, -1, -1, -1};

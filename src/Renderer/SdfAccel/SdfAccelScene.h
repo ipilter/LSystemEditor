@@ -2,6 +2,7 @@
 
 #include "SdfAccelField.h"
 #include "SdfAccelTypes.h"
+#include "SdfSceneContent.h"
 
 #include <cuda_runtime.h>
 #include <vector>
@@ -19,9 +20,7 @@ public:
     void setBuildParams(const SdfAccelBuildParams& params);
     void setDefaultLayout();
 
-    void addSphere(SdfFloat3 center, float radius);
-    void addCylinder(SdfFloat3 center, SdfFloat2 halfExtents);
-    void addCappedCone(SdfFloat3 center, float halfHeight, float radiusBottom, float radiusTop);
+    void addShape(const SdfShape& shape);
 
     bool build();
 
@@ -35,9 +34,6 @@ public:
     bool isBuilt() const { return m_built; }
     const std::vector<SdfAccelObjectGpu>& objectsHost() const { return m_objects; }
     const std::vector<SdfOctreeNode>& octreeNodesHost() const { return m_octreeNodes; }
-
-    float evalSDF(SdfFloat3 p) const;
-    SdfHit rayMarch(SdfFloat3 ro, SdfFloat3 rd, const SdfMarchParamsGpu& params) const;
 
 private:
     struct PendingObject

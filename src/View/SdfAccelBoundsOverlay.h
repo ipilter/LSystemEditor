@@ -37,7 +37,11 @@ private:
     GLuint m_vao = 0;
     GLuint m_vbo = 0;
     int m_aabbVertexCount = 0;
-    int m_octreeVertexCount = 0;
-    std::size_t m_aabbByteOffset = 0;
+    int m_octreeFullFirstVertex = 0;
+    int m_octreeFullVertexCount = 0;
+    int m_octreeExteriorFirstVertex = 0;
+    int m_octreeExteriorVertexCount = 0;
+    int m_octreeLeavesFirstVertex = 0;
+    int m_octreeLeavesVertexCount = 0;
     bool m_initialized = false;
 };

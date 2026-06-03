@@ -27,23 +27,6 @@ struct SdfMarchParamsGpu
 
 using SdfMarchParamsHost = SdfMarchParamsGpu;
 
-struct SdfSceneGpu
-{
-    SdfFloat3 cylinderCenter{};
-    float _pad0 = 0.0f;
-    SdfFloat2 cylinderHalfExtents{};
-    SdfFloat2 _pad1{};
-
-    SdfFloat3 sphereCenter{};
-    float sphereRadius = 0.0f;
-
-    SdfFloat3 coneCenter{};
-    float coneHalfHeight = 0.0f;
-    float coneRadiusBottom = 0.0f;
-    float coneRadiusTop = 0.0f;
-    float _pad2 = 0.0f;
-};
-
 struct SdfHit
 {
     bool hit = false;
@@ -53,11 +36,11 @@ struct SdfHit
     SdfFloat3 normal{};
 };
 
-enum class SdfVisualMode : int
+enum class SdfDebugVisualMode : int
 {
-    StepCount = 0,
-    HitDistance = 1,
-    Shaded = 2,
+    Off = 0,
+    StepCount = 1,
+    HitDistance = 2,
 };
 
 enum class SdfAccelBoundsOverlayMode : int
@@ -66,4 +49,6 @@ enum class SdfAccelBoundsOverlayMode : int
     Aabb = 1,
     Octree = 2,
     Both = 3,
+    OctreeExterior = 4,
+    OctreeLeaves = 5,
 };

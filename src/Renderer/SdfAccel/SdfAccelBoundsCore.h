@@ -159,21 +159,3 @@ SDF_ACCEL_CORE_FN SdfAccelAabb sdfAccelCappedConeBounds(
         sdfMakeFloat3(center.x - maxRadius, center.y - halfHeight, center.z - maxRadius),
         sdfMakeFloat3(center.x + maxRadius, center.y + halfHeight, center.z + maxRadius));
 }
-
-SDF_ACCEL_CORE_FN SdfAccelAabb sdfAccelLocalBoundsFromPayload(const SdfAccelPayloadGpu* payload, SdfFloat3 worldCenter)
-{
-    if (payload == nullptr) {
-        return sdfAccelMakeAabb(worldCenter, worldCenter);
-    }
-
-    switch (static_cast<SdfAccelPrimitiveType>(payload->type)) {
-    case SdfAccelPrimitiveType::Sphere:
-        return sdfAccelSphereBounds(worldCenter, payload->param0);
-    case SdfAccelPrimitiveType::Cylinder:
-        return sdfAccelCylinderBounds(worldCenter, payload->halfExtents);
-    case SdfAccelPrimitiveType::CappedCone:
-        return sdfAccelCappedConeBounds(worldCenter, payload->param0, payload->param1, payload->param2);
-    default:
-        return sdfAccelMakeAabb(worldCenter, worldCenter);
-    }
-}

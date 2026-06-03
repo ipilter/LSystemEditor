@@ -25,9 +25,11 @@ public:
     QSpinBox* previewStepsSpinBox() const;
     QComboBox* sdfVisualModeComboBox() const;
     QComboBox* boundsOverlayComboBox() const;
+    QSpinBox* octreeMaxDepthSpinBox() const;
     QPushButton* startButton() const;
     QPushButton* stopButton() const;
     QPushButton* settingsButton() const;
+    QPushButton* addSdfButton() const;
 
     void setIteration(int value);
 
@@ -46,10 +48,12 @@ private:
     QSpinBox* m_previewStepsSpinBox = nullptr;
     QComboBox* m_sdfVisualModeComboBox = nullptr;
     QComboBox* m_boundsOverlayComboBox = nullptr;
+    QSpinBox* m_octreeMaxDepthSpinBox = nullptr;
     QLabel* m_iterationLabel = nullptr;
     QPushButton* m_startButton = nullptr;
     QPushButton* m_stopButton = nullptr;
     QPushButton* m_settingsButton = nullptr;
+    QPushButton* m_addSdfButton = nullptr;
     QPlainTextEdit* m_logView = nullptr;
     QSize m_pendingViewportSize;
 };

@@ -33,23 +33,3 @@ SDF_CORE_FN float sdCappedCone(SdfFloat3 p, float halfHeight, float radiusBottom
     const float s = cb.x < 0.0f && ca.y < 0.0f ? -1.0f : 1.0f;
     return s * sqrtf(sdfMin2(caLenSq, cbLenSq));
 }
-
-SDF_CORE_FN float sceneSDF(SdfFloat3 p, const SdfSceneGpu* scene)
-{
-    if (scene == nullptr) {
-        return 1.0e20f;
-    }
-
-    const SdfFloat3 cylinderP = sdfSub3(p, scene->cylinderCenter);
-    float distance = sdCylinder(cylinderP, scene->cylinderHalfExtents);
-
-    const SdfFloat3 sphereP = sdfSub3(p, scene->sphereCenter);
-    distance = sdfOpUnion(distance, sdSphere(sphereP, scene->sphereRadius));
-
-    const SdfFloat3 coneP = sdfSub3(p, scene->coneCenter);
-    distance = sdfOpUnion(
-        distance,
-        sdCappedCone(coneP, scene->coneHalfHeight, scene->coneRadiusBottom, scene->coneRadiusTop));
-
-    return distance;
-}

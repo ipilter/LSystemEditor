@@ -5,6 +5,7 @@
 #include "OpenGLViewportWidget.h"
 #include "SceneModel.h"
 #include "SettingsDialog.h"
+#include "AddSdfDialog.h"
 
 #include <QColorDialog>
 #include <QComboBox>
@@ -22,27 +23,27 @@ QString colorButtonStyleSheet(const QColor& color)
         .arg(color.name(QColor::HexRgb));
 }
 
-SdfVisualMode visualModeFromComboIndex(int index)
+SdfDebugVisualMode visualModeFromComboIndex(int index)
 {
     switch (index) {
     case 1:
-        return SdfVisualMode::HitDistance;
+        return SdfDebugVisualMode::HitDistance;
     case 2:
-        return SdfVisualMode::Shaded;
+        return SdfDebugVisualMode::Off;
     case 0:
     default:
-        return SdfVisualMode::StepCount;
+        return SdfDebugVisualMode::StepCount;
     }
 }
 
-int comboIndexFromVisualMode(SdfVisualMode mode)
+int comboIndexFromVisualMode(SdfDebugVisualMode mode)
 {
     switch (mode) {
-    case SdfVisualMode::HitDistance:
+    case SdfDebugVisualMode::HitDistance:
         return 1;
-    case SdfVisualMode::Shaded:
+    case SdfDebugVisualMode::Off:
         return 2;
-    case SdfVisualMode::StepCount:
+    case SdfDebugVisualMode::StepCount:
     default:
         return 0;
     }
@@ -56,6 +57,10 @@ SdfAccelBoundsOverlayMode boundsOverlayModeFromComboIndex(int index)
     case 2:
         return SdfAccelBoundsOverlayMode::Octree;
     case 3:
+        return SdfAccelBoundsOverlayMode::OctreeExterior;
+    case 4:
+        return SdfAccelBoundsOverlayMode::OctreeLeaves;
+    case 5:
         return SdfAccelBoundsOverlayMode::Both;
     case 0:
     default:
@@ -70,8 +75,12 @@ int comboIndexFromBoundsOverlayMode(SdfAccelBoundsOverlayMode mode)
         return 1;
     case SdfAccelBoundsOverlayMode::Octree:
         return 2;
-    case SdfAccelBoundsOverlayMode::Both:
+    case SdfAccelBoundsOverlayMode::OctreeExterior:
         return 3;
+    case SdfAccelBoundsOverlayMode::OctreeLeaves:
+        return 4;
+    case SdfAccelBoundsOverlayMode::Both:
+        return 5;
     case SdfAccelBoundsOverlayMode::Off:
     default:
         return 0;
@@ -97,16 +106,18 @@ SceneController::SceneController(SceneModel* model, MainView* view, QObject* par
     syncPreviewStepsSpinBox();
     syncSdfVisualModeComboBox();
     syncBoundsOverlayComboBox();
+    syncOctreeMaxDepthSpinBox();
 
     connect(m_view->colorButton(), &QPushButton::clicked, this, &SceneController::onColorButtonClicked);
     connect(m_model, &SceneModel::clearColorChanged, this, &SceneController::onClearColorChanged);
     connect(m_model, &SceneModel::renderSizeChanged, this, &SceneController::onRenderSizeChanged);
     connect(m_model, &SceneModel::maxSamplesPerPixelChanged, this, [this](int) { syncMaxSamplesSpinBox(); });
     connect(m_model, &SceneModel::previewStepsPerLevelChanged, this, [this](int) { syncPreviewStepsSpinBox(); });
-    connect(m_model, &SceneModel::sdfVisualModeChanged, this, [this](SdfVisualMode) { syncSdfVisualModeComboBox(); });
+    connect(m_model, &SceneModel::sdfVisualModeChanged, this, [this](SdfDebugVisualMode) { syncSdfVisualModeComboBox(); });
     connect(m_model, &SceneModel::boundsOverlayModeChanged, this, [this](SdfAccelBoundsOverlayMode) {
         syncBoundsOverlayComboBox();
     });
+    connect(m_model, &SceneModel::octreeMaxDepthChanged, this, [this](int) { syncOctreeMaxDepthSpinBox(); });
 
     connect(m_view->renderWidthSpinBox(), &QSpinBox::valueChanged, this, &SceneController::onRenderSizeSpinBoxChanged);
     connect(m_view->renderHeightSpinBox(), &QSpinBox::valueChanged, this, &SceneController::onRenderSizeSpinBoxChanged);
@@ -122,12 +133,18 @@ SceneController::SceneController(SceneModel* model, MainView* view, QObject* par
         QOverload<int>::of(&QComboBox::currentIndexChanged),
         this,
         &SceneController::onBoundsOverlayComboBoxChanged);
+    connect(
+        m_view->octreeMaxDepthSpinBox(),
+        QOverload<int>::of(&QSpinBox::valueChanged),
+        this,
+        &SceneController::onOctreeMaxDepthSpinBoxChanged);
     connect(&m_renderSizeDebounce, &DebounceTimer::triggered, this, &SceneController::applyRenderSizeFromSpinBoxes);
     connect(&m_maxSamplesDebounce, &DebounceTimer::triggered, this, &SceneController::applyMaxSamplesFromSpinBox);
     connect(&m_previewStepsDebounce, &DebounceTimer::triggered, this, &SceneController::applyPreviewStepsFromSpinBox);
     connect(m_view->startButton(), &QPushButton::clicked, this, &SceneController::onStartButtonClicked);
     connect(m_view->stopButton(), &QPushButton::clicked, this, &SceneController::onStopButtonClicked);
     connect(m_view->settingsButton(), &QPushButton::clicked, this, &SceneController::onSettingsButtonClicked);
+    connect(m_view->addSdfButton(), &QPushButton::clicked, this, &SceneController::onAddSdfButtonClicked);
     connect(m_view->viewport(), &OpenGLViewportWidget::iterationChanged, m_view, &MainView::setIteration);
     connect(&AppSettings::instance(), &AppSettings::debounceMsChanged, this,
             [this](const QString& elementId, int ms) {
@@ -206,6 +223,11 @@ void SceneController::onBoundsOverlayComboBoxChanged()
         boundsOverlayModeFromComboIndex(m_view->boundsOverlayComboBox()->currentIndex()));
 }
 
+void SceneController::onOctreeMaxDepthSpinBoxChanged()
+{
+    m_model->setOctreeMaxDepth(m_view->octreeMaxDepthSpinBox()->value());
+}
+
 void SceneController::onStartButtonClicked()
 {
     m_view->setIteration(0);
@@ -223,6 +245,14 @@ void SceneController::onSettingsButtonClicked()
     if (dialog.exec() == QDialog::Accepted) {
         m_model->setAccelAabbColor(AppSettings::instance().accelAabbColor());
         m_model->setAccelOctreeColor(AppSettings::instance().accelOctreeColor());
+    }
+}
+
+void SceneController::onAddSdfButtonClicked()
+{
+    AddSdfDialog dialog(m_view);
+    if (dialog.exec() == QDialog::Accepted) {
+        m_model->addSdfShape(dialog.result());
     }
 }
 
@@ -269,4 +299,11 @@ void SceneController::syncBoundsOverlayComboBox()
     m_view->boundsOverlayComboBox()->setCurrentIndex(
         comboIndexFromBoundsOverlayMode(m_model->boundsOverlayMode()));
     m_view->boundsOverlayComboBox()->blockSignals(false);
+}
+
+void SceneController::syncOctreeMaxDepthSpinBox()
+{
+    m_view->octreeMaxDepthSpinBox()->blockSignals(true);
+    m_view->octreeMaxDepthSpinBox()->setValue(m_model->octreeMaxDepth());
+    m_view->octreeMaxDepthSpinBox()->blockSignals(false);
 }

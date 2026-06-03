@@ -2,7 +2,9 @@
 
 #include "SdfAccelScene.h"
 #include "SdfAccelTraverseCore.h"
-#include "SdfRayMarcherCore.h"
+#include "SdfAccelRayMarchCore.h"
+#include "SdfMathCore.h"
+#include "SdfSceneContent.h"
 
 #include <cmath>
 #include <iostream>
@@ -45,74 +47,95 @@ inline SdfMarchParamsGpu defaultMarchParams()
     return params;
 }
 
-struct BruteObject
+inline float accelSceneEvalSDF(const SdfAccelScene& scene, SdfFloat3 p)
 {
-    SdfAccelPrimitiveType type = SdfAccelPrimitiveType::Sphere;
-    SdfFloat3 center{};
-    float param0 = 0.0f;
-    float param1 = 0.0f;
-    float param2 = 0.0f;
-    SdfFloat2 halfExtents{};
-};
-
-inline float bruteEvalObject(SdfFloat3 p, const BruteObject& object)
-{
-    const SdfFloat3 localP = sdfSub3(p, object.center);
-    switch (object.type) {
-    case SdfAccelPrimitiveType::Sphere:
-        return sdSphere(localP, object.param0);
-    case SdfAccelPrimitiveType::Cylinder:
-        return sdCylinder(localP, object.halfExtents);
-    case SdfAccelPrimitiveType::CappedCone:
-        return sdCappedCone(localP, object.param0, object.param1, object.param2);
-    default:
+    const SdfAccelSceneGpu* hostScene = scene.hostScene();
+    if (hostScene == nullptr) {
         return 1.0e20f;
     }
+    return sdfAccelSceneSDF(p, hostScene);
 }
 
-inline float bruteSceneSDF(SdfFloat3 p, const std::vector<BruteObject>& objects)
+inline SdfHit accelSceneRayMarch(
+    const SdfAccelScene& scene,
+    SdfFloat3 ro,
+    SdfFloat3 rd,
+    const SdfMarchParamsGpu& params)
+{
+    const SdfAccelSceneGpu* hostScene = scene.hostScene();
+    if (hostScene == nullptr) {
+        return SdfHit{};
+    }
+    return sdfAccelRayMarch(ro, rd, hostScene, &params);
+}
+
+inline float bruteSceneSDF(SdfFloat3 p, const std::vector<std::unique_ptr<SdfShape>>& shapes)
 {
     float best = 1.0e20f;
-    for (const BruteObject& object : objects) {
-        best = sdfMin2(best, bruteEvalObject(p, object));
+    for (const std::unique_ptr<SdfShape>& shape : shapes) {
+        if (shape != nullptr) {
+            best = sdfMin2(best, shape->evalWorld(p));
+        }
     }
     return best;
 }
 
-inline std::vector<BruteObject> defaultLayoutObjects()
+inline SdfFloat3 evalRay(SdfFloat3 ro, SdfFloat3 rd, float t)
 {
-    std::vector<BruteObject> objects;
-    objects.push_back(
-        BruteObject{
-            SdfAccelPrimitiveType::Cylinder,
-            sdfMakeFloat3(-2.5f, 0.0f, 0.0f),
-            0.0f,
-            0.0f,
-            0.0f,
-            sdfMakeFloat2(0.5f, 1.0f)});
-    objects.push_back(BruteObject{SdfAccelPrimitiveType::Sphere, sdfMakeFloat3(0.0f, 0.0f, 0.0f), 0.5f});
-    objects.push_back(
-        BruteObject{
-            SdfAccelPrimitiveType::CappedCone,
-            sdfMakeFloat3(2.5f, 0.0f, 0.0f),
-            1.0f,
-            0.5f,
-            0.125f});
-    return objects;
+    return sdfEvalRay(ro, rd, t);
 }
 
-inline SdfSceneGpu defaultLayoutLegacyScene()
+inline SdfHit bruteForceRayMarch(
+    SdfFloat3 ro,
+    SdfFloat3 rd,
+    const std::vector<std::unique_ptr<SdfShape>>& shapes,
+    const SdfMarchParamsGpu& params)
 {
-    SdfSceneGpu scene{};
-    scene.cylinderCenter = sdfMakeFloat3(-2.5f, 0.0f, 0.0f);
-    scene.cylinderHalfExtents = sdfMakeFloat2(0.5f, 1.0f);
-    scene.sphereCenter = sdfMakeFloat3(0.0f, 0.0f, 0.0f);
-    scene.sphereRadius = 0.5f;
-    scene.coneCenter = sdfMakeFloat3(2.5f, 0.0f, 0.0f);
-    scene.coneHalfHeight = 1.0f;
-    scene.coneRadiusBottom = 0.5f;
-    scene.coneRadiusTop = 0.125f;
-    return scene;
+    SdfHit result{};
+    if (shapes.empty()) {
+        return result;
+    }
+
+    rd = sdfNormalize3(rd);
+    if (bruteSceneSDF(ro, shapes) < -params.surfaceEpsilon) {
+        return result;
+    }
+
+    const float coarseDt = 0.02f;
+    float t = 0.0f;
+    float prevSdf = bruteSceneSDF(ro, shapes);
+    float tPrev = 0.0f;
+    int steps = 0;
+    const int maxCoarseSteps = static_cast<int>(params.maxDistance / coarseDt) + 1;
+
+    while (t <= params.maxDistance && steps < maxCoarseSteps) {
+        t += coarseDt;
+        const SdfFloat3 p = evalRay(ro, rd, t);
+        const float d = bruteSceneSDF(p, shapes);
+        if (prevSdf > params.surfaceEpsilon && d <= params.surfaceEpsilon) {
+            float t0 = tPrev;
+            float t1 = t;
+            for (int i = 0; i < 20; ++i) {
+                const float tMid = 0.5f * (t0 + t1);
+                const float midSdf = bruteSceneSDF(evalRay(ro, rd, tMid), shapes);
+                if (midSdf > params.surfaceEpsilon) {
+                    t0 = tMid;
+                } else {
+                    t1 = tMid;
+                }
+            }
+            result.hit = true;
+            result.t = t1;
+            result.steps = steps + 1;
+            result.sdfAtHit = bruteSceneSDF(evalRay(ro, rd, t1), shapes);
+            return result;
+        }
+        tPrev = t;
+        prevSdf = d;
+        ++steps;
+    }
+
+    return result;
 }
 
 inline bool octreeDescentOk(

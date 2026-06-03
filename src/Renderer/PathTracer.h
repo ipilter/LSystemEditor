@@ -2,13 +2,16 @@
 
 #include "CameraGpu.h"
 #include "Sdf/SdfTypes.h"
+#include "Sdf/Shapes/SdfShape.h"
 #include "SdfAccel/SdfAccelBoundsMesh.h"
+#include "SdfAccel/SdfSceneContent.h"
 
 #include <QColor>
 #include <cstdint>
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <vector>
 
 namespace PathTracerDetail {
 struct PathTracerImpl;
@@ -33,7 +36,12 @@ public:
 
     /// Requires an active OpenGL context on the calling thread (cudaGraphicsGLRegisterBuffer).
     /// pbo0 and pbo1 are OpenGL buffer object names owned by the caller.
-    bool configure(int width, int height, uint32_t pbo0, uint32_t pbo1);
+    bool configure(
+        int width,
+        int height,
+        uint32_t pbo0,
+        uint32_t pbo1,
+        const std::vector<std::unique_ptr<SdfShape>>& shapes);
 
     void start();
     void stop();
@@ -61,13 +69,18 @@ public:
 
     CameraGpu lastSampleCamera() const;
 
-    void setVisualMode(SdfVisualMode mode);
-    SdfVisualMode visualMode() const;
+    void setVisualMode(SdfDebugVisualMode mode);
+    SdfDebugVisualMode visualMode() const;
 
     void setClearColor(const QColor& color);
 
     void rebuildAccelBoundsMesh(const QColor& aabbColor, const QColor& octreeColor);
     const SdfAccelBoundsMesh& accelBoundsMesh() const;
+
+    void setOctreeMaxDepth(int depth);
+    int octreeMaxDepth() const;
+
+    bool rebuildAccelScene(const std::vector<std::unique_ptr<SdfShape>>& shapes);
 
 private:
     void renderLoop();

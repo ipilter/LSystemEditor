@@ -47,6 +47,9 @@ public:
     QColor accelOctreeColor() const;
     void setAccelOctreeColor(const QColor& color);
 
+    int octreeMaxDepth() const;
+    void setOctreeMaxDepth(int value);
+
     void load();
     void save();
 
@@ -58,6 +61,7 @@ private:
     static int clampRenderDimension(int value);
     static int clampMaxSamplesPerPixel(int value);
     static int clampPreviewStepsPerLevel(int value);
+    static int clampOctreeMaxDepth(int value);
     void seedDefaultDebounceValues();
 
     static AppSettings* s_instance;
@@ -69,4 +73,5 @@ private:
     int m_previewStepsPerLevel = 0;
     QColor m_accelAabbColor = QColor(0, 200, 80);
     QColor m_accelOctreeColor = QColor(230, 200, 0);
+    int m_octreeMaxDepth = 5;
 };
