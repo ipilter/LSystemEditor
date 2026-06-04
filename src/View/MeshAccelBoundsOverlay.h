@@ -1,7 +1,7 @@
 #pragma once
 
-#include "Sdf/SdfTypes.h"
-#include "SdfAccel/SdfAccelBoundsMesh.h"
+#include "MeshAccel/MeshAccelBoundsMesh.h"
+#include "MeshAccel/MeshAccelTypes.h"
 
 #include <QColor>
 #include <QOpenGLFunctions_4_5_Core>
@@ -9,22 +9,22 @@
 
 #include <glm/glm.hpp>
 
-class SdfAccelBoundsOverlay
+class MeshAccelBoundsOverlay
 {
 public:
-    SdfAccelBoundsOverlay() = default;
-    ~SdfAccelBoundsOverlay();
+    MeshAccelBoundsOverlay() = default;
+    ~MeshAccelBoundsOverlay();
 
-    SdfAccelBoundsOverlay(const SdfAccelBoundsOverlay&) = delete;
-    SdfAccelBoundsOverlay& operator=(const SdfAccelBoundsOverlay&) = delete;
+    MeshAccelBoundsOverlay(const MeshAccelBoundsOverlay&) = delete;
+    MeshAccelBoundsOverlay& operator=(const MeshAccelBoundsOverlay&) = delete;
 
     void initialize(QOpenGLFunctions_4_5_Core* gl);
     void release(QOpenGLFunctions_4_5_Core* gl);
-    void rebuild(QOpenGLFunctions_4_5_Core* gl, const SdfAccelBoundsMesh& mesh);
+    void rebuild(QOpenGLFunctions_4_5_Core* gl, const MeshAccelBoundsMesh& mesh);
     void draw(
         QOpenGLFunctions_4_5_Core* gl,
         const glm::mat4& viewProj,
-        SdfAccelBoundsOverlayMode mode,
+        MeshAccelBoundsOverlayMode mode,
         const QColor& boundsColor);
 
 private:

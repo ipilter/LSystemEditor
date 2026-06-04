@@ -103,26 +103,13 @@ MainView::MainView(QWidget* parent)
 
     auto* visualModeRow = new QHBoxLayout();
     visualModeRow->addWidget(new QLabel(QStringLiteral("Debug:"), renderGroup));
-    m_sdfVisualModeComboBox = new QComboBox(renderGroup);
-    m_sdfVisualModeComboBox->addItem(QStringLiteral("Step Count"));
-    m_sdfVisualModeComboBox->addItem(QStringLiteral("Distance"));
-    m_sdfVisualModeComboBox->addItem(QStringLiteral("Off"));
-    m_sdfVisualModeComboBox->setToolTip(
-        QStringLiteral("Step Count: march iteration heatmap. Distance: hit distance heatmap. Off: no debug visualization."));
-    visualModeRow->addWidget(m_sdfVisualModeComboBox, 1);
+    m_debugVisualModeComboBox = new QComboBox(renderGroup);
+    m_debugVisualModeComboBox->addItem(QStringLiteral("Normals"));
+    m_debugVisualModeComboBox->addItem(QStringLiteral("Distance"));
+    m_debugVisualModeComboBox->setToolTip(
+        QStringLiteral("Normals: shaded surface normals. Distance: hit distance heatmap."));
+    visualModeRow->addWidget(m_debugVisualModeComboBox, 1);
     renderLayout->addLayout(visualModeRow);
-
-    auto* traversalModeRow = new QHBoxLayout();
-    traversalModeRow->addWidget(new QLabel(QStringLiteral("Traversal:"), renderGroup));
-    m_sdfTraversalModeComboBox = new QComboBox(renderGroup);
-    m_sdfTraversalModeComboBox->addItem(QStringLiteral("Brute Force"));
-    m_sdfTraversalModeComboBox->addItem(QStringLiteral("BVH"));
-    m_sdfTraversalModeComboBox->setToolTip(
-        QStringLiteral(
-            "Brute Force: evaluate every object each march step. "
-            "BVH: object-level BVH culling with analytical conservative bounds; exact SDF near surfaces."));
-    traversalModeRow->addWidget(m_sdfTraversalModeComboBox, 1);
-    renderLayout->addLayout(traversalModeRow);
 
     auto* boundsOverlayRow = new QHBoxLayout();
     boundsOverlayRow->addWidget(new QLabel(QStringLiteral("Bounds:"), renderGroup));
@@ -161,9 +148,9 @@ MainView::MainView(QWidget* parent)
 
     auto* userGroup = new QGroupBox(QStringLiteral("User"), controlBar);
     auto* userLayout = new QVBoxLayout(userGroup);
-    m_addSdfButton = new QPushButton(QStringLiteral("Add"), userGroup);
-    m_addSdfButton->setToolTip(QStringLiteral("Add a new SDF primitive to the scene"));
-    userLayout->addWidget(m_addSdfButton);
+    m_addPrimitiveButton = new QPushButton(QStringLiteral("Add"), userGroup);
+    m_addPrimitiveButton->setToolTip(QStringLiteral("Add a new Manifold primitive to the scene"));
+    userLayout->addWidget(m_addPrimitiveButton);
     controlLayout->addWidget(userGroup);
 
     auto* backgroundRow = new QHBoxLayout();
@@ -224,14 +211,9 @@ QSpinBox* MainView::previewStepsSpinBox() const
     return m_previewStepsSpinBox;
 }
 
-QComboBox* MainView::sdfVisualModeComboBox() const
+QComboBox* MainView::debugVisualModeComboBox() const
 {
-    return m_sdfVisualModeComboBox;
-}
-
-QComboBox* MainView::sdfTraversalModeComboBox() const
-{
-    return m_sdfTraversalModeComboBox;
+    return m_debugVisualModeComboBox;
 }
 
 QComboBox* MainView::boundsOverlayComboBox() const
@@ -254,9 +236,9 @@ QPushButton* MainView::settingsButton() const
     return m_settingsButton;
 }
 
-QPushButton* MainView::addSdfButton() const
+QPushButton* MainView::addPrimitiveButton() const
 {
-    return m_addSdfButton;
+    return m_addPrimitiveButton;
 }
 
 void MainView::setIteration(int value)

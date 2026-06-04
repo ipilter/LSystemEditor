@@ -1,10 +1,10 @@
 #pragma once
 
 #include "CameraGpu.h"
-#include "Sdf/SdfTypes.h"
-#include "Sdf/Shapes/SdfShape.h"
-#include "SdfAccel/SdfAccelBoundsMesh.h"
-#include "SdfAccel/SdfSceneContent.h"
+#include "Geometry/GeometryTypes.h"
+#include "MeshAccel/MeshAccelBoundsMesh.h"
+#include "SceneDefaults.h"
+#include "ScenePrimitive.h"
 
 #include <QColor>
 #include <cstdint>
@@ -41,7 +41,7 @@ public:
         int height,
         uint32_t pbo0,
         uint32_t pbo1,
-        const std::vector<std::unique_ptr<SdfShape>>& shapes);
+        const std::vector<std::unique_ptr<ScenePrimitive>>& primitives);
 
     void start();
     void stop();
@@ -69,18 +69,15 @@ public:
 
     CameraGpu lastSampleCamera() const;
 
-    void setVisualMode(SdfDebugVisualMode mode);
-    SdfDebugVisualMode visualMode() const;
-
-    void setSdfTraversalMode(SdfTraversalMode mode);
-    SdfTraversalMode sdfTraversalMode() const;
+    void setVisualMode(RenderDebugVisualMode mode);
+    RenderDebugVisualMode visualMode() const;
 
     void setClearColor(const QColor& color);
 
-    void rebuildAccelBoundsMesh(const QColor& boundsColor);
-    const SdfAccelBoundsMesh& accelBoundsMesh() const;
+    void rebuildMeshBoundsMesh(const QColor& boundsColor);
+    const MeshAccelBoundsMesh& meshBoundsMesh() const;
 
-    bool rebuildAccelScene(const std::vector<std::unique_ptr<SdfShape>>& shapes);
+    bool rebuildMeshScene(const std::vector<std::unique_ptr<ScenePrimitive>>& primitives);
 
 private:
     void renderLoop();

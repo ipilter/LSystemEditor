@@ -1,7 +1,5 @@
 #pragma once
 
-#include "Sdf/SdfTypes.h"
-
 #include <QColor>
 #include <QHash>
 #include <QObject>
@@ -46,9 +44,6 @@ public:
     QColor accelBvhColor() const;
     void setAccelBvhColor(const QColor& color);
 
-    SdfTraversalMode sdfTraversalMode() const;
-    void setSdfTraversalMode(SdfTraversalMode mode);
-
     void load();
     void save();
 
@@ -60,7 +55,6 @@ private:
     static int clampRenderDimension(int value);
     static int clampMaxSamplesPerPixel(int value);
     static int clampPreviewStepsPerLevel(int value);
-    static SdfTraversalMode clampSdfTraversalMode(SdfTraversalMode mode);
     void seedDefaultDebounceValues();
 
     static AppSettings* s_instance;
@@ -71,5 +65,4 @@ private:
     int m_maxSamplesPerPixel = 1024;
     int m_previewStepsPerLevel = 0;
     QColor m_accelBvhColor = QColor(230, 200, 0);
-    SdfTraversalMode m_sdfTraversalMode = SdfTraversalMode::BvhAccel;
 };

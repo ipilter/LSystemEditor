@@ -1,8 +1,9 @@
 #pragma once
 
-#include "Sdf/SdfTypes.h"
-#include "Sdf/Shapes/SdfShape.h"
-#include "SdfAccel/SdfSceneContent.h"
+#include "Geometry/GeometryTypes.h"
+#include "MeshAccel/MeshAccelTypes.h"
+#include "SceneDefaults.h"
+#include "ScenePrimitive.h"
 
 #include <QColor>
 #include <QObject>
@@ -35,20 +36,17 @@ public:
     int previewStepsPerLevel() const;
     void setPreviewStepsPerLevel(int value);
 
-    SdfDebugVisualMode sdfVisualMode() const;
-    void setSdfVisualMode(SdfDebugVisualMode mode);
+    RenderDebugVisualMode debugVisualMode() const;
+    void setDebugVisualMode(RenderDebugVisualMode mode);
 
-    SdfTraversalMode sdfTraversalMode() const;
-    void setSdfTraversalMode(SdfTraversalMode mode);
-
-    SdfAccelBoundsOverlayMode boundsOverlayMode() const;
-    void setBoundsOverlayMode(SdfAccelBoundsOverlayMode mode);
+    MeshAccelBoundsOverlayMode boundsOverlayMode() const;
+    void setBoundsOverlayMode(MeshAccelBoundsOverlayMode mode);
 
     QColor accelBvhColor() const;
     void setAccelBvhColor(const QColor& color);
 
-    const std::vector<std::unique_ptr<SdfShape>>& sdfShapes() const;
-    void addSdfShape(std::unique_ptr<SdfShape> shape);
+    const std::vector<std::unique_ptr<ScenePrimitive>>& primitives() const;
+    void addPrimitive(std::unique_ptr<ScenePrimitive> primitive);
 
     GLuint pboId(int index) const;
     void setPboIds(GLuint pbo0, GLuint pbo1);
@@ -58,16 +56,14 @@ signals:
     void renderSizeChanged(const QSize& size);
     void maxSamplesPerPixelChanged(int value);
     void previewStepsPerLevelChanged(int value);
-    void sdfVisualModeChanged(SdfDebugVisualMode mode);
-    void sdfTraversalModeChanged(SdfTraversalMode mode);
-    void boundsOverlayModeChanged(SdfAccelBoundsOverlayMode mode);
+    void debugVisualModeChanged(RenderDebugVisualMode mode);
+    void boundsOverlayModeChanged(MeshAccelBoundsOverlayMode mode);
     void accelBvhColorChanged(const QColor& color);
-    void sdfSceneChanged();
+    void sceneChanged();
 
 private:
-    static SdfDebugVisualMode clampVisualMode(SdfDebugVisualMode mode);
-    static SdfTraversalMode clampTraversalMode(SdfTraversalMode mode);
-    static SdfAccelBoundsOverlayMode clampBoundsOverlayMode(SdfAccelBoundsOverlayMode mode);
+    static RenderDebugVisualMode clampVisualMode(RenderDebugVisualMode mode);
+    static MeshAccelBoundsOverlayMode clampBoundsOverlayMode(MeshAccelBoundsOverlayMode mode);
     static int clampDimension(int value);
     static int clampMaxSamples(int value);
     static int clampPreviewSteps(int value);
@@ -76,10 +72,9 @@ private:
     QSize m_renderSize;
     int m_maxSamplesPerPixel = 8;
     int m_previewStepsPerLevel = 2;
-    SdfDebugVisualMode m_sdfVisualMode = SdfDebugVisualMode::Off;
-    SdfTraversalMode m_sdfTraversalMode = SdfTraversalMode::BvhAccel;
-    SdfAccelBoundsOverlayMode m_boundsOverlayMode = SdfAccelBoundsOverlayMode::Off;
+    RenderDebugVisualMode m_debugVisualMode = RenderDebugVisualMode::Off;
+    MeshAccelBoundsOverlayMode m_boundsOverlayMode = MeshAccelBoundsOverlayMode::Off;
     QColor m_accelBvhColor = QColor(230, 200, 0);
-    std::vector<std::unique_ptr<SdfShape>> m_sdfShapes;
+    std::vector<std::unique_ptr<ScenePrimitive>> m_primitives;
     GLuint m_pboIds[bufferCount] = {0, 0};
 };

@@ -1,0 +1,173 @@
+#pragma once
+
+#include "MeshAccelTypes.h"
+#include "Geometry/MathCore.h"
+
+#if defined(__CUDACC__)
+#define MESH_ACCEL_CORE_FN __host__ __device__ inline
+#else
+#define MESH_ACCEL_CORE_FN inline
+#endif
+
+MESH_ACCEL_CORE_FN bool meshAccelRayAabb(
+    Vec3 ro,
+    Vec3 rd,
+    Vec3 invRd,
+    Vec3 boundsMin,
+    Vec3 boundsMax,
+    float tMin,
+    float tMax,
+    float& outTEnter,
+    float& outTExit)
+{
+    float tEnter = tMin;
+    float tExit = tMax;
+
+    for (int axis = 0; axis < 3; ++axis) {
+        const float origin = axis == 0 ? ro.x : (axis == 1 ? ro.y : ro.z);
+        const float invD = axis == 0 ? invRd.x : (axis == 1 ? invRd.y : invRd.z);
+        const float bMin = axis == 0 ? boundsMin.x : (axis == 1 ? boundsMin.y : boundsMin.z);
+        const float bMax = axis == 0 ? boundsMax.x : (axis == 1 ? boundsMax.y : boundsMax.z);
+
+        float t0 = (bMin - origin) * invD;
+        float t1 = (bMax - origin) * invD;
+        if (invD < 0.0f) {
+            const float tmp = t0;
+            t0 = t1;
+            t1 = tmp;
+        }
+
+        tEnter = vecMax2(tEnter, t0);
+        tExit = vecMin2(tExit, t1);
+        if (tEnter > tExit) {
+            return false;
+        }
+    }
+
+    outTEnter = tEnter;
+    outTExit = tExit;
+    return tExit >= tMin;
+}
+
+MESH_ACCEL_CORE_FN bool meshAccelRayTriangle(
+    Vec3 ro,
+    Vec3 rd,
+    const TriangleGpu& tri,
+    float tMin,
+    float tMax,
+    float& outT,
+    Vec3& outNormal)
+{
+    const Vec3 e1 = vecSub3(tri.v1, tri.v0);
+    const Vec3 e2 = vecSub3(tri.v2, tri.v0);
+    const Vec3 pvec = vecMake3(
+        rd.y * e2.z - rd.z * e2.y,
+        rd.z * e2.x - rd.x * e2.z,
+        rd.x * e2.y - rd.y * e2.x);
+
+    const float det = vecDot3(e1, pvec);
+    if (fabsf(det) < 1.0e-8f) {
+        return false;
+    }
+
+    const float invDet = 1.0f / det;
+    const Vec3 tvec = vecSub3(ro, tri.v0);
+    const float u = vecDot3(tvec, pvec) * invDet;
+    if (u < 0.0f || u > 1.0f) {
+        return false;
+    }
+
+    const Vec3 qvec = vecMake3(
+        tvec.y * e1.z - tvec.z * e1.y,
+        tvec.z * e1.x - tvec.x * e1.z,
+        tvec.x * e1.y - tvec.y * e1.x);
+    const float v = vecDot3(rd, qvec) * invDet;
+    if (v < 0.0f || u + v > 1.0f) {
+        return false;
+    }
+
+    const float t = vecDot3(e2, qvec) * invDet;
+    if (t < tMin || t > tMax) {
+        return false;
+    }
+
+    outT = t;
+    outNormal = det < 0.0f ? tri.normal : vecScale3(tri.normal, -1.0f);
+    return true;
+}
+
+MESH_ACCEL_CORE_FN MeshHit meshAccelTraceRay(
+    Vec3 ro,
+    Vec3 rd,
+    const MeshAccelSceneGpu* scene,
+    float tMin,
+    float tMax)
+{
+    MeshHit result{};
+
+    if (scene == nullptr || scene->bvhNodes == nullptr || scene->triangles == nullptr ||
+        scene->bvhNodeCount == 0 || scene->triangleCount == 0) {
+        return result;
+    }
+
+    rd = vecNormalize3(rd);
+    const Vec3 invRd = vecMake3(
+        fabsf(rd.x) > 1.0e-8f ? 1.0f / rd.x : 0.0f,
+        fabsf(rd.y) > 1.0e-8f ? 1.0f / rd.y : 0.0f,
+        fabsf(rd.z) > 1.0e-8f ? 1.0f / rd.z : 0.0f);
+
+    int stack[64];
+    int stackSize = 0;
+    stack[stackSize++] = static_cast<int>(scene->bvhRootIndex);
+
+    float closestT = tMax;
+    Vec3 closestNormal{};
+
+    while (stackSize > 0) {
+        const int nodeIndex = stack[--stackSize];
+        if (nodeIndex < 0 || nodeIndex >= static_cast<int>(scene->bvhNodeCount)) {
+            continue;
+        }
+
+        const MeshBvhNode& node = scene->bvhNodes[nodeIndex];
+        float tEnter = 0.0f;
+        float tExit = 0.0f;
+        if (!meshAccelRayAabb(ro, rd, invRd, node.boundsMin, node.boundsMax, tMin, closestT, tEnter, tExit)) {
+            continue;
+        }
+
+        if (node.triCount > 0) {
+            const uint32_t end = node.triStart + node.triCount;
+            for (uint32_t triIndex = node.triStart; triIndex < end; ++triIndex) {
+                if (triIndex >= scene->triangleCount) {
+                    break;
+                }
+
+                float tHit = 0.0f;
+                Vec3 normal{};
+                if (meshAccelRayTriangle(ro, rd, scene->triangles[triIndex], tMin, closestT, tHit, normal)) {
+                    closestT = tHit;
+                    closestNormal = normal;
+                }
+            }
+            continue;
+        }
+
+        if (stackSize + 2 > 64) {
+            continue;
+        }
+
+        const int left = static_cast<int>(node.leftIndex);
+        const int right = static_cast<int>(node.rightIndex);
+        stack[stackSize++] = left;
+        stack[stackSize++] = right;
+    }
+
+    if (closestT < tMax) {
+        result.hit = true;
+        result.t = closestT;
+        result.normal = vecNormalize3(closestNormal);
+    }
+
+    return result;
+}

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Sdf/Shapes/SdfShape.h"
+#include "ScenePrimitive.h"
 
 #include <QDialog>
 #include <memory>
@@ -10,14 +10,14 @@ class QDoubleSpinBox;
 class QFormLayout;
 class QWidget;
 
-class AddSdfDialog : public QDialog
+class AddPrimitiveDialog : public QDialog
 {
     Q_OBJECT
 
 public:
-    explicit AddSdfDialog(QWidget* parent = nullptr);
+    explicit AddPrimitiveDialog(QWidget* parent = nullptr);
 
-    std::unique_ptr<SdfShape> result();
+    std::unique_ptr<ScenePrimitive> result();
 
 private:
     void onTypeChanged(int index);
@@ -33,5 +33,5 @@ private:
     QDoubleSpinBox* m_radiusBottomSpinBox = nullptr;
     QDoubleSpinBox* m_radiusTopSpinBox = nullptr;
 
-    std::unique_ptr<SdfShape> m_result;
+    std::unique_ptr<ScenePrimitive> m_result;
 };

@@ -38,8 +38,6 @@ constexpr const char* kLegacyAccelAabbColorBlueKey = "accelAabbColorBlue";
 constexpr const char* kLegacyAccelOctreeColorRedKey = "accelOctreeColorRed";
 constexpr const char* kLegacyAccelOctreeColorGreenKey = "accelOctreeColorGreen";
 constexpr const char* kLegacyAccelOctreeColorBlueKey = "accelOctreeColorBlue";
-constexpr const char* kSdfTraversalModeKey = "sdfTraversalMode";
-
 bool isKnownDebounceElementId(const QString& elementId)
 {
     return elementId == DebounceElementIds::kRenderSize
@@ -190,22 +188,6 @@ void AppSettings::setAccelBvhColor(const QColor& color)
     save();
 }
 
-SdfTraversalMode AppSettings::sdfTraversalMode() const
-{
-    return m_sdfTraversalMode;
-}
-
-void AppSettings::setSdfTraversalMode(SdfTraversalMode mode)
-{
-    const SdfTraversalMode clamped = clampSdfTraversalMode(mode);
-    if (m_sdfTraversalMode == clamped) {
-        return;
-    }
-
-    m_sdfTraversalMode = clamped;
-    save();
-}
-
 int AppSettings::clampDebounceMs(int value)
 {
     if (value < kMinDebounceMs) {
@@ -248,17 +230,6 @@ int AppSettings::clampPreviewStepsPerLevel(int value)
         return kMaxPreviewStepsPerLevel;
     }
     return value;
-}
-
-SdfTraversalMode AppSettings::clampSdfTraversalMode(SdfTraversalMode mode)
-{
-    switch (mode) {
-    case SdfTraversalMode::BruteForce:
-    case SdfTraversalMode::BvhAccel:
-        return mode;
-    default:
-        return SdfTraversalMode::BvhAccel;
-    }
 }
 
 void AppSettings::load()
@@ -370,14 +341,6 @@ void AppSettings::load()
             m_accelBvhColor);
     }
 
-    const QVariant sdfTraversalModeValue = settings.value(kSdfTraversalModeKey);
-    if (sdfTraversalModeValue.isValid()) {
-        bool ok = false;
-        const int mode = sdfTraversalModeValue.toInt(&ok);
-        if (ok) {
-            m_sdfTraversalMode = clampSdfTraversalMode(static_cast<SdfTraversalMode>(mode));
-        }
-    }
 }
 
 void AppSettings::save()
@@ -401,6 +364,5 @@ void AppSettings::save()
     settings.setValue(kAccelBvhColorRedKey, m_accelBvhColor.red());
     settings.setValue(kAccelBvhColorGreenKey, m_accelBvhColor.green());
     settings.setValue(kAccelBvhColorBlueKey, m_accelBvhColor.blue());
-    settings.setValue(kSdfTraversalModeKey, static_cast<int>(m_sdfTraversalMode));
     settings.sync();
 }

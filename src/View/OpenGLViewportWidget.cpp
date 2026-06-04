@@ -186,19 +186,13 @@ void OpenGLViewportWidget::setSceneModel(SceneModel* model)
         m_pathTracer.setPreviewStepsPerLevel(steps);
     });
 
-    connect(m_model, &SceneModel::sdfVisualModeChanged, this, [this](SdfDebugVisualMode mode) {
+    connect(m_model, &SceneModel::debugVisualModeChanged, this, [this](RenderDebugVisualMode mode) {
         m_pathTracer.setVisualMode(mode);
         m_pathTracer.resetAccumulation();
         update();
     });
 
-    connect(m_model, &SceneModel::sdfTraversalModeChanged, this, [this](SdfTraversalMode mode) {
-        m_pathTracer.setSdfTraversalMode(mode);
-        m_pathTracer.resetAccumulation();
-        update();
-    });
-
-    connect(m_model, &SceneModel::boundsOverlayModeChanged, this, [this](SdfAccelBoundsOverlayMode) {
+    connect(m_model, &SceneModel::boundsOverlayModeChanged, this, [this](MeshAccelBoundsOverlayMode) {
         update();
     });
 
@@ -207,12 +201,12 @@ void OpenGLViewportWidget::setSceneModel(SceneModel* model)
         update();
     });
 
-    connect(m_model, &SceneModel::sdfSceneChanged, this, [this]() {
+    connect(m_model, &SceneModel::sceneChanged, this, [this]() {
         if (!m_glInitialized || m_model == nullptr) {
             return;
         }
         makeCurrent();
-        if (!m_pathTracer.rebuildAccelScene(m_model->sdfShapes())) {
+        if (!m_pathTracer.rebuildMeshScene(m_model->primitives())) {
             doneCurrent();
             return;
         }
@@ -330,13 +324,13 @@ void OpenGLViewportWidget::rebuildBoundsOverlay()
         return;
     }
 
-    m_pathTracer.rebuildAccelBoundsMesh(m_model->accelBvhColor());
-    m_boundsOverlay.rebuild(this, m_pathTracer.accelBoundsMesh());
+    m_pathTracer.rebuildMeshBoundsMesh(m_model->accelBvhColor());
+    m_boundsOverlay.rebuild(this, m_pathTracer.meshBoundsMesh());
 }
 
 void OpenGLViewportWidget::drawBoundsOverlay()
 {
-    if (m_model == nullptr || m_model->boundsOverlayMode() == SdfAccelBoundsOverlayMode::Off) {
+    if (m_model == nullptr || m_model->boundsOverlayMode() == MeshAccelBoundsOverlayMode::Off) {
         return;
     }
 
@@ -532,7 +526,7 @@ void OpenGLViewportWidget::recreateGpuBuffers()
     }
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
-    if (!m_pathTracer.configure(w, h, m_pbos[0], m_pbos[1], m_model->sdfShapes())) {
+    if (!m_pathTracer.configure(w, h, m_pbos[0], m_pbos[1], m_model->primitives())) {
         AppLog::instance().error(QStringLiteral("PathTracer configure failed for %1x%2").arg(w).arg(h));
         return;
     }
@@ -543,8 +537,7 @@ void OpenGLViewportWidget::recreateGpuBuffers()
 
     m_pathTracer.setMaxSamplesPerPixel(m_model->maxSamplesPerPixel());
     m_pathTracer.setPreviewStepsPerLevel(m_model->previewStepsPerLevel());
-    m_pathTracer.setVisualMode(m_model->sdfVisualMode());
-    m_pathTracer.setSdfTraversalMode(m_model->sdfTraversalMode());
+    m_pathTracer.setVisualMode(m_model->debugVisualMode());
 
     m_model->setPboIds(m_pbos[0], m_pbos[1]);
 

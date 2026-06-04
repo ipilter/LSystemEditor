@@ -1,8 +1,4 @@
-#include "AddSdfDialog.h"
-
-#include "Sdf/Shapes/CappedConeSdf.h"
-#include "Sdf/Shapes/CylinderSdf.h"
-#include "Sdf/Shapes/SphereSdf.h"
+#include "AddPrimitiveDialog.h"
 
 #include <QComboBox>
 #include <QDialogButtonBox>
@@ -39,10 +35,10 @@ QDoubleSpinBox* makeParameterSpinBox(QWidget* parent, double value)
 
 } // namespace
 
-AddSdfDialog::AddSdfDialog(QWidget* parent)
+AddPrimitiveDialog::AddPrimitiveDialog(QWidget* parent)
     : QDialog(parent)
 {
-    setWindowTitle(QStringLiteral("Add SDF"));
+    setWindowTitle(QStringLiteral("Add Primitive"));
     setModal(true);
 
     auto* rootLayout = new QVBoxLayout(this);
@@ -78,33 +74,34 @@ AddSdfDialog::AddSdfDialog(QWidget* parent)
 
     auto* buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     connect(buttonBox, &QDialogButtonBox::accepted, this, [this]() {
-        const SdfFloat3 center = sdfMakeFloat3(
+        auto primitive = std::make_unique<ScenePrimitive>();
+        primitive->center = Vec3{
             static_cast<float>(m_centerXSpinBox->value()),
             static_cast<float>(m_centerYSpinBox->value()),
-            static_cast<float>(m_centerZSpinBox->value()));
+            static_cast<float>(m_centerZSpinBox->value())};
 
         switch (m_typeComboBox->currentIndex()) {
         case 0:
-            m_result = std::make_unique<SphereSdf>(center, static_cast<float>(m_radiusSpinBox->value()));
+            primitive->type = PrimitiveType::Sphere;
+            primitive->radius = static_cast<float>(m_radiusSpinBox->value());
             break;
         case 1:
-            m_result = std::make_unique<CylinderSdf>(
-                center,
-                sdfMakeFloat2(
-                    static_cast<float>(m_radiusSpinBox->value()),
-                    static_cast<float>(m_halfHeightSpinBox->value())));
+            primitive->type = PrimitiveType::Cylinder;
+            primitive->halfExtents = Vec2{
+                static_cast<float>(m_radiusSpinBox->value()),
+                static_cast<float>(m_halfHeightSpinBox->value())};
             break;
         case 2:
-            m_result = std::make_unique<CappedConeSdf>(
-                center,
-                static_cast<float>(m_halfHeightSpinBox->value()),
-                static_cast<float>(m_radiusBottomSpinBox->value()),
-                static_cast<float>(m_radiusTopSpinBox->value()));
+            primitive->type = PrimitiveType::CappedCone;
+            primitive->halfHeight = static_cast<float>(m_halfHeightSpinBox->value());
+            primitive->radiusBottom = static_cast<float>(m_radiusBottomSpinBox->value());
+            primitive->radiusTop = static_cast<float>(m_radiusTopSpinBox->value());
             break;
         default:
-            break;
+            return;
         }
 
+        m_result = std::move(primitive);
         accept();
     });
     connect(buttonBox, &QDialogButtonBox::rejected, this, &QDialog::reject);
@@ -114,23 +111,23 @@ AddSdfDialog::AddSdfDialog(QWidget* parent)
         m_typeComboBox,
         QOverload<int>::of(&QComboBox::currentIndexChanged),
         this,
-        &AddSdfDialog::onTypeChanged);
+        &AddPrimitiveDialog::onTypeChanged);
 
     onTypeChanged(m_typeComboBox->currentIndex());
 }
 
-std::unique_ptr<SdfShape> AddSdfDialog::result()
+std::unique_ptr<ScenePrimitive> AddPrimitiveDialog::result()
 {
     return std::move(m_result);
 }
 
-void AddSdfDialog::onTypeChanged(int index)
+void AddPrimitiveDialog::onTypeChanged(int index)
 {
     Q_UNUSED(index);
     updateParameterVisibility();
 }
 
-void AddSdfDialog::updateParameterVisibility()
+void AddPrimitiveDialog::updateParameterVisibility()
 {
     const int typeIndex = m_typeComboBox->currentIndex();
 

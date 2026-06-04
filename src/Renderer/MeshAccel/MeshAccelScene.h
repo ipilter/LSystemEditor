@@ -1,0 +1,44 @@
+#pragma once
+
+#include "MeshAccelTypes.h"
+#include "MeshBuilder/HostMesh.h"
+
+#include <cuda_runtime.h>
+#include <vector>
+
+class MeshAccelScene
+{
+public:
+    MeshAccelScene();
+    ~MeshAccelScene();
+
+    MeshAccelScene(const MeshAccelScene&) = delete;
+    MeshAccelScene& operator=(const MeshAccelScene&) = delete;
+
+    void clear();
+
+    bool build(const HostMesh& mesh);
+
+    bool allocate();
+    void release();
+    bool upload(cudaStream_t stream);
+
+    const MeshAccelSceneGpu* deviceScene() const { return m_dScene; }
+    const MeshAccelSceneGpu* hostScene() const { return m_built ? &m_hostScene : nullptr; }
+
+    bool isBuilt() const { return m_built; }
+    const std::vector<TriangleGpu>& trianglesHost() const { return m_triangles; }
+    const std::vector<MeshBvhNode>& bvhNodesHost() const { return m_bvhNodes; }
+
+private:
+    std::vector<MeshBvhNode> m_bvhNodes;
+    std::vector<TriangleGpu> m_triangles;
+    MeshAccelSceneGpu m_hostScene{};
+    bool m_built = false;
+
+    MeshAccelSceneGpu* m_dScene = nullptr;
+    MeshBvhNode* m_dBvhNodes = nullptr;
+    TriangleGpu* m_dTriangles = nullptr;
+
+    bool m_deviceDirty = true;
+};

@@ -19,8 +19,7 @@ SceneModel::SceneModel(QObject* parent)
     , m_maxSamplesPerPixel(AppSettings::instance().maxSamplesPerPixel())
     , m_previewStepsPerLevel(AppSettings::instance().previewStepsPerLevel())
     , m_accelBvhColor(AppSettings::instance().accelBvhColor())
-    , m_sdfTraversalMode(AppSettings::instance().sdfTraversalMode())
-    , m_sdfShapes(sdfDefaultSceneShapes())
+    , m_primitives(defaultScenePrimitives())
 {
 }
 
@@ -97,47 +96,30 @@ void SceneModel::setPreviewStepsPerLevel(int value)
     emit previewStepsPerLevelChanged(m_previewStepsPerLevel);
 }
 
-SdfDebugVisualMode SceneModel::sdfVisualMode() const
+RenderDebugVisualMode SceneModel::debugVisualMode() const
 {
-    return m_sdfVisualMode;
+    return m_debugVisualMode;
 }
 
-void SceneModel::setSdfVisualMode(SdfDebugVisualMode mode)
+void SceneModel::setDebugVisualMode(RenderDebugVisualMode mode)
 {
-    const SdfDebugVisualMode clamped = clampVisualMode(mode);
-    if (m_sdfVisualMode == clamped) {
+    const RenderDebugVisualMode clamped = clampVisualMode(mode);
+    if (m_debugVisualMode == clamped) {
         return;
     }
 
-    m_sdfVisualMode = clamped;
-    emit sdfVisualModeChanged(m_sdfVisualMode);
+    m_debugVisualMode = clamped;
+    emit debugVisualModeChanged(m_debugVisualMode);
 }
 
-SdfTraversalMode SceneModel::sdfTraversalMode() const
-{
-    return m_sdfTraversalMode;
-}
-
-void SceneModel::setSdfTraversalMode(SdfTraversalMode mode)
-{
-    const SdfTraversalMode clamped = clampTraversalMode(mode);
-    if (m_sdfTraversalMode == clamped) {
-        return;
-    }
-
-    m_sdfTraversalMode = clamped;
-    AppSettings::instance().setSdfTraversalMode(clamped);
-    emit sdfTraversalModeChanged(m_sdfTraversalMode);
-}
-
-SdfAccelBoundsOverlayMode SceneModel::boundsOverlayMode() const
+MeshAccelBoundsOverlayMode SceneModel::boundsOverlayMode() const
 {
     return m_boundsOverlayMode;
 }
 
-void SceneModel::setBoundsOverlayMode(SdfAccelBoundsOverlayMode mode)
+void SceneModel::setBoundsOverlayMode(MeshAccelBoundsOverlayMode mode)
 {
-    const SdfAccelBoundsOverlayMode clamped = clampBoundsOverlayMode(mode);
+    const MeshAccelBoundsOverlayMode clamped = clampBoundsOverlayMode(mode);
     if (m_boundsOverlayMode == clamped) {
         return;
     }
@@ -162,18 +144,18 @@ void SceneModel::setAccelBvhColor(const QColor& color)
     emit accelBvhColorChanged(m_accelBvhColor);
 }
 
-const std::vector<std::unique_ptr<SdfShape>>& SceneModel::sdfShapes() const
+const std::vector<std::unique_ptr<ScenePrimitive>>& SceneModel::primitives() const
 {
-    return m_sdfShapes;
+    return m_primitives;
 }
 
-void SceneModel::addSdfShape(std::unique_ptr<SdfShape> shape)
+void SceneModel::addPrimitive(std::unique_ptr<ScenePrimitive> primitive)
 {
-    if (shape == nullptr) {
+    if (primitive == nullptr) {
         return;
     }
-    m_sdfShapes.push_back(std::move(shape));
-    emit sdfSceneChanged();
+    m_primitives.push_back(std::move(primitive));
+    emit sceneChanged();
 }
 
 GLuint SceneModel::pboId(int index) const
@@ -223,41 +205,29 @@ int SceneModel::clampPreviewSteps(int value)
     return value;
 }
 
-SdfDebugVisualMode SceneModel::clampVisualMode(SdfDebugVisualMode mode)
+RenderDebugVisualMode SceneModel::clampVisualMode(RenderDebugVisualMode mode)
 {
     switch (mode) {
-    case SdfDebugVisualMode::StepCount:
-    case SdfDebugVisualMode::HitDistance:
-    case SdfDebugVisualMode::Off:
+    case RenderDebugVisualMode::HitDistance:
+    case RenderDebugVisualMode::Off:
         return mode;
     default:
-        return SdfDebugVisualMode::Off;
+        return RenderDebugVisualMode::Off;
     }
 }
 
-SdfTraversalMode SceneModel::clampTraversalMode(SdfTraversalMode mode)
+MeshAccelBoundsOverlayMode SceneModel::clampBoundsOverlayMode(MeshAccelBoundsOverlayMode mode)
 {
     switch (mode) {
-    case SdfTraversalMode::BruteForce:
-    case SdfTraversalMode::BvhAccel:
-        return mode;
-    default:
-        return SdfTraversalMode::BvhAccel;
-    }
-}
-
-SdfAccelBoundsOverlayMode SceneModel::clampBoundsOverlayMode(SdfAccelBoundsOverlayMode mode)
-{
-    switch (mode) {
-    case SdfAccelBoundsOverlayMode::Off:
-    case SdfAccelBoundsOverlayMode::Bvh:
+    case MeshAccelBoundsOverlayMode::Off:
+    case MeshAccelBoundsOverlayMode::Bvh:
         return mode;
     default: {
         const int raw = static_cast<int>(mode);
         if (raw == 1 || raw == 2 || raw == 3) {
-            return SdfAccelBoundsOverlayMode::Bvh;
+            return MeshAccelBoundsOverlayMode::Bvh;
         }
-        return SdfAccelBoundsOverlayMode::Off;
+        return MeshAccelBoundsOverlayMode::Off;
     }
     }
 }

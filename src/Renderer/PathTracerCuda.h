@@ -1,14 +1,14 @@
 #pragma once
 
 #include "CameraGpu.h"
-#include "Sdf/SdfTypes.h"
+#include "MeshAccel/MeshAccelTypes.h"
 
 #include <cuda_runtime.h>
 #include <vector_types.h>
 
 #include <cstdint>
 
-struct SdfAccelSceneGpu;
+struct MeshAccelSceneGpu;
 
 bool pathTracerClearAccumulator(
     float4* d_buffer,
@@ -20,16 +20,6 @@ bool pathTracerClearAccumulator(
     float backgroundB,
     cudaStream_t stream);
 
-bool pathTracerInitRaySortBuffers(
-    uint32_t** keys,
-    uint32_t** indices,
-    int* pixelCount,
-    int width,
-    int height,
-    cudaStream_t stream);
-
-bool pathTracerFreeRaySortBuffers(uint32_t** keys, uint32_t** indices, int* pixelCount);
-
 bool pathTracerSample(
     float4* d_buffer,
     uint32_t* d_samples,
@@ -37,16 +27,12 @@ bool pathTracerSample(
     int height,
     int stride,
     const CameraGpu* d_camera,
-    const SdfAccelSceneGpu* d_scene,
-    const SdfMarchParamsGpu* d_marchParams,
+    const MeshAccelSceneGpu* d_scene,
+    const RenderParamsGpu* d_renderParams,
     int visualMode,
-    int sdfTraversalMode,
     const uint32_t* sobolMatrices,
     const unsigned int* pixelScramble,
     int sobolDimensionCount,
-    int enableRaySort,
-    uint32_t* d_raySortKeys,
-    uint32_t* d_raySortIndices,
     cudaStream_t stream);
 
 bool pathTracerCopyToPbo(

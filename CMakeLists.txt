@@ -52,6 +52,21 @@ if(NOT glm_FOUND)
     target_include_directories(glm INTERFACE ${glm_SOURCE_DIR})
 endif()
 
+set(MANIFOLD_TEST OFF CACHE BOOL "" FORCE)
+set(MANIFOLD_PYBIND OFF CACHE BOOL "" FORCE)
+set(MANIFOLD_JSBIND OFF CACHE BOOL "" FORCE)
+set(MANIFOLD_CBIND OFF CACHE BOOL "" FORCE)
+set(MANIFOLD_CROSS_SECTION OFF CACHE BOOL "" FORCE)
+set(MANIFOLD_PAR ON CACHE BOOL "" FORCE)
+set(MANIFOLD_DOWNLOADS ON CACHE BOOL "" FORCE)
+
+include(FetchContent)
+FetchContent_Declare(manifold
+    GIT_REPOSITORY https://github.com/elalish/manifold.git
+    GIT_TAG        v3.0.1
+    GIT_SHALLOW    TRUE)
+FetchContent_MakeAvailable(manifold)
+
 file(GLOB_RECURSE PATHTRACER_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cu"
@@ -63,20 +78,19 @@ set(PATHTRACER_SAMPLING_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Sampling/SobolTables.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Sampling/QmcGpuResources.cpp")
 
-set(PATHTRACER_SDF_SOURCES
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Sdf/Shapes/SdfShape.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Sdf/Shapes/SphereSdf.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Sdf/Shapes/CylinderSdf.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Sdf/Shapes/CappedConeSdf.cpp")
+set(PATHTRACER_MESH_BUILDER_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/MeshBuilder/ManifoldMeshBuilder.cpp")
 
-set(PATHTRACER_SDF_ACCEL_SOURCES
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/SdfAccel/SdfBvhBuilder.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/SdfAccel/SdfAccelScene.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/SdfAccel/SdfSceneContent.cpp")
+set(PATHTRACER_MESH_ACCEL_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/MeshAccel/MeshBvhBuilder.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/MeshAccel/MeshAccelScene.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/MeshAccel/MeshSceneContent.cpp")
 
 list(FILTER PATHTRACER_SOURCES EXCLUDE REGEX ".*/Renderer/Sampling/(SobolDirectionData|SobolTables|QmcGpuResources)\\.cpp$")
-list(FILTER PATHTRACER_SOURCES EXCLUDE REGEX ".*/Renderer/Sdf/Shapes/(SdfShape|SphereSdf|CylinderSdf|CappedConeSdf)\\.cpp$")
-list(FILTER PATHTRACER_SOURCES EXCLUDE REGEX ".*/Renderer/SdfAccel/(SdfBvhBuilder|SdfAccelScene|SdfSceneContent)\\.cpp$")
+list(FILTER PATHTRACER_SOURCES EXCLUDE REGEX ".*/Renderer/MeshBuilder/ManifoldMeshBuilder\\.cpp$")
+list(FILTER PATHTRACER_SOURCES EXCLUDE REGEX ".*/Renderer/MeshAccel/(MeshBvhBuilder|MeshAccelScene|MeshSceneContent)\\.cpp$")
+list(FILTER PATHTRACER_SOURCES EXCLUDE REGEX ".*/View/AddSdfDialog\\.cpp$")
+list(FILTER PATHTRACER_SOURCES EXCLUDE REGEX ".*/Renderer/Sdf/.*")
 
 add_library(pathtracer_sampling STATIC ${PATHTRACER_SAMPLING_SOURCES})
 target_include_directories(pathtracer_sampling PUBLIC
@@ -85,34 +99,45 @@ target_include_directories(pathtracer_sampling PUBLIC
 target_link_libraries(pathtracer_sampling PUBLIC CUDA::cudart Qt6::Core)
 set_target_properties(pathtracer_sampling PROPERTIES FOLDER "src")
 
-add_library(pathtracer_sdf STATIC ${PATHTRACER_SDF_SOURCES})
-target_include_directories(pathtracer_sdf PUBLIC
+add_library(pathtracer_mesh_builder STATIC ${PATHTRACER_MESH_BUILDER_SOURCES})
+target_include_directories(pathtracer_mesh_builder PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Sdf"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/SdfAccel")
-target_link_libraries(pathtracer_sdf PUBLIC CUDA::cudart)
-set_target_properties(pathtracer_sdf PROPERTIES FOLDER "src")
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/MeshBuilder"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Geometry"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Model")
+target_link_libraries(pathtracer_mesh_builder PUBLIC manifold)
+set_target_properties(pathtracer_mesh_builder PROPERTIES FOLDER "src")
 
-add_library(pathtracer_sdf_accel STATIC ${PATHTRACER_SDF_ACCEL_SOURCES})
-target_include_directories(pathtracer_sdf_accel PUBLIC
+add_library(pathtracer_mesh_accel STATIC ${PATHTRACER_MESH_ACCEL_SOURCES})
+target_include_directories(pathtracer_mesh_accel PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/SdfAccel"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Sdf")
-target_link_libraries(pathtracer_sdf_accel PUBLIC CUDA::cudart)
-set_target_properties(pathtracer_sdf_accel PROPERTIES FOLDER "src")
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/MeshAccel"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/MeshBuilder"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Geometry"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Model")
+target_link_libraries(pathtracer_mesh_accel PUBLIC pathtracer_mesh_builder CUDA::cudart)
+set_target_properties(pathtracer_mesh_accel PROPERTIES FOLDER "src")
 
 add_executable(pathtracer WIN32 ${PATHTRACER_SOURCES})
 target_include_directories(pathtracer PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Application"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Sampling"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Sdf"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/SdfAccel"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Geometry"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/MeshBuilder"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/MeshAccel"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/View"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Controller"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Model"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Sdf")
-target_link_libraries(pathtracer PRIVATE pathtracer_sampling pathtracer_sdf pathtracer_sdf_accel Qt6::Widgets Qt6::OpenGL Qt6::OpenGLWidgets CUDA::cudart glm::glm)
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Model")
+target_link_libraries(pathtracer PRIVATE
+    pathtracer_sampling
+    pathtracer_mesh_builder
+    pathtracer_mesh_accel
+    Qt6::Widgets
+    Qt6::OpenGL
+    Qt6::OpenGLWidgets
+    CUDA::cudart
+    glm::glm)
 set_target_properties(pathtracer PROPERTIES
     OUTPUT_NAME pathtracer
     AUTOMOC ON
@@ -164,12 +189,14 @@ set_target_properties(qmc_sampling_tests PROPERTIES FOLDER "tests")
 
 add_test(NAME QmcSampling COMMAND qmc_sampling_tests)
 
-add_executable(sdf_accel_tests tests/SdfAccelTests.cpp)
-target_link_libraries(sdf_accel_tests PRIVATE pathtracer_sdf_accel pathtracer_sdf Qt6::Gui)
-target_include_directories(sdf_accel_tests PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/SdfAccel"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Sdf"
+add_executable(mesh_accel_tests tests/MeshAccelTests.cpp)
+target_link_libraries(mesh_accel_tests PRIVATE pathtracer_mesh_accel Qt6::Gui)
+target_include_directories(mesh_accel_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/MeshAccel"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/MeshBuilder"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Geometry"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Model"
     "${CMAKE_CURRENT_SOURCE_DIR}/tests")
-set_target_properties(sdf_accel_tests PROPERTIES FOLDER "tests")
+set_target_properties(mesh_accel_tests PROPERTIES FOLDER "tests")
 
-add_test(NAME SdfAccel COMMAND sdf_accel_tests)
+add_test(NAME MeshAccel COMMAND mesh_accel_tests)

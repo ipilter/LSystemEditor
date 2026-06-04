@@ -26,19 +26,17 @@ private:
     void applyMaxSamplesFromSpinBox();
     void onPreviewStepsSpinBoxChanged();
     void applyPreviewStepsFromSpinBox();
-    void onSdfVisualModeComboBoxChanged();
-    void onSdfTraversalModeComboBoxChanged();
+    void onDebugVisualModeComboBoxChanged();
     void onBoundsOverlayComboBoxChanged();
     void onStartButtonClicked();
     void onStopButtonClicked();
     void onSettingsButtonClicked();
-    void onAddSdfButtonClicked();
+    void onAddPrimitiveButtonClicked();
     void syncColorButtonStyle();
     void syncRenderSpinBoxes();
     void syncMaxSamplesSpinBox();
     void syncPreviewStepsSpinBox();
-    void syncSdfVisualModeComboBox();
-    void syncSdfTraversalModeComboBox();
+    void syncDebugVisualModeComboBox();
     void syncBoundsOverlayComboBox();
 
     SceneModel* m_model = nullptr;

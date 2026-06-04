@@ -2,7 +2,7 @@
 
 #include "Camera3D.h"
 #include "PathTracer.h"
-#include "SdfAccelBoundsOverlay.h"
+#include "MeshAccelBoundsOverlay.h"
 
 #include <QColor>
 #include <QOpenGLFunctions_4_5_Core>
@@ -58,7 +58,7 @@ private:
     SceneModel* m_model = nullptr;
     PathTracer m_pathTracer;
     Camera3D m_camera;
-    SdfAccelBoundsOverlay m_boundsOverlay;
+    MeshAccelBoundsOverlay m_boundsOverlay;
 
     QColor m_clearColor;
     bool m_looking = false;

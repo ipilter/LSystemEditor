@@ -5,7 +5,7 @@
 #include "OpenGLViewportWidget.h"
 #include "SceneModel.h"
 #include "SettingsDialog.h"
-#include "AddSdfDialog.h"
+#include "AddPrimitiveDialog.h"
 
 #include <QColorDialog>
 #include <QComboBox>
@@ -23,71 +23,45 @@ QString colorButtonStyleSheet(const QColor& color)
         .arg(color.name(QColor::HexRgb));
 }
 
-SdfDebugVisualMode visualModeFromComboIndex(int index)
+RenderDebugVisualMode visualModeFromComboIndex(int index)
 {
     switch (index) {
     case 1:
-        return SdfDebugVisualMode::HitDistance;
-    case 2:
-        return SdfDebugVisualMode::Off;
+        return RenderDebugVisualMode::HitDistance;
     case 0:
     default:
-        return SdfDebugVisualMode::StepCount;
+        return RenderDebugVisualMode::Off;
     }
 }
 
-int comboIndexFromVisualMode(SdfDebugVisualMode mode)
+int comboIndexFromVisualMode(RenderDebugVisualMode mode)
 {
     switch (mode) {
-    case SdfDebugVisualMode::HitDistance:
+    case RenderDebugVisualMode::HitDistance:
         return 1;
-    case SdfDebugVisualMode::Off:
-        return 2;
-    case SdfDebugVisualMode::StepCount:
+    case RenderDebugVisualMode::Off:
     default:
         return 0;
     }
 }
 
-SdfAccelBoundsOverlayMode boundsOverlayModeFromComboIndex(int index)
+MeshAccelBoundsOverlayMode boundsOverlayModeFromComboIndex(int index)
 {
     switch (index) {
     case 1:
-        return SdfAccelBoundsOverlayMode::Bvh;
+        return MeshAccelBoundsOverlayMode::Bvh;
     case 0:
     default:
-        return SdfAccelBoundsOverlayMode::Off;
+        return MeshAccelBoundsOverlayMode::Off;
     }
 }
 
-SdfTraversalMode traversalModeFromComboIndex(int index)
-{
-    switch (index) {
-    case 0:
-        return SdfTraversalMode::BruteForce;
-    case 1:
-    default:
-        return SdfTraversalMode::BvhAccel;
-    }
-}
-
-int comboIndexFromTraversalMode(SdfTraversalMode mode)
+int comboIndexFromBoundsOverlayMode(MeshAccelBoundsOverlayMode mode)
 {
     switch (mode) {
-    case SdfTraversalMode::BruteForce:
-        return 0;
-    case SdfTraversalMode::BvhAccel:
-    default:
+    case MeshAccelBoundsOverlayMode::Bvh:
         return 1;
-    }
-}
-
-int comboIndexFromBoundsOverlayMode(SdfAccelBoundsOverlayMode mode)
-{
-    switch (mode) {
-    case SdfAccelBoundsOverlayMode::Bvh:
-        return 1;
-    case SdfAccelBoundsOverlayMode::Off:
+    case MeshAccelBoundsOverlayMode::Off:
     default:
         return 0;
     }
@@ -110,8 +84,7 @@ SceneController::SceneController(SceneModel* model, MainView* view, QObject* par
     syncRenderSpinBoxes();
     syncMaxSamplesSpinBox();
     syncPreviewStepsSpinBox();
-    syncSdfVisualModeComboBox();
-    syncSdfTraversalModeComboBox();
+    syncDebugVisualModeComboBox();
     syncBoundsOverlayComboBox();
 
     connect(m_view->colorButton(), &QPushButton::clicked, this, &SceneController::onColorButtonClicked);
@@ -119,11 +92,10 @@ SceneController::SceneController(SceneModel* model, MainView* view, QObject* par
     connect(m_model, &SceneModel::renderSizeChanged, this, &SceneController::onRenderSizeChanged);
     connect(m_model, &SceneModel::maxSamplesPerPixelChanged, this, [this](int) { syncMaxSamplesSpinBox(); });
     connect(m_model, &SceneModel::previewStepsPerLevelChanged, this, [this](int) { syncPreviewStepsSpinBox(); });
-    connect(m_model, &SceneModel::sdfVisualModeChanged, this, [this](SdfDebugVisualMode) { syncSdfVisualModeComboBox(); });
-    connect(m_model, &SceneModel::sdfTraversalModeChanged, this, [this](SdfTraversalMode) {
-        syncSdfTraversalModeComboBox();
+    connect(m_model, &SceneModel::debugVisualModeChanged, this, [this](RenderDebugVisualMode) {
+        syncDebugVisualModeComboBox();
     });
-    connect(m_model, &SceneModel::boundsOverlayModeChanged, this, [this](SdfAccelBoundsOverlayMode) {
+    connect(m_model, &SceneModel::boundsOverlayModeChanged, this, [this](MeshAccelBoundsOverlayMode) {
         syncBoundsOverlayComboBox();
     });
     connect(m_view->renderWidthSpinBox(), &QSpinBox::valueChanged, this, &SceneController::onRenderSizeSpinBoxChanged);
@@ -131,15 +103,10 @@ SceneController::SceneController(SceneModel* model, MainView* view, QObject* par
     connect(m_view->maxSamplesSpinBox(), &QSpinBox::valueChanged, this, &SceneController::onMaxSamplesSpinBoxChanged);
     connect(m_view->previewStepsSpinBox(), &QSpinBox::valueChanged, this, &SceneController::onPreviewStepsSpinBoxChanged);
     connect(
-        m_view->sdfVisualModeComboBox(),
+        m_view->debugVisualModeComboBox(),
         QOverload<int>::of(&QComboBox::currentIndexChanged),
         this,
-        &SceneController::onSdfVisualModeComboBoxChanged);
-    connect(
-        m_view->sdfTraversalModeComboBox(),
-        QOverload<int>::of(&QComboBox::currentIndexChanged),
-        this,
-        &SceneController::onSdfTraversalModeComboBoxChanged);
+        &SceneController::onDebugVisualModeComboBoxChanged);
     connect(
         m_view->boundsOverlayComboBox(),
         QOverload<int>::of(&QComboBox::currentIndexChanged),
@@ -151,7 +118,7 @@ SceneController::SceneController(SceneModel* model, MainView* view, QObject* par
     connect(m_view->startButton(), &QPushButton::clicked, this, &SceneController::onStartButtonClicked);
     connect(m_view->stopButton(), &QPushButton::clicked, this, &SceneController::onStopButtonClicked);
     connect(m_view->settingsButton(), &QPushButton::clicked, this, &SceneController::onSettingsButtonClicked);
-    connect(m_view->addSdfButton(), &QPushButton::clicked, this, &SceneController::onAddSdfButtonClicked);
+    connect(m_view->addPrimitiveButton(), &QPushButton::clicked, this, &SceneController::onAddPrimitiveButtonClicked);
     connect(m_view->viewport(), &OpenGLViewportWidget::iterationChanged, m_view, &MainView::setIteration);
     connect(&AppSettings::instance(), &AppSettings::debounceMsChanged, this,
             [this](const QString& elementId, int ms) {
@@ -219,14 +186,9 @@ void SceneController::applyPreviewStepsFromSpinBox()
     m_model->setPreviewStepsPerLevel(m_view->previewStepsSpinBox()->value());
 }
 
-void SceneController::onSdfVisualModeComboBoxChanged()
+void SceneController::onDebugVisualModeComboBoxChanged()
 {
-    m_model->setSdfVisualMode(visualModeFromComboIndex(m_view->sdfVisualModeComboBox()->currentIndex()));
-}
-
-void SceneController::onSdfTraversalModeComboBoxChanged()
-{
-    m_model->setSdfTraversalMode(traversalModeFromComboIndex(m_view->sdfTraversalModeComboBox()->currentIndex()));
+    m_model->setDebugVisualMode(visualModeFromComboIndex(m_view->debugVisualModeComboBox()->currentIndex()));
 }
 
 void SceneController::onBoundsOverlayComboBoxChanged()
@@ -254,11 +216,11 @@ void SceneController::onSettingsButtonClicked()
     }
 }
 
-void SceneController::onAddSdfButtonClicked()
+void SceneController::onAddPrimitiveButtonClicked()
 {
-    AddSdfDialog dialog(m_view);
+    AddPrimitiveDialog dialog(m_view);
     if (dialog.exec() == QDialog::Accepted) {
-        m_model->addSdfShape(dialog.result());
+        m_model->addPrimitive(dialog.result());
     }
 }
 
@@ -292,18 +254,11 @@ void SceneController::syncPreviewStepsSpinBox()
     m_view->previewStepsSpinBox()->blockSignals(false);
 }
 
-void SceneController::syncSdfVisualModeComboBox()
+void SceneController::syncDebugVisualModeComboBox()
 {
-    m_view->sdfVisualModeComboBox()->blockSignals(true);
-    m_view->sdfVisualModeComboBox()->setCurrentIndex(comboIndexFromVisualMode(m_model->sdfVisualMode()));
-    m_view->sdfVisualModeComboBox()->blockSignals(false);
-}
-
-void SceneController::syncSdfTraversalModeComboBox()
-{
-    m_view->sdfTraversalModeComboBox()->blockSignals(true);
-    m_view->sdfTraversalModeComboBox()->setCurrentIndex(comboIndexFromTraversalMode(m_model->sdfTraversalMode()));
-    m_view->sdfTraversalModeComboBox()->blockSignals(false);
+    m_view->debugVisualModeComboBox()->blockSignals(true);
+    m_view->debugVisualModeComboBox()->setCurrentIndex(comboIndexFromVisualMode(m_model->debugVisualMode()));
+    m_view->debugVisualModeComboBox()->blockSignals(false);
 }
 
 void SceneController::syncBoundsOverlayComboBox()

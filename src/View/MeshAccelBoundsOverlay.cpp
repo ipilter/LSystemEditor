@@ -1,4 +1,4 @@
-#include "SdfAccelBoundsOverlay.h"
+#include "MeshAccelBoundsOverlay.h"
 
 #include "AppLog.h"
 
@@ -35,14 +35,14 @@ void main()
 
 } // namespace
 
-SdfAccelBoundsOverlay::~SdfAccelBoundsOverlay()
+MeshAccelBoundsOverlay::~MeshAccelBoundsOverlay()
 {
     if (m_gl != nullptr) {
         release(m_gl);
     }
 }
 
-void SdfAccelBoundsOverlay::initialize(QOpenGLFunctions_4_5_Core* gl)
+void MeshAccelBoundsOverlay::initialize(QOpenGLFunctions_4_5_Core* gl)
 {
     if (gl == nullptr || m_initialized) {
         return;
@@ -57,7 +57,7 @@ void SdfAccelBoundsOverlay::initialize(QOpenGLFunctions_4_5_Core* gl)
     gl->glDeleteShader(fragmentShader);
 
     if (m_program == 0) {
-        AppLog::instance().error(QStringLiteral("SdfAccelBoundsOverlay: shader program failed to link"));
+        AppLog::instance().error(QStringLiteral("MeshAccelBoundsOverlay: shader program failed to link"));
         return;
     }
 
@@ -66,7 +66,7 @@ void SdfAccelBoundsOverlay::initialize(QOpenGLFunctions_4_5_Core* gl)
     m_initialized = true;
 }
 
-void SdfAccelBoundsOverlay::release(QOpenGLFunctions_4_5_Core* gl)
+void MeshAccelBoundsOverlay::release(QOpenGLFunctions_4_5_Core* gl)
 {
     if (gl == nullptr) {
         return;
@@ -90,7 +90,7 @@ void SdfAccelBoundsOverlay::release(QOpenGLFunctions_4_5_Core* gl)
     m_gl = nullptr;
 }
 
-void SdfAccelBoundsOverlay::rebuild(QOpenGLFunctions_4_5_Core* gl, const SdfAccelBoundsMesh& mesh)
+void MeshAccelBoundsOverlay::rebuild(QOpenGLFunctions_4_5_Core* gl, const MeshAccelBoundsMesh& mesh)
 {
     if (gl == nullptr || !m_initialized || m_vao == 0) {
         return;
@@ -105,7 +105,7 @@ void SdfAccelBoundsOverlay::rebuild(QOpenGLFunctions_4_5_Core* gl, const SdfAcce
     } else {
         gl->glBufferData(
             GL_ARRAY_BUFFER,
-            static_cast<GLsizeiptr>(mesh.bvhLines.size() * sizeof(SdfAccelBoundsLineVertex)),
+            static_cast<GLsizeiptr>(mesh.bvhLines.size() * sizeof(MeshAccelBoundsLineVertex)),
             mesh.bvhLines.data(),
             GL_STATIC_DRAW);
     }
@@ -116,7 +116,7 @@ void SdfAccelBoundsOverlay::rebuild(QOpenGLFunctions_4_5_Core* gl, const SdfAcce
         3,
         GL_FLOAT,
         GL_FALSE,
-        static_cast<GLsizei>(sizeof(SdfAccelBoundsLineVertex)),
+        static_cast<GLsizei>(sizeof(MeshAccelBoundsLineVertex)),
         nullptr);
     gl->glEnableVertexAttribArray(1);
     gl->glVertexAttribPointer(
@@ -124,21 +124,21 @@ void SdfAccelBoundsOverlay::rebuild(QOpenGLFunctions_4_5_Core* gl, const SdfAcce
         3,
         GL_FLOAT,
         GL_FALSE,
-        static_cast<GLsizei>(sizeof(SdfAccelBoundsLineVertex)),
+        static_cast<GLsizei>(sizeof(MeshAccelBoundsLineVertex)),
         reinterpret_cast<const void*>(3 * sizeof(float)));
 
     gl->glBindVertexArray(0);
 }
 
-void SdfAccelBoundsOverlay::draw(
+void MeshAccelBoundsOverlay::draw(
     QOpenGLFunctions_4_5_Core* gl,
     const glm::mat4& viewProj,
-    SdfAccelBoundsOverlayMode mode,
+    MeshAccelBoundsOverlayMode mode,
     const QColor& boundsColor)
 {
     Q_UNUSED(boundsColor);
 
-    if (gl == nullptr || !m_initialized || m_program == 0 || mode != SdfAccelBoundsOverlayMode::Bvh) {
+    if (gl == nullptr || !m_initialized || m_program == 0 || mode != MeshAccelBoundsOverlayMode::Bvh) {
         return;
     }
 
@@ -154,7 +154,7 @@ void SdfAccelBoundsOverlay::draw(
     gl->glBindVertexArray(0);
 }
 
-GLuint SdfAccelBoundsOverlay::compileShader(QOpenGLFunctions_4_5_Core* gl, GLenum type, const char* source)
+GLuint MeshAccelBoundsOverlay::compileShader(QOpenGLFunctions_4_5_Core* gl, GLenum type, const char* source)
 {
     const GLuint shader = gl->glCreateShader(type);
     gl->glShaderSource(shader, 1, &source, nullptr);
@@ -172,7 +172,7 @@ GLuint SdfAccelBoundsOverlay::compileShader(QOpenGLFunctions_4_5_Core* gl, GLenu
         const QString typeName =
             type == GL_VERTEX_SHADER ? QStringLiteral("vertex") : QStringLiteral("fragment");
         AppLog::instance().error(
-            QStringLiteral("SdfAccelBoundsOverlay shader compile failed (%1): %2")
+            QStringLiteral("MeshAccelBoundsOverlay shader compile failed (%1): %2")
                 .arg(typeName, QString::fromUtf8(log)));
         gl->glDeleteShader(shader);
         return 0;
@@ -181,7 +181,7 @@ GLuint SdfAccelBoundsOverlay::compileShader(QOpenGLFunctions_4_5_Core* gl, GLenu
     return shader;
 }
 
-GLuint SdfAccelBoundsOverlay::linkProgram(QOpenGLFunctions_4_5_Core* gl, GLuint vertexShader, GLuint fragmentShader)
+GLuint MeshAccelBoundsOverlay::linkProgram(QOpenGLFunctions_4_5_Core* gl, GLuint vertexShader, GLuint fragmentShader)
 {
     if (vertexShader == 0 || fragmentShader == 0) {
         return 0;
@@ -202,7 +202,7 @@ GLuint SdfAccelBoundsOverlay::linkProgram(QOpenGLFunctions_4_5_Core* gl, GLuint 
         gl->glGetProgramInfoLog(program, logLength, nullptr, log.data());
 
         AppLog::instance().error(
-            QStringLiteral("SdfAccelBoundsOverlay shader link failed: %1").arg(QString::fromUtf8(log)));
+            QStringLiteral("MeshAccelBoundsOverlay shader link failed: %1").arg(QString::fromUtf8(log)));
         gl->glDeleteProgram(program);
         return 0;
     }

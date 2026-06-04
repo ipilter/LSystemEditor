@@ -23,13 +23,12 @@ public:
     QSpinBox* renderHeightSpinBox() const;
     QSpinBox* maxSamplesSpinBox() const;
     QSpinBox* previewStepsSpinBox() const;
-    QComboBox* sdfVisualModeComboBox() const;
-    QComboBox* sdfTraversalModeComboBox() const;
+    QComboBox* debugVisualModeComboBox() const;
     QComboBox* boundsOverlayComboBox() const;
     QPushButton* startButton() const;
     QPushButton* stopButton() const;
     QPushButton* settingsButton() const;
-    QPushButton* addSdfButton() const;
+    QPushButton* addPrimitiveButton() const;
 
     void setIteration(int value);
 
@@ -46,14 +45,13 @@ private:
     QSpinBox* m_renderHeightSpinBox = nullptr;
     QSpinBox* m_maxSamplesSpinBox = nullptr;
     QSpinBox* m_previewStepsSpinBox = nullptr;
-    QComboBox* m_sdfVisualModeComboBox = nullptr;
-    QComboBox* m_sdfTraversalModeComboBox = nullptr;
+    QComboBox* m_debugVisualModeComboBox = nullptr;
     QComboBox* m_boundsOverlayComboBox = nullptr;
     QLabel* m_iterationLabel = nullptr;
     QPushButton* m_startButton = nullptr;
     QPushButton* m_stopButton = nullptr;
     QPushButton* m_settingsButton = nullptr;
-    QPushButton* m_addSdfButton = nullptr;
+    QPushButton* m_addPrimitiveButton = nullptr;
     QPlainTextEdit* m_logView = nullptr;
     QSize m_pendingViewportSize;
 };
