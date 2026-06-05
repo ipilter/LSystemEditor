@@ -298,7 +298,7 @@ RenderDebugVisualMode SceneModel::clampVisualMode(RenderDebugVisualMode mode)
     case RenderDebugVisualMode::Off:
         return mode;
     default:
-        return RenderDebugVisualMode::Normals;
+        return RenderDebugVisualMode::Off;
     }
 }
 

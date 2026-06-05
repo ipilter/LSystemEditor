@@ -15,6 +15,6 @@ struct Vec2
 
 enum class RenderDebugVisualMode : int
 {
-    Normals = 0,
-    Off = 1,
+  Off = 0,
+  Normals = 1,
 };

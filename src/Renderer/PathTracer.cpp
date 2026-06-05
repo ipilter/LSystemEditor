@@ -58,7 +58,7 @@ struct PathTracerDetail::PathTracerImpl
     std::atomic<int> previewStepsPerLevel{0};
     std::atomic<int> sampleCount{0};
     std::atomic<int> lastSamplingStride{1};
-    std::atomic<int> visualMode{static_cast<int>(RenderDebugVisualMode::Normals)};
+    std::atomic<int> visualMode{static_cast<int>(RenderDebugVisualMode::Off)};
 
     MeshAccelScene meshScene;
     RenderParamsGpu hostRenderParams{};

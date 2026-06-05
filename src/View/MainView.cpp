@@ -111,8 +111,8 @@ MainView::MainView(QWidget* parent)
     auto* visualModeRow = new QHBoxLayout();
     visualModeRow->addWidget(new QLabel(QStringLiteral("Debug:"), renderGroup));
     m_debugVisualModeComboBox = new QComboBox(renderGroup);
-    m_debugVisualModeComboBox->addItem(QStringLiteral("Normals"));
     m_debugVisualModeComboBox->addItem(QStringLiteral("Off"));
+    m_debugVisualModeComboBox->addItem(QStringLiteral("Normals"));
     m_debugVisualModeComboBox->setToolTip(
         QStringLiteral("Normals: surface normal debug view. Off: sun shading with shadows."));
     visualModeRow->addWidget(m_debugVisualModeComboBox, 1);

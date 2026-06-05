@@ -89,7 +89,7 @@ private:
     QSize m_renderSize;
     int m_maxSamplesPerPixel = 8;
     int m_previewStepsPerLevel = 2;
-    RenderDebugVisualMode m_debugVisualMode = RenderDebugVisualMode::Normals;
+    RenderDebugVisualMode m_debugVisualMode = RenderDebugVisualMode::Off;
     float m_sunAzimuthDeg = 135.0f;
     float m_sunElevationDeg = 45.0f;
     QColor m_sunColor = QColor(255, 245, 230);

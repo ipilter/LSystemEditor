@@ -29,19 +29,19 @@ RenderDebugVisualMode visualModeFromComboIndex(int index)
 {
     switch (index) {
     case 1:
-        return RenderDebugVisualMode::Off;
+      return RenderDebugVisualMode::Normals;
     case 0:
     default:
-        return RenderDebugVisualMode::Normals;
+      return RenderDebugVisualMode::Off;
     }
 }
 
 int comboIndexFromVisualMode(RenderDebugVisualMode mode)
 {
     switch (mode) {
-    case RenderDebugVisualMode::Off:
-        return 1;
     case RenderDebugVisualMode::Normals:
+      return 1;
+    case RenderDebugVisualMode::Off:
     default:
         return 0;
     }
