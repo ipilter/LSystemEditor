@@ -10,6 +10,14 @@ constexpr int kMinMaxSamplesPerPixel = 0;
 constexpr int kMaxMaxSamplesPerPixel = 1'000'000;
 constexpr int kMinPreviewStepsPerLevel = 0;
 constexpr int kMaxPreviewStepsPerLevel = 128;
+constexpr float kMinSunAzimuth = 0.0f;
+constexpr float kMaxSunAzimuth = 360.0f;
+constexpr float kMinSunElevation = -90.0f;
+constexpr float kMaxSunElevation = 90.0f;
+constexpr float kMinSunDiskSize = 0.1f;
+constexpr float kMaxSunDiskSize = 30.0f;
+constexpr int kMinSecondaryBounceCount = 0;
+constexpr int kMaxSecondaryBounceCount = 8;
 } // namespace
 
 SceneModel::SceneModel(QObject* parent)
@@ -19,7 +27,6 @@ SceneModel::SceneModel(QObject* parent)
     , m_maxSamplesPerPixel(AppSettings::instance().maxSamplesPerPixel())
     , m_previewStepsPerLevel(AppSettings::instance().previewStepsPerLevel())
     , m_accelBvhColor(AppSettings::instance().accelBvhColor())
-    , m_primitives()
 {
 }
 
@@ -112,6 +119,85 @@ void SceneModel::setDebugVisualMode(RenderDebugVisualMode mode)
     emit debugVisualModeChanged(m_debugVisualMode);
 }
 
+float SceneModel::sunAzimuthDeg() const
+{
+    return m_sunAzimuthDeg;
+}
+
+float SceneModel::sunElevationDeg() const
+{
+    return m_sunElevationDeg;
+}
+
+QColor SceneModel::sunColor() const
+{
+    return m_sunColor;
+}
+
+float SceneModel::sunDiskSizeDeg() const
+{
+    return m_sunDiskSizeDeg;
+}
+
+void SceneModel::setSunAzimuthDeg(float value)
+{
+    const float clamped = clampSunAzimuth(value);
+    if (m_sunAzimuthDeg == clamped) {
+        return;
+    }
+
+    m_sunAzimuthDeg = clamped;
+    emit sunSettingsChanged();
+}
+
+void SceneModel::setSunElevationDeg(float value)
+{
+    const float clamped = clampSunElevation(value);
+    if (m_sunElevationDeg == clamped) {
+        return;
+    }
+
+    m_sunElevationDeg = clamped;
+    emit sunSettingsChanged();
+}
+
+void SceneModel::setSunColor(const QColor& color)
+{
+    if (!color.isValid() || m_sunColor == color) {
+        return;
+    }
+
+    m_sunColor = color;
+    emit sunSettingsChanged();
+}
+
+void SceneModel::setSunDiskSizeDeg(float value)
+{
+    const float clamped = clampSunDiskSize(value);
+    if (m_sunDiskSizeDeg == clamped) {
+        return;
+    }
+
+    m_sunDiskSizeDeg = clamped;
+    emit sunSettingsChanged();
+}
+
+int SceneModel::secondaryBounceCount() const
+{
+    return m_secondaryBounceCount;
+}
+
+void SceneModel::setSecondaryBounceCount(int value)
+{
+    const int clamped = clampSecondaryBounceCount(value);
+    if (m_secondaryBounceCount == clamped) {
+        return;
+    }
+
+    m_secondaryBounceCount = clamped;
+    emit secondaryBounceCountChanged(m_secondaryBounceCount);
+}
+
 MeshAccelBoundsOverlayMode SceneModel::boundsOverlayMode() const
 {
     return m_boundsOverlayMode;
@@ -142,20 +228,6 @@ void SceneModel::setAccelBvhColor(const QColor& color)
     m_accelBvhColor = color;
     AppSettings::instance().setAccelBvhColor(color);
     emit accelBvhColorChanged(m_accelBvhColor);
-}
-
-const std::vector<std::unique_ptr<ScenePrimitive>>& SceneModel::primitives() const
-{
-    return m_primitives;
-}
-
-void SceneModel::addPrimitive(std::unique_ptr<ScenePrimitive> primitive)
-{
-    if (primitive == nullptr) {
-        return;
-    }
-    m_primitives.push_back(std::move(primitive));
-    emit sceneChanged();
 }
 
 const std::vector<ProceduralInstance>& SceneModel::proceduralInstances() const
@@ -222,12 +294,56 @@ int SceneModel::clampPreviewSteps(int value)
 RenderDebugVisualMode SceneModel::clampVisualMode(RenderDebugVisualMode mode)
 {
     switch (mode) {
-    case RenderDebugVisualMode::HitDistance:
+    case RenderDebugVisualMode::Normals:
     case RenderDebugVisualMode::Off:
         return mode;
     default:
-        return RenderDebugVisualMode::Off;
+        return RenderDebugVisualMode::Normals;
     }
+}
+
+float SceneModel::clampSunAzimuth(float value)
+{
+    if (value < kMinSunAzimuth) {
+        return kMinSunAzimuth;
+    }
+    if (value > kMaxSunAzimuth) {
+        return kMaxSunAzimuth;
+    }
+    return value;
+}
+
+float SceneModel::clampSunElevation(float value)
+{
+    if (value < kMinSunElevation) {
+        return kMinSunElevation;
+    }
+    if (value > kMaxSunElevation) {
+        return kMaxSunElevation;
+    }
+    return value;
+}
+
+float SceneModel::clampSunDiskSize(float value)
+{
+    if (value < kMinSunDiskSize) {
+        return kMinSunDiskSize;
+    }
+    if (value > kMaxSunDiskSize) {
+        return kMaxSunDiskSize;
+    }
+    return value;
+}
+
+int SceneModel::clampSecondaryBounceCount(int value)
+{
+    if (value < kMinSecondaryBounceCount) {
+        return kMinSecondaryBounceCount;
+    }
+    if (value > kMaxSecondaryBounceCount) {
+        return kMaxSecondaryBounceCount;
+    }
+    return value;
 }
 
 MeshAccelBoundsOverlayMode SceneModel::clampBoundsOverlayMode(MeshAccelBoundsOverlayMode mode)

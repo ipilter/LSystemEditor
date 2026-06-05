@@ -12,6 +12,7 @@
 #include <QComboBox>
 #include <QDialog>
 #include <QPushButton>
+#include <QDoubleSpinBox>
 #include <QSpinBox>
 
 namespace {
@@ -28,19 +29,19 @@ RenderDebugVisualMode visualModeFromComboIndex(int index)
 {
     switch (index) {
     case 1:
-        return RenderDebugVisualMode::HitDistance;
+        return RenderDebugVisualMode::Off;
     case 0:
     default:
-        return RenderDebugVisualMode::Off;
+        return RenderDebugVisualMode::Normals;
     }
 }
 
 int comboIndexFromVisualMode(RenderDebugVisualMode mode)
 {
     switch (mode) {
-    case RenderDebugVisualMode::HitDistance:
-        return 1;
     case RenderDebugVisualMode::Off:
+        return 1;
+    case RenderDebugVisualMode::Normals:
     default:
         return 0;
     }
@@ -86,6 +87,7 @@ SceneController::SceneController(SceneModel* model, MainView* view, QObject* par
     syncMaxSamplesSpinBox();
     syncPreviewStepsSpinBox();
     syncDebugVisualModeComboBox();
+    syncSunControls();
     syncBoundsOverlayComboBox();
 
     connect(m_view->colorButton(), &QPushButton::clicked, this, &SceneController::onColorButtonClicked);
@@ -95,6 +97,12 @@ SceneController::SceneController(SceneModel* model, MainView* view, QObject* par
     connect(m_model, &SceneModel::previewStepsPerLevelChanged, this, [this](int) { syncPreviewStepsSpinBox(); });
     connect(m_model, &SceneModel::debugVisualModeChanged, this, [this](RenderDebugVisualMode) {
         syncDebugVisualModeComboBox();
+    });
+    connect(m_model, &SceneModel::sunSettingsChanged, this, [this]() {
+        syncSunControls();
+    });
+    connect(m_model, &SceneModel::secondaryBounceCountChanged, this, [this](int) {
+        syncSunControls();
     });
     connect(m_model, &SceneModel::boundsOverlayModeChanged, this, [this](MeshAccelBoundsOverlayMode) {
         syncBoundsOverlayComboBox();
@@ -113,6 +121,23 @@ SceneController::SceneController(SceneModel* model, MainView* view, QObject* par
         QOverload<int>::of(&QComboBox::currentIndexChanged),
         this,
         &SceneController::onBoundsOverlayComboBoxChanged);
+    connect(m_view->sunAzimuthSpinBox(), &QDoubleSpinBox::valueChanged, this, &SceneController::onSunAzimuthSpinBoxChanged);
+    connect(
+        m_view->sunElevationSpinBox(),
+        &QDoubleSpinBox::valueChanged,
+        this,
+        &SceneController::onSunElevationSpinBoxChanged);
+    connect(m_view->sunColorButton(), &QPushButton::clicked, this, &SceneController::onSunColorButtonClicked);
+    connect(
+        m_view->sunDiskSizeSpinBox(),
+        &QDoubleSpinBox::valueChanged,
+        this,
+        &SceneController::onSunDiskSizeSpinBoxChanged);
+    connect(
+        m_view->secondaryBounceSpinBox(),
+        QOverload<int>::of(&QSpinBox::valueChanged),
+        this,
+        &SceneController::onSecondaryBounceSpinBoxChanged);
     connect(&m_renderSizeDebounce, &DebounceTimer::triggered, this, &SceneController::applyRenderSizeFromSpinBoxes);
     connect(&m_maxSamplesDebounce, &DebounceTimer::triggered, this, &SceneController::applyMaxSamplesFromSpinBox);
     connect(&m_previewStepsDebounce, &DebounceTimer::triggered, this, &SceneController::applyPreviewStepsFromSpinBox);
@@ -190,6 +215,38 @@ void SceneController::applyPreviewStepsFromSpinBox()
 void SceneController::onDebugVisualModeComboBoxChanged()
 {
     m_model->setDebugVisualMode(visualModeFromComboIndex(m_view->debugVisualModeComboBox()->currentIndex()));
+}
+
+void SceneController::onSunAzimuthSpinBoxChanged()
+{
+    m_model->setSunAzimuthDeg(static_cast<float>(m_view->sunAzimuthSpinBox()->value()));
+}
+
+void SceneController::onSunElevationSpinBoxChanged()
+{
+    m_model->setSunElevationDeg(static_cast<float>(m_view->sunElevationSpinBox()->value()));
+}
+
+void SceneController::onSunColorButtonClicked()
+{
+    const QColor chosen = QColorDialog::getColor(
+        m_model->sunColor(),
+        m_view,
+        QStringLiteral("Sun color"));
+
+    if (chosen.isValid()) {
+        m_model->setSunColor(chosen);
+    }
+}
+
+void SceneController::onSunDiskSizeSpinBoxChanged()
+{
+    m_model->setSunDiskSizeDeg(static_cast<float>(m_view->sunDiskSizeSpinBox()->value()));
+}
+
+void SceneController::onSecondaryBounceSpinBoxChanged()
+{
+    m_model->setSecondaryBounceCount(m_view->secondaryBounceSpinBox()->value());
 }
 
 void SceneController::onBoundsOverlayComboBoxChanged()
@@ -272,6 +329,25 @@ void SceneController::syncDebugVisualModeComboBox()
     m_view->debugVisualModeComboBox()->blockSignals(true);
     m_view->debugVisualModeComboBox()->setCurrentIndex(comboIndexFromVisualMode(m_model->debugVisualMode()));
     m_view->debugVisualModeComboBox()->blockSignals(false);
+}
+
+void SceneController::syncSunControls()
+{
+    m_view->sunAzimuthSpinBox()->blockSignals(true);
+    m_view->sunElevationSpinBox()->blockSignals(true);
+    m_view->sunDiskSizeSpinBox()->blockSignals(true);
+    m_view->secondaryBounceSpinBox()->blockSignals(true);
+
+    m_view->sunAzimuthSpinBox()->setValue(m_model->sunAzimuthDeg());
+    m_view->sunElevationSpinBox()->setValue(m_model->sunElevationDeg());
+    m_view->sunDiskSizeSpinBox()->setValue(m_model->sunDiskSizeDeg());
+    m_view->secondaryBounceSpinBox()->setValue(m_model->secondaryBounceCount());
+    m_view->sunColorButton()->setStyleSheet(colorButtonStyleSheet(m_model->sunColor()));
+
+    m_view->sunAzimuthSpinBox()->blockSignals(false);
+    m_view->sunElevationSpinBox()->blockSignals(false);
+    m_view->sunDiskSizeSpinBox()->blockSignals(false);
+    m_view->secondaryBounceSpinBox()->blockSignals(false);
 }
 
 void SceneController::syncBoundsOverlayComboBox()

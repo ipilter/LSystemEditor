@@ -455,7 +455,6 @@ void runProceduralMeshTests()
     }
 
     {
-        std::vector<std::unique_ptr<ScenePrimitive>> primitives;
         std::vector<ProceduralInstance> instances;
         ProceduralInstance instance{};
         instance.commandString = "F F F";
@@ -463,6 +462,6 @@ void runProceduralMeshTests()
         instances.push_back(std::move(instance));
 
         MeshAccelScene scene;
-        expectTrue(meshSceneBuild(primitives, instances, scene), "meshSceneBuild with procedural instance");
+        expectTrue(meshSceneBuild(instances, scene), "meshSceneBuild with procedural instance");
     }
 }

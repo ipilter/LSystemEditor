@@ -23,16 +23,3 @@ MATH_CORE_FN Vec3 normalToColor(Vec3 normal, bool hit, const RenderParamsGpu* pa
         normal.y * 0.5f + 0.5f,
         normal.z * 0.5f + 0.5f);
 }
-
-MATH_CORE_FN Vec3 distanceToHeatmap(float t, float maxDist, bool hit, const RenderParamsGpu* params)
-{
-    if (!hit) {
-        return renderMissBackground(params);
-    }
-
-    const float u = vecMin2(t / maxDist, 1.0f);
-    const float r = vecMin2(u * 3.0f, 1.0f);
-    const float g = vecMax2(0.0f, vecMin2(u * 3.0f - 1.0f, 1.0f));
-    const float b = vecMax2(0.0f, 1.0f - u * 2.0f);
-    return vecMake3(r, g, b);
-}

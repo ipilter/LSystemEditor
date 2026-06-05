@@ -2,31 +2,13 @@
 
 #include "Procedural/ProceduralMeshBuilder.h"
 
-bool meshSceneBuildFromPrimitives(
-    const std::vector<std::unique_ptr<ScenePrimitive>>& primitives,
-    MeshAccelScene& scene,
-    const ManifoldMeshBuildParams& params)
-{
-    return meshSceneBuild(primitives, {}, scene, params);
-}
-
 bool meshSceneBuild(
-    const std::vector<std::unique_ptr<ScenePrimitive>>& primitives,
     const std::vector<ProceduralInstance>& proceduralInstances,
     MeshAccelScene& scene,
-    const ManifoldMeshBuildParams& params)
+    const MeshSceneBuildParams& params)
 {
     HostMesh mesh{};
     bool hasMesh = false;
-
-    if (!primitives.empty()) {
-        HostMesh primitiveMesh{};
-        if (!ManifoldMeshBuilder::buildSceneMesh(primitives, primitiveMesh, params)) {
-            return false;
-        }
-        hostMeshAppend(mesh, primitiveMesh);
-        hasMesh = true;
-    }
 
     ProceduralBuildParams proceduralParams{};
     proceduralParams.circularSegments = params.circularSegments;
@@ -40,7 +22,9 @@ bool meshSceneBuild(
                 instance.commandString, instance.iterations, root, proceduralMesh, proceduralParams)) {
             return false;
         }
-        hostMeshAppend(mesh, proceduralMesh);
+
+        const uint32_t materialIndexOffset = static_cast<uint32_t>(mesh.materials.size());
+        hostMeshAppend(mesh, proceduralMesh, materialIndexOffset);
         hasMesh = true;
     }
 

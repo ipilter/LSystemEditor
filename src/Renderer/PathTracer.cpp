@@ -58,7 +58,7 @@ struct PathTracerDetail::PathTracerImpl
     std::atomic<int> previewStepsPerLevel{0};
     std::atomic<int> sampleCount{0};
     std::atomic<int> lastSamplingStride{1};
-    std::atomic<int> visualMode{static_cast<int>(RenderDebugVisualMode::Off)};
+    std::atomic<int> visualMode{static_cast<int>(RenderDebugVisualMode::Normals)};
 
     MeshAccelScene meshScene;
     RenderParamsGpu hostRenderParams{};
@@ -578,11 +578,25 @@ bool initRenderParams(PathTracerDetail::PathTracerImpl* impl, cudaStream_t strea
     const float backgroundG = impl->hostRenderParams.backgroundG;
     const float backgroundB = impl->hostRenderParams.backgroundB;
 
+    const float sunAzimuthDeg = impl->hostRenderParams.sunAzimuthDeg;
+    const float sunElevationDeg = impl->hostRenderParams.sunElevationDeg;
+    const float sunColorR = impl->hostRenderParams.sunColorR;
+    const float sunColorG = impl->hostRenderParams.sunColorG;
+    const float sunColorB = impl->hostRenderParams.sunColorB;
+    const float sunDiskSizeDeg = impl->hostRenderParams.sunDiskSizeDeg;
+    const int secondaryBounceCount = impl->hostRenderParams.secondaryBounceCount;
+
     impl->hostRenderParams = RenderParamsGpu{};
-    impl->hostRenderParams.maxDistance = 100.0f;
     impl->hostRenderParams.backgroundR = backgroundR;
     impl->hostRenderParams.backgroundG = backgroundG;
     impl->hostRenderParams.backgroundB = backgroundB;
+    impl->hostRenderParams.sunAzimuthDeg = sunAzimuthDeg;
+    impl->hostRenderParams.sunElevationDeg = sunElevationDeg;
+    impl->hostRenderParams.sunColorR = sunColorR;
+    impl->hostRenderParams.sunColorG = sunColorG;
+    impl->hostRenderParams.sunColorB = sunColorB;
+    impl->hostRenderParams.sunDiskSizeDeg = sunDiskSizeDeg;
+    impl->hostRenderParams.secondaryBounceCount = secondaryBounceCount;
 
     const cudaError_t allocError = cudaMalloc(&impl->d_renderParams, sizeof(RenderParamsGpu));
     if (allocError != cudaSuccess) {
@@ -647,7 +661,6 @@ void releaseMeshScene(PathTracerDetail::PathTracerImpl* impl)
 
 bool buildAndUploadMeshScene(
     PathTracerDetail::PathTracerImpl* impl,
-    const std::vector<std::unique_ptr<ScenePrimitive>>& primitives,
     const std::vector<ProceduralInstance>& proceduralInstances,
     QString* outError)
 {
@@ -658,7 +671,7 @@ bool buildAndUploadMeshScene(
         return false;
     }
 
-    if (!meshSceneBuild(primitives, proceduralInstances, impl->meshScene)) {
+    if (!meshSceneBuild(proceduralInstances, impl->meshScene)) {
         if (outError != nullptr) {
             *outError = QStringLiteral("Manifold mesh scene build failed");
         }
@@ -713,7 +726,6 @@ bool PathTracer::configure(
     int height,
     uint32_t pbo0,
     uint32_t pbo1,
-    const std::vector<std::unique_ptr<ScenePrimitive>>& primitives,
     const std::vector<ProceduralInstance>& proceduralInstances)
 {
     if (width <= 0 || height <= 0 || pbo0 == 0 || pbo1 == 0) {
@@ -789,7 +801,7 @@ bool PathTracer::configure(
     }
 
     QString accelError;
-    if (!buildAndUploadMeshScene(m_impl.get(), primitives, proceduralInstances, &accelError)) {
+    if (!buildAndUploadMeshScene(m_impl.get(), proceduralInstances, &accelError)) {
         AppLog::instance().error(
             QStringLiteral("PathTracer configure: %1").arg(accelError));
         unregisterPboResources(m_impl.get());
@@ -1014,6 +1026,53 @@ RenderDebugVisualMode PathTracer::visualMode() const
     return static_cast<RenderDebugVisualMode>(m_impl->visualMode.load());
 }
 
+void PathTracer::setSunSettings(float azimuthDeg, float elevationDeg, const QColor& color, float diskSizeDeg)
+{
+    m_impl->hostRenderParams.sunAzimuthDeg = azimuthDeg;
+    m_impl->hostRenderParams.sunElevationDeg = elevationDeg;
+    if (color.isValid()) {
+        m_impl->hostRenderParams.sunColorR = static_cast<float>(color.redF());
+        m_impl->hostRenderParams.sunColorG = static_cast<float>(color.greenF());
+        m_impl->hostRenderParams.sunColorB = static_cast<float>(color.blueF());
+    }
+    m_impl->hostRenderParams.sunDiskSizeDeg = diskSizeDeg;
+
+    if (m_impl->stream == nullptr) {
+        return;
+    }
+
+    QString error;
+    if (!uploadRenderParams(m_impl.get(), m_impl->stream, &error)) {
+        AppLog::instance().error(
+            QStringLiteral("PathTracer sun settings upload failed: %1").arg(error));
+        return;
+    }
+
+    if (m_impl->configured.load()) {
+        resetAccumulation();
+    }
+}
+
+void PathTracer::setSecondaryBounceCount(int count)
+{
+    m_impl->hostRenderParams.secondaryBounceCount = count;
+
+    if (m_impl->stream == nullptr) {
+        return;
+    }
+
+    QString error;
+    if (!uploadRenderParams(m_impl.get(), m_impl->stream, &error)) {
+        AppLog::instance().error(
+            QStringLiteral("PathTracer secondary bounce upload failed: %1").arg(error));
+        return;
+    }
+
+    if (m_impl->configured.load()) {
+        resetAccumulation();
+    }
+}
+
 void PathTracer::setClearColor(const QColor& color)
 {
     if (!color.isValid()) {
@@ -1053,16 +1112,14 @@ const MeshAccelBoundsMesh& PathTracer::meshBoundsMesh() const
     return m_impl->boundsMesh;
 }
 
-bool PathTracer::rebuildMeshScene(
-    const std::vector<std::unique_ptr<ScenePrimitive>>& primitives,
-    const std::vector<ProceduralInstance>& proceduralInstances)
+bool PathTracer::rebuildMeshScene(const std::vector<ProceduralInstance>& proceduralInstances)
 {
     if (!m_impl->configured.load()) {
         return false;
     }
 
     QString error;
-    if (!buildAndUploadMeshScene(m_impl.get(), primitives, proceduralInstances, &error)) {
+    if (!buildAndUploadMeshScene(m_impl.get(), proceduralInstances, &error)) {
         AppLog::instance().error(QStringLiteral("PathTracer rebuild mesh scene: %1").arg(error));
         return false;
     }

@@ -29,16 +29,19 @@ public:
     bool isBuilt() const { return m_built; }
     const std::vector<TriangleGpu>& trianglesHost() const { return m_triangles; }
     const std::vector<MeshBvhNode>& bvhNodesHost() const { return m_bvhNodes; }
+    const std::vector<MaterialGpu>& materialsHost() const { return m_materials; }
 
 private:
     std::vector<MeshBvhNode> m_bvhNodes;
     std::vector<TriangleGpu> m_triangles;
+    std::vector<MaterialGpu> m_materials;
     MeshAccelSceneGpu m_hostScene{};
     bool m_built = false;
 
     MeshAccelSceneGpu* m_dScene = nullptr;
     MeshBvhNode* m_dBvhNodes = nullptr;
     TriangleGpu* m_dTriangles = nullptr;
+    MaterialGpu* m_dMaterials = nullptr;
 
     bool m_deviceDirty = true;
 };

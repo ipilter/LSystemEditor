@@ -2,6 +2,7 @@
 #include "MeshAccelScene.cuh"
 #include "QmcSampler.cuh"
 #include "RenderVisualCore.h"
+#include "ShadingCore.h"
 
 #include <cuda_runtime.h>
 #include <vector_types.h>
@@ -60,23 +61,17 @@ __device__ void samplePixel(
     float3 rdFloat{};
     cameraPrimaryRay(camera, u, v, roFloat, rdFloat);
 
-    const MeshHit hit = meshAccelTraceRay(
-        toVec3(roFloat),
-        toVec3(rdFloat),
-        scene,
-        0.0f,
-        renderParams != nullptr ? renderParams->maxDistance : 100.0f);
+    const Vec3 ro = toVec3(roFloat);
+    const Vec3 rd = toVec3(rdFloat);
+    const MeshHit hit =
+        meshAccelTraceRay(ro, rd, scene, 0.0f, ShadingCoreDetail::kRayTMax);
 
     Vec3 rgbVec{};
     switch (visualMode) {
-    case static_cast<int>(RenderDebugVisualMode::HitDistance):
-        rgbVec = distanceToHeatmap(
-            hit.t,
-            renderParams != nullptr ? renderParams->maxDistance : 100.0f,
-            hit.hit,
-            renderParams);
-        break;
     case static_cast<int>(RenderDebugVisualMode::Off):
+        rgbVec = shadeOffMode(hit, ro, rd, scene, renderParams, ctx, sobolMatrices, sobolDimensionCount);
+        break;
+    case static_cast<int>(RenderDebugVisualMode::Normals):
     default:
         rgbVec = normalToColor(hit.normal, hit.hit, renderParams);
         break;

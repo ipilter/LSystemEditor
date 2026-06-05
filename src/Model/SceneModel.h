@@ -3,8 +3,6 @@
 #include "Geometry/GeometryTypes.h"
 #include "MeshAccel/MeshAccelTypes.h"
 #include "Procedural/ProceduralTypes.h"
-#include "SceneDefaults.h"
-#include "ScenePrimitive.h"
 
 #include <QColor>
 #include <QObject>
@@ -40,14 +38,23 @@ public:
     RenderDebugVisualMode debugVisualMode() const;
     void setDebugVisualMode(RenderDebugVisualMode mode);
 
+    float sunAzimuthDeg() const;
+    float sunElevationDeg() const;
+    QColor sunColor() const;
+    float sunDiskSizeDeg() const;
+    void setSunAzimuthDeg(float value);
+    void setSunElevationDeg(float value);
+    void setSunColor(const QColor& color);
+    void setSunDiskSizeDeg(float value);
+
+    int secondaryBounceCount() const;
+    void setSecondaryBounceCount(int value);
+
     MeshAccelBoundsOverlayMode boundsOverlayMode() const;
     void setBoundsOverlayMode(MeshAccelBoundsOverlayMode mode);
 
     QColor accelBvhColor() const;
     void setAccelBvhColor(const QColor& color);
-
-    const std::vector<std::unique_ptr<ScenePrimitive>>& primitives() const;
-    void addPrimitive(std::unique_ptr<ScenePrimitive> primitive);
 
     const std::vector<ProceduralInstance>& proceduralInstances() const;
     void addProceduralInstance(ProceduralInstance instance);
@@ -61,6 +68,8 @@ signals:
     void maxSamplesPerPixelChanged(int value);
     void previewStepsPerLevelChanged(int value);
     void debugVisualModeChanged(RenderDebugVisualMode mode);
+    void sunSettingsChanged();
+    void secondaryBounceCountChanged(int value);
     void boundsOverlayModeChanged(MeshAccelBoundsOverlayMode mode);
     void accelBvhColorChanged(const QColor& color);
     void sceneChanged();
@@ -71,15 +80,23 @@ private:
     static int clampDimension(int value);
     static int clampMaxSamples(int value);
     static int clampPreviewSteps(int value);
+    static float clampSunAzimuth(float value);
+    static float clampSunElevation(float value);
+    static float clampSunDiskSize(float value);
+    static int clampSecondaryBounceCount(int value);
 
     QColor m_clearColor;
     QSize m_renderSize;
     int m_maxSamplesPerPixel = 8;
     int m_previewStepsPerLevel = 2;
-    RenderDebugVisualMode m_debugVisualMode = RenderDebugVisualMode::Off;
+    RenderDebugVisualMode m_debugVisualMode = RenderDebugVisualMode::Normals;
+    float m_sunAzimuthDeg = 135.0f;
+    float m_sunElevationDeg = 45.0f;
+    QColor m_sunColor = QColor(255, 245, 230);
+    float m_sunDiskSizeDeg = 0.53f;
+    int m_secondaryBounceCount = 1;
     MeshAccelBoundsOverlayMode m_boundsOverlayMode = MeshAccelBoundsOverlayMode::Off;
     QColor m_accelBvhColor = QColor(230, 200, 0);
-    std::vector<std::unique_ptr<ScenePrimitive>> m_primitives;
     std::vector<ProceduralInstance> m_proceduralInstances;
     GLuint m_pboIds[bufferCount] = {0, 0};
 };

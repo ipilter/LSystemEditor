@@ -81,7 +81,6 @@ set(PATHTRACER_SAMPLING_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Sampling/QmcGpuResources.cpp")
 
 set(PATHTRACER_MESH_BUILDER_SOURCES
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/MeshBuilder/ManifoldMeshBuilder.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/MeshBuilder/ManifoldMeshConvert.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Procedural/Turtle.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Procedural/Spline.cpp"
@@ -95,7 +94,7 @@ set(PATHTRACER_MESH_ACCEL_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/MeshAccel/MeshSceneContent.cpp")
 
 list(FILTER PATHTRACER_SOURCES EXCLUDE REGEX ".*/Renderer/Sampling/(SobolDirectionData|SobolTables|QmcGpuResources)\\.cpp$")
-list(FILTER PATHTRACER_SOURCES EXCLUDE REGEX ".*/Renderer/MeshBuilder/(ManifoldMeshBuilder|ManifoldMeshConvert)\\.cpp$")
+list(FILTER PATHTRACER_SOURCES EXCLUDE REGEX ".*/Renderer/MeshBuilder/ManifoldMeshConvert\\.cpp$")
 list(FILTER PATHTRACER_SOURCES EXCLUDE REGEX ".*/Renderer/Procedural/.*\\.cpp$")
 list(FILTER PATHTRACER_SOURCES EXCLUDE REGEX ".*/Renderer/MeshAccel/(MeshBvhBuilder|MeshAccelScene|MeshSceneContent)\\.cpp$")
 list(FILTER PATHTRACER_SOURCES EXCLUDE REGEX ".*/View/AddSdfDialog\\.cpp$")

@@ -192,6 +192,16 @@ void OpenGLViewportWidget::setSceneModel(SceneModel* model)
         update();
     });
 
+    connect(m_model, &SceneModel::sunSettingsChanged, this, [this]() {
+        syncSunSettingsToPathTracer();
+        update();
+    });
+
+    connect(m_model, &SceneModel::secondaryBounceCountChanged, this, [this](int count) {
+        m_pathTracer.setSecondaryBounceCount(count);
+        update();
+    });
+
     connect(m_model, &SceneModel::boundsOverlayModeChanged, this, [this](MeshAccelBoundsOverlayMode) {
         update();
     });
@@ -206,7 +216,7 @@ void OpenGLViewportWidget::setSceneModel(SceneModel* model)
             return;
         }
         makeCurrent();
-        if (!m_pathTracer.rebuildMeshScene(m_model->primitives(), m_model->proceduralInstances())) {
+        if (!m_pathTracer.rebuildMeshScene(m_model->proceduralInstances())) {
             doneCurrent();
             return;
         }
@@ -484,6 +494,20 @@ void OpenGLViewportWidget::syncCameraToPathTracer()
     m_pathTracer.setCamera(m_camera.toGpu());
 }
 
+void OpenGLViewportWidget::syncSunSettingsToPathTracer()
+{
+    if (m_model == nullptr) {
+        return;
+    }
+
+    m_pathTracer.setSunSettings(
+        m_model->sunAzimuthDeg(),
+        m_model->sunElevationDeg(),
+        m_model->sunColor(),
+        m_model->sunDiskSizeDeg());
+    m_pathTracer.setSecondaryBounceCount(m_model->secondaryBounceCount());
+}
+
 void OpenGLViewportWidget::onCameraChanged()
 {
     syncCameraToPathTracer();
@@ -532,8 +556,7 @@ void OpenGLViewportWidget::recreateGpuBuffers()
     }
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
-    if (!m_pathTracer.configure(
-            w, h, m_pbos[0], m_pbos[1], m_model->primitives(), m_model->proceduralInstances())) {
+    if (!m_pathTracer.configure(w, h, m_pbos[0], m_pbos[1], m_model->proceduralInstances())) {
         AppLog::instance().error(QStringLiteral("PathTracer configure failed for %1x%2").arg(w).arg(h));
         return;
     }
@@ -545,6 +568,7 @@ void OpenGLViewportWidget::recreateGpuBuffers()
     m_pathTracer.setMaxSamplesPerPixel(m_model->maxSamplesPerPixel());
     m_pathTracer.setPreviewStepsPerLevel(m_model->previewStepsPerLevel());
     m_pathTracer.setVisualMode(m_model->debugVisualMode());
+    syncSunSettingsToPathTracer();
 
     m_model->setPboIds(m_pbos[0], m_pbos[1]);
 

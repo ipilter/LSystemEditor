@@ -50,6 +50,7 @@ private:
     void uploadDisplayTexture(int slot, bool initialUpload);
     void releaseGlResources();
     void syncCameraToPathTracer();
+    void syncSunSettingsToPathTracer();
     void onCameraChanged();
     void rebuildBoundsOverlay();
     void drawSceneOverlays();

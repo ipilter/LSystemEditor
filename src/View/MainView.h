@@ -4,6 +4,7 @@
 #include <QWidget>
 
 class QComboBox;
+class QDoubleSpinBox;
 class OpenGLViewportWidget;
 class QLabel;
 class QPlainTextEdit;
@@ -25,6 +26,11 @@ public:
     QSpinBox* previewStepsSpinBox() const;
     QComboBox* debugVisualModeComboBox() const;
     QComboBox* boundsOverlayComboBox() const;
+    QDoubleSpinBox* sunAzimuthSpinBox() const;
+    QDoubleSpinBox* sunElevationSpinBox() const;
+    QPushButton* sunColorButton() const;
+    QDoubleSpinBox* sunDiskSizeSpinBox() const;
+    QSpinBox* secondaryBounceSpinBox() const;
     QPushButton* startButton() const;
     QPushButton* stopButton() const;
     QPushButton* settingsButton() const;
@@ -49,6 +55,11 @@ private:
     QSpinBox* m_previewStepsSpinBox = nullptr;
     QComboBox* m_debugVisualModeComboBox = nullptr;
     QComboBox* m_boundsOverlayComboBox = nullptr;
+    QDoubleSpinBox* m_sunAzimuthSpinBox = nullptr;
+    QDoubleSpinBox* m_sunElevationSpinBox = nullptr;
+    QPushButton* m_sunColorButton = nullptr;
+    QDoubleSpinBox* m_sunDiskSizeSpinBox = nullptr;
+    QSpinBox* m_secondaryBounceSpinBox = nullptr;
     QLabel* m_iterationLabel = nullptr;
     QPushButton* m_startButton = nullptr;
     QPushButton* m_stopButton = nullptr;

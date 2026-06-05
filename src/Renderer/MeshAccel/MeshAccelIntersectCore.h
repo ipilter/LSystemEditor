@@ -129,6 +129,7 @@ MESH_ACCEL_CORE_FN MeshHit meshAccelTraceRay(
 
     float closestT = tMax;
     Vec3 closestNormal{};
+    uint32_t closestTriangleIndex = 0;
 
     while (stackSize > 0) {
         const int nodeIndex = stack[--stackSize];
@@ -155,6 +156,7 @@ MESH_ACCEL_CORE_FN MeshHit meshAccelTraceRay(
                 if (meshAccelRayTriangle(ro, rd, scene->triangles[triIndex], tMin, closestT, tHit, normal)) {
                     closestT = tHit;
                     closestNormal = normal;
+                    closestTriangleIndex = triIndex;
                 }
             }
             continue;
@@ -174,6 +176,7 @@ MESH_ACCEL_CORE_FN MeshHit meshAccelTraceRay(
         result.hit = true;
         result.t = closestT;
         result.normal = vecNormalize3(closestNormal);
+        result.triangleIndex = closestTriangleIndex;
     }
 
     return result;

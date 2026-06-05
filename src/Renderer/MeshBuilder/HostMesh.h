@@ -1,7 +1,9 @@
 #pragma once
 
 #include "Geometry/GeometryTypes.h"
+#include "MeshAccel/MeshAccelTypes.h"
 
+#include <cstdint>
 #include <vector>
 
 struct HostTriangle
@@ -9,11 +11,13 @@ struct HostTriangle
     Vec3 v0{};
     Vec3 v1{};
     Vec3 v2{};
+    uint32_t materialIndex = 0;
 };
 
 struct HostMesh
 {
     std::vector<HostTriangle> triangles;
+    std::vector<MaterialGpu> materials;
 };
 
 struct HostMeshAabb
@@ -63,7 +67,13 @@ inline HostMeshAabb hostMeshComputeAabb(const HostMesh& mesh)
     return aabb;
 }
 
-inline void hostMeshAppend(HostMesh& dst, const HostMesh& src)
+inline void hostMeshAppend(HostMesh& dst, const HostMesh& src, const uint32_t materialIndexOffset = 0)
 {
+    const size_t triOffset = dst.triangles.size();
     dst.triangles.insert(dst.triangles.end(), src.triangles.begin(), src.triangles.end());
+    for (size_t i = triOffset; i < dst.triangles.size(); ++i) {
+        dst.triangles[i].materialIndex += materialIndexOffset;
+    }
+
+    dst.materials.insert(dst.materials.end(), src.materials.begin(), src.materials.end());
 }

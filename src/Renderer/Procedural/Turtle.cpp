@@ -209,6 +209,12 @@ public:
 
             if (symbolNameIs(sym, "Roll") && hasArg) {
                 applyRoll(m_pose, arg);
+                continue;
+            }
+
+            if (symbolNameIs(sym, "Mat") && hasArg) {
+                m_currentMaterialId = static_cast<uint32_t>(arg);
+                continue;
             }
         }
 
@@ -228,6 +234,7 @@ private:
 
         TurtleSegment segment{};
         segment.states = std::move(m_currentStates);
+        segment.materialId = m_currentMaterialId;
         m_output.segments.push_back(std::move(segment));
         m_currentStates.clear();
     }
@@ -237,6 +244,7 @@ private:
     TurtlePose m_pose;
     std::vector<TurtleState> m_currentStates;
     std::vector<BranchFrame> m_branchStack;
+    uint32_t m_currentMaterialId = 0;
 };
 
 } // namespace

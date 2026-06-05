@@ -27,6 +27,11 @@ private:
     void onPreviewStepsSpinBoxChanged();
     void applyPreviewStepsFromSpinBox();
     void onDebugVisualModeComboBoxChanged();
+    void onSunAzimuthSpinBoxChanged();
+    void onSunElevationSpinBoxChanged();
+    void onSunColorButtonClicked();
+    void onSunDiskSizeSpinBoxChanged();
+    void onSecondaryBounceSpinBoxChanged();
     void onBoundsOverlayComboBoxChanged();
     void onStartButtonClicked();
     void onStopButtonClicked();
@@ -37,6 +42,7 @@ private:
     void syncMaxSamplesSpinBox();
     void syncPreviewStepsSpinBox();
     void syncDebugVisualModeComboBox();
+    void syncSunControls();
     void syncBoundsOverlayComboBox();
 
     SceneModel* m_model = nullptr;
