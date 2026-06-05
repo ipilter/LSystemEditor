@@ -48,7 +48,13 @@ bool MeshAccelScene::build(const HostMesh& mesh)
     clear();
 
     if (mesh.triangles.empty()) {
-        return false;
+        m_hostScene = MeshAccelSceneGpu{};
+        m_hostScene.bvhNodeCount = 0;
+        m_hostScene.triangleCount = 0;
+        m_hostScene.bvhRootIndex = 0;
+        m_built = true;
+        m_deviceDirty = true;
+        return true;
     }
 
     m_triangles.reserve(mesh.triangles.size());

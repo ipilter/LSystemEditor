@@ -1,0 +1,28 @@
+L-System: symbol manipulation (out of scope, assume input like below).
+	"F(0.8)Yaw(2)F(0.5)Yaw(1)F(0.3)Yaw(3)[Pich(45)FFF][Pich(-45)FFF]"
+
+Turtle
+	States: A buffer of transforms: [(P0, V0, R0), (P1, V1, R1), ...] (Position, Velocity/Tangent, Radius/State).
+	f or [] triggers the new segment creation!
+	Multiple, continous Fs must create a single spline with multiple internal points maintaining the tangents/radius. This will significantly reduce the vertex count of the final mesh.
+	Turtle knows this info only, later states must not know about branching just the list of segments in 3d space.
+
+	Tangent-aligned Frames: ensure the cross-section is oriented using a Parallel Transport frame to avoid "twisting" along the spline.
+
+Spline	
+	Generate Spline: Iterate through that array of states to generate theo Hermite or Bezier control points then the spline itself
+	
+Loft:
+	Generate Manifold tapered lofted mesh object along the path, get the cross section from precreated paths, get radius from turtle(F module from LSystem)
+	Radiuses (for start end or middle crossections) will come from LSystem modules to gives more control.
+	
+Assembly
+	Iteratively Union these objects.
+	Grouping should be applied on every branching (Turtle generates groups?)
+	Branching points ideal for groups if a branch contains more than 1 segment 
+	we can group these. Use Binary Tree of Unions (union pairs) to group the N segment in each group.
+	
+Refine
+	manifold::Refine to make smooth mesh. Expecting round branching after this.
+	
+Export to glTF for use in godot or just upload to GPU and path trace it

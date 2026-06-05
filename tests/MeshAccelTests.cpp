@@ -12,9 +12,9 @@
 #include <memory>
 #include <vector>
 
-namespace {
-
 int gFailures = 0;
+
+namespace {
 
 void expectTrue(bool condition, const char* label)
 {
@@ -211,6 +211,8 @@ void testTwoSphereSceneMesh()
 
 } // namespace
 
+void runProceduralMeshTests();
+
 int main()
 {
     testGpuStructLayout();
@@ -220,6 +222,7 @@ int main()
     testSingleSphereTightMeshExtent();
     testTwoSphereSceneMesh();
     testMeshSceneBuild();
+    runProceduralMeshTests();
 
     if (gFailures != 0) {
         std::cerr << gFailures << " test failure(s)\n";

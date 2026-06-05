@@ -3,6 +3,7 @@
 #include "Camera3D.h"
 #include "PathTracer.h"
 #include "MeshAccelBoundsOverlay.h"
+#include "OriginGizmoOverlay.h"
 
 #include <QColor>
 #include <QOpenGLFunctions_4_5_Core>
@@ -51,7 +52,7 @@ private:
     void syncCameraToPathTracer();
     void onCameraChanged();
     void rebuildBoundsOverlay();
-    void drawBoundsOverlay();
+    void drawSceneOverlays();
     GLuint compileShader(GLenum type, const char* source);
     GLuint linkProgram(GLuint vertexShader, GLuint fragmentShader);
 
@@ -59,6 +60,7 @@ private:
     PathTracer m_pathTracer;
     Camera3D m_camera;
     MeshAccelBoundsOverlay m_boundsOverlay;
+    OriginGizmoOverlay m_originGizmo;
 
     QColor m_clearColor;
     bool m_looking = false;

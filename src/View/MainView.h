@@ -29,6 +29,8 @@ public:
     QPushButton* stopButton() const;
     QPushButton* settingsButton() const;
     QPushButton* addPrimitiveButton() const;
+    QPlainTextEdit* lsystemEdit() const;
+    QSpinBox* lsystemIterationsSpinBox() const;
 
     void setIteration(int value);
 
@@ -52,6 +54,8 @@ private:
     QPushButton* m_stopButton = nullptr;
     QPushButton* m_settingsButton = nullptr;
     QPushButton* m_addPrimitiveButton = nullptr;
+    QPlainTextEdit* m_lsystemEdit = nullptr;
+    QSpinBox* m_lsystemIterationsSpinBox = nullptr;
     QPlainTextEdit* m_logView = nullptr;
     QSize m_pendingViewportSize;
 };

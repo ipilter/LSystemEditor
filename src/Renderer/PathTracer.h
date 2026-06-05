@@ -3,6 +3,7 @@
 #include "CameraGpu.h"
 #include "Geometry/GeometryTypes.h"
 #include "MeshAccel/MeshAccelBoundsMesh.h"
+#include "Procedural/ProceduralTypes.h"
 #include "SceneDefaults.h"
 #include "ScenePrimitive.h"
 
@@ -41,7 +42,8 @@ public:
         int height,
         uint32_t pbo0,
         uint32_t pbo1,
-        const std::vector<std::unique_ptr<ScenePrimitive>>& primitives);
+        const std::vector<std::unique_ptr<ScenePrimitive>>& primitives,
+        const std::vector<ProceduralInstance>& proceduralInstances = {});
 
     void start();
     void stop();
@@ -77,7 +79,9 @@ public:
     void rebuildMeshBoundsMesh(const QColor& boundsColor);
     const MeshAccelBoundsMesh& meshBoundsMesh() const;
 
-    bool rebuildMeshScene(const std::vector<std::unique_ptr<ScenePrimitive>>& primitives);
+    bool rebuildMeshScene(
+        const std::vector<std::unique_ptr<ScenePrimitive>>& primitives,
+        const std::vector<ProceduralInstance>& proceduralInstances = {});
 
 private:
     void renderLoop();

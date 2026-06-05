@@ -94,3 +94,43 @@ MATH_CORE_FN float vecClamp(float value, float low, float high)
 {
     return vecMax2(low, vecMin2(value, high));
 }
+
+MATH_CORE_FN Vec3 vecCross3(Vec3 a, Vec3 b)
+{
+    return vecMake3(
+        a.y * b.z - a.z * b.y,
+        a.z * b.x - a.x * b.z,
+        a.x * b.y - a.y * b.x);
+}
+
+MATH_CORE_FN Vec3 vecLerp3(Vec3 a, Vec3 b, float t)
+{
+    return vecAdd3(vecScale3(a, 1.0f - t), vecScale3(b, t));
+}
+
+MATH_CORE_FN float vecLerp(float a, float b, float t)
+{
+    return a + (b - a) * t;
+}
+
+#if !defined(__CUDACC__)
+inline Vec3 vecRotateYawPitchRoll(Vec3 v, float yawDeg, float pitchDeg, float rollDeg)
+{
+    const float degToRad = 3.14159265f / 180.0f;
+    const float yaw = yawDeg * degToRad;
+    const float pitch = pitchDeg * degToRad;
+    const float roll = rollDeg * degToRad;
+
+    const float cy = std::cos(yaw);
+    const float sy = std::sin(yaw);
+    Vec3 yRot = vecMake3(cy * v.x + sy * v.z, v.y, -sy * v.x + cy * v.z);
+
+    const float cp = std::cos(pitch);
+    const float sp = std::sin(pitch);
+    Vec3 xRot = vecMake3(yRot.x, cp * yRot.y - sp * yRot.z, sp * yRot.y + cp * yRot.z);
+
+    const float cr = std::cos(roll);
+    const float sr = std::sin(roll);
+    return vecMake3(cr * xRot.x + sr * xRot.y, -sr * xRot.x + cr * xRot.y, xRot.z);
+}
+#endif

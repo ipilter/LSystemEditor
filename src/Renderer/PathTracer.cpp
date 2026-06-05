@@ -648,6 +648,7 @@ void releaseMeshScene(PathTracerDetail::PathTracerImpl* impl)
 bool buildAndUploadMeshScene(
     PathTracerDetail::PathTracerImpl* impl,
     const std::vector<std::unique_ptr<ScenePrimitive>>& primitives,
+    const std::vector<ProceduralInstance>& proceduralInstances,
     QString* outError)
 {
     if (impl == nullptr || impl->stream == nullptr) {
@@ -657,7 +658,7 @@ bool buildAndUploadMeshScene(
         return false;
     }
 
-    if (!meshSceneBuildFromPrimitives(primitives, impl->meshScene)) {
+    if (!meshSceneBuild(primitives, proceduralInstances, impl->meshScene)) {
         if (outError != nullptr) {
             *outError = QStringLiteral("Manifold mesh scene build failed");
         }
@@ -712,7 +713,8 @@ bool PathTracer::configure(
     int height,
     uint32_t pbo0,
     uint32_t pbo1,
-    const std::vector<std::unique_ptr<ScenePrimitive>>& primitives)
+    const std::vector<std::unique_ptr<ScenePrimitive>>& primitives,
+    const std::vector<ProceduralInstance>& proceduralInstances)
 {
     if (width <= 0 || height <= 0 || pbo0 == 0 || pbo1 == 0) {
         AppLog::instance().error(QStringLiteral("PathTracer configure: invalid dimensions or PBO ids"));
@@ -787,7 +789,7 @@ bool PathTracer::configure(
     }
 
     QString accelError;
-    if (!buildAndUploadMeshScene(m_impl.get(), primitives, &accelError)) {
+    if (!buildAndUploadMeshScene(m_impl.get(), primitives, proceduralInstances, &accelError)) {
         AppLog::instance().error(
             QStringLiteral("PathTracer configure: %1").arg(accelError));
         unregisterPboResources(m_impl.get());
@@ -1051,14 +1053,16 @@ const MeshAccelBoundsMesh& PathTracer::meshBoundsMesh() const
     return m_impl->boundsMesh;
 }
 
-bool PathTracer::rebuildMeshScene(const std::vector<std::unique_ptr<ScenePrimitive>>& primitives)
+bool PathTracer::rebuildMeshScene(
+    const std::vector<std::unique_ptr<ScenePrimitive>>& primitives,
+    const std::vector<ProceduralInstance>& proceduralInstances)
 {
     if (!m_impl->configured.load()) {
         return false;
     }
 
     QString error;
-    if (!buildAndUploadMeshScene(m_impl.get(), primitives, &error)) {
+    if (!buildAndUploadMeshScene(m_impl.get(), primitives, proceduralInstances, &error)) {
         AppLog::instance().error(QStringLiteral("PathTracer rebuild mesh scene: %1").arg(error));
         return false;
     }

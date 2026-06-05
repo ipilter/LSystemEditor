@@ -206,7 +206,7 @@ void OpenGLViewportWidget::setSceneModel(SceneModel* model)
             return;
         }
         makeCurrent();
-        if (!m_pathTracer.rebuildMeshScene(m_model->primitives())) {
+        if (!m_pathTracer.rebuildMeshScene(m_model->primitives(), m_model->proceduralInstances())) {
             doneCurrent();
             return;
         }
@@ -260,6 +260,7 @@ void OpenGLViewportWidget::initializeGL()
     glBindVertexArray(0);
 
     m_boundsOverlay.initialize(this);
+    m_originGizmo.initialize(this);
     m_glInitialized = true;
 
     if (m_model != nullptr) {
@@ -315,7 +316,7 @@ void OpenGLViewportWidget::paintGL()
         glBindVertexArray(0);
     }
 
-    drawBoundsOverlay();
+    drawSceneOverlays();
 }
 
 void OpenGLViewportWidget::rebuildBoundsOverlay()
@@ -328,9 +329,9 @@ void OpenGLViewportWidget::rebuildBoundsOverlay()
     m_boundsOverlay.rebuild(this, m_pathTracer.meshBoundsMesh());
 }
 
-void OpenGLViewportWidget::drawBoundsOverlay()
+void OpenGLViewportWidget::drawSceneOverlays()
 {
-    if (m_model == nullptr || m_model->boundsOverlayMode() == MeshAccelBoundsOverlayMode::Off) {
+    if (m_model == nullptr) {
         return;
     }
 
@@ -357,11 +358,16 @@ void OpenGLViewportWidget::drawBoundsOverlay()
     const glm::mat4 viewProj =
         Camera3D::projMatrixFromGpu(sampleCamera, renderW, renderH)
         * Camera3D::viewMatrixFromGpu(sampleCamera);
-    m_boundsOverlay.draw(
-        this,
-        viewProj,
-        m_model->boundsOverlayMode(),
-        m_model->accelBvhColor());
+
+    m_originGizmo.draw(this, viewProj);
+
+    if (m_model->boundsOverlayMode() != MeshAccelBoundsOverlayMode::Off) {
+        m_boundsOverlay.draw(
+            this,
+            viewProj,
+            m_model->boundsOverlayMode(),
+            m_model->accelBvhColor());
+    }
 
     glDisable(GL_SCISSOR_TEST);
     glDisable(GL_DEPTH_TEST);
@@ -526,7 +532,8 @@ void OpenGLViewportWidget::recreateGpuBuffers()
     }
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
-    if (!m_pathTracer.configure(w, h, m_pbos[0], m_pbos[1], m_model->primitives())) {
+    if (!m_pathTracer.configure(
+            w, h, m_pbos[0], m_pbos[1], m_model->primitives(), m_model->proceduralInstances())) {
         AppLog::instance().error(QStringLiteral("PathTracer configure failed for %1x%2").arg(w).arg(h));
         return;
     }
@@ -593,6 +600,7 @@ void OpenGLViewportWidget::releaseGlResources()
 {
     m_pathTracer.releaseOutputSurfaces();
     m_boundsOverlay.release(this);
+    m_originGizmo.release(this);
 
     if (m_texture != 0) {
         glDeleteTextures(1, &m_texture);

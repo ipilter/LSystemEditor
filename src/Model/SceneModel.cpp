@@ -19,7 +19,7 @@ SceneModel::SceneModel(QObject* parent)
     , m_maxSamplesPerPixel(AppSettings::instance().maxSamplesPerPixel())
     , m_previewStepsPerLevel(AppSettings::instance().previewStepsPerLevel())
     , m_accelBvhColor(AppSettings::instance().accelBvhColor())
-    , m_primitives(defaultScenePrimitives())
+    , m_primitives()
 {
 }
 
@@ -155,6 +155,20 @@ void SceneModel::addPrimitive(std::unique_ptr<ScenePrimitive> primitive)
         return;
     }
     m_primitives.push_back(std::move(primitive));
+    emit sceneChanged();
+}
+
+const std::vector<ProceduralInstance>& SceneModel::proceduralInstances() const
+{
+    return m_proceduralInstances;
+}
+
+void SceneModel::addProceduralInstance(ProceduralInstance instance)
+{
+    if (instance.commandString.empty()) {
+        return;
+    }
+    m_proceduralInstances.push_back(std::move(instance));
     emit sceneChanged();
 }
 

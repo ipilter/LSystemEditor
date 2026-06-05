@@ -52,11 +52,13 @@ if(NOT glm_FOUND)
     target_include_directories(glm INTERFACE ${glm_SOURCE_DIR})
 endif()
 
+add_subdirectory(src/LSystemLib)
+
 set(MANIFOLD_TEST OFF CACHE BOOL "" FORCE)
 set(MANIFOLD_PYBIND OFF CACHE BOOL "" FORCE)
 set(MANIFOLD_JSBIND OFF CACHE BOOL "" FORCE)
 set(MANIFOLD_CBIND OFF CACHE BOOL "" FORCE)
-set(MANIFOLD_CROSS_SECTION OFF CACHE BOOL "" FORCE)
+set(MANIFOLD_CROSS_SECTION ON CACHE BOOL "" FORCE)
 set(MANIFOLD_PAR ON CACHE BOOL "" FORCE)
 set(MANIFOLD_DOWNLOADS ON CACHE BOOL "" FORCE)
 
@@ -79,7 +81,13 @@ set(PATHTRACER_SAMPLING_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Sampling/QmcGpuResources.cpp")
 
 set(PATHTRACER_MESH_BUILDER_SOURCES
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/MeshBuilder/ManifoldMeshBuilder.cpp")
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/MeshBuilder/ManifoldMeshBuilder.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/MeshBuilder/ManifoldMeshConvert.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Procedural/Turtle.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Procedural/Spline.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Procedural/Loft.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Procedural/ProceduralAssembly.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Procedural/ProceduralMeshBuilder.cpp")
 
 set(PATHTRACER_MESH_ACCEL_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/MeshAccel/MeshBvhBuilder.cpp"
@@ -87,10 +95,12 @@ set(PATHTRACER_MESH_ACCEL_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/MeshAccel/MeshSceneContent.cpp")
 
 list(FILTER PATHTRACER_SOURCES EXCLUDE REGEX ".*/Renderer/Sampling/(SobolDirectionData|SobolTables|QmcGpuResources)\\.cpp$")
-list(FILTER PATHTRACER_SOURCES EXCLUDE REGEX ".*/Renderer/MeshBuilder/ManifoldMeshBuilder\\.cpp$")
+list(FILTER PATHTRACER_SOURCES EXCLUDE REGEX ".*/Renderer/MeshBuilder/(ManifoldMeshBuilder|ManifoldMeshConvert)\\.cpp$")
+list(FILTER PATHTRACER_SOURCES EXCLUDE REGEX ".*/Renderer/Procedural/.*\\.cpp$")
 list(FILTER PATHTRACER_SOURCES EXCLUDE REGEX ".*/Renderer/MeshAccel/(MeshBvhBuilder|MeshAccelScene|MeshSceneContent)\\.cpp$")
 list(FILTER PATHTRACER_SOURCES EXCLUDE REGEX ".*/View/AddSdfDialog\\.cpp$")
 list(FILTER PATHTRACER_SOURCES EXCLUDE REGEX ".*/Renderer/Sdf/.*")
+list(FILTER PATHTRACER_SOURCES EXCLUDE REGEX ".*/LSystemLib/.*")
 
 add_library(pathtracer_sampling STATIC ${PATHTRACER_SAMPLING_SOURCES})
 target_include_directories(pathtracer_sampling PUBLIC
@@ -103,9 +113,10 @@ add_library(pathtracer_mesh_builder STATIC ${PATHTRACER_MESH_BUILDER_SOURCES})
 target_include_directories(pathtracer_mesh_builder PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/MeshBuilder"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Procedural"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Geometry"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Model")
-target_link_libraries(pathtracer_mesh_builder PUBLIC manifold)
+target_link_libraries(pathtracer_mesh_builder PUBLIC manifold LSystemLib)
 set_target_properties(pathtracer_mesh_builder PROPERTIES FOLDER "src")
 
 add_library(pathtracer_mesh_accel STATIC ${PATHTRACER_MESH_ACCEL_SOURCES})
@@ -113,6 +124,7 @@ target_include_directories(pathtracer_mesh_accel PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/MeshAccel"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/MeshBuilder"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Procedural"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Geometry"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Model")
 target_link_libraries(pathtracer_mesh_accel PUBLIC pathtracer_mesh_builder CUDA::cudart)
@@ -125,6 +137,7 @@ target_include_directories(pathtracer PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Sampling"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Geometry"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/MeshBuilder"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Procedural"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/MeshAccel"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/View"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Controller"
@@ -189,11 +202,12 @@ set_target_properties(qmc_sampling_tests PROPERTIES FOLDER "tests")
 
 add_test(NAME QmcSampling COMMAND qmc_sampling_tests)
 
-add_executable(mesh_accel_tests tests/MeshAccelTests.cpp)
+add_executable(mesh_accel_tests tests/MeshAccelTests.cpp tests/ProceduralMeshTests.cpp)
 target_link_libraries(mesh_accel_tests PRIVATE pathtracer_mesh_accel Qt6::Gui)
 target_include_directories(mesh_accel_tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/MeshAccel"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/MeshBuilder"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Procedural"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Geometry"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Model"
     "${CMAKE_CURRENT_SOURCE_DIR}/tests")

@@ -2,6 +2,7 @@
 
 #include "Geometry/GeometryTypes.h"
 #include "MeshAccel/MeshAccelTypes.h"
+#include "Procedural/ProceduralTypes.h"
 #include "SceneDefaults.h"
 #include "ScenePrimitive.h"
 
@@ -48,6 +49,9 @@ public:
     const std::vector<std::unique_ptr<ScenePrimitive>>& primitives() const;
     void addPrimitive(std::unique_ptr<ScenePrimitive> primitive);
 
+    const std::vector<ProceduralInstance>& proceduralInstances() const;
+    void addProceduralInstance(ProceduralInstance instance);
+
     GLuint pboId(int index) const;
     void setPboIds(GLuint pbo0, GLuint pbo1);
 
@@ -76,5 +80,6 @@ private:
     MeshAccelBoundsOverlayMode m_boundsOverlayMode = MeshAccelBoundsOverlayMode::Off;
     QColor m_accelBvhColor = QColor(230, 200, 0);
     std::vector<std::unique_ptr<ScenePrimitive>> m_primitives;
+    std::vector<ProceduralInstance> m_proceduralInstances;
     GLuint m_pboIds[bufferCount] = {0, 0};
 };

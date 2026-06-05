@@ -3,11 +3,12 @@
 #include "AppSettings.h"
 #include "MainView.h"
 #include "OpenGLViewportWidget.h"
+#include "LSystemTransformDialog.h"
 #include "SceneModel.h"
 #include "SettingsDialog.h"
-#include "AddPrimitiveDialog.h"
-
 #include <QColorDialog>
+#include <QDialog>
+#include <QPlainTextEdit>
 #include <QComboBox>
 #include <QDialog>
 #include <QPushButton>
@@ -218,10 +219,22 @@ void SceneController::onSettingsButtonClicked()
 
 void SceneController::onAddPrimitiveButtonClicked()
 {
-    AddPrimitiveDialog dialog(m_view);
-    if (dialog.exec() == QDialog::Accepted) {
-        m_model->addPrimitive(dialog.result());
+    const QString command = m_view->lsystemEdit()->toPlainText().trimmed();
+    if (command.isEmpty()) {
+        return;
     }
+
+    LSystemTransformDialog dialog(m_view);
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+
+    ProceduralInstance instance{};
+    instance.commandString = command.toStdString();
+    instance.iterations = static_cast<std::size_t>(m_view->lsystemIterationsSpinBox()->value());
+    instance.translation = dialog.translation();
+    instance.rotationDeg = dialog.rotationDeg();
+    m_model->addProceduralInstance(std::move(instance));
 }
 
 void SceneController::syncColorButtonStyle()
