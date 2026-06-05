@@ -92,7 +92,14 @@ MESH_ACCEL_CORE_FN bool meshAccelRayTriangle(
     }
 
     outT = t;
-    outNormal = det < 0.0f ? tri.normal : vecScale3(tri.normal, -1.0f);
+    Vec3 n = vecNormalize3(vecMake3(
+        e1.y * e2.z - e1.z * e2.y,
+        e1.z * e2.x - e1.x * e2.z,
+        e1.x * e2.y - e1.y * e2.x));
+    if (vecDot3(n, rd) > 0.0f) {
+        n = vecScale3(n, -1.0f);
+    }
+    outNormal = n;
     return true;
 }
 

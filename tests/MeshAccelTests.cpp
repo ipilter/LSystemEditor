@@ -3,6 +3,7 @@
 #include "MeshAccel/MeshAccelScene.h"
 #include "MeshAccel/MeshAccelTypes.h"
 #include "MeshAccel/MeshSceneContent.h"
+#include "Geometry/MathCore.h"
 #include "ScenePrimitive.h"
 
 #include <cstddef>
@@ -209,6 +210,62 @@ void testTwoSphereSceneMesh()
     expectTrue(extentX < maxAllowedExtentX, "TwoSphereSceneTightExtentX");
 }
 
+Vec3 triangleCentroid(const TriangleGpu& tri)
+{
+    return vecScale3(vecAdd3(vecAdd3(tri.v0, tri.v1), tri.v2), 1.0f / 3.0f);
+}
+
+Vec3 orientedTriangleNormal(const TriangleGpu& tri, Vec3 rd)
+{
+    const Vec3 e1 = vecSub3(tri.v1, tri.v0);
+    const Vec3 e2 = vecSub3(tri.v2, tri.v0);
+    Vec3 n = vecNormalize3(vecMake3(
+        e1.y * e2.z - e1.z * e2.y,
+        e1.z * e2.x - e1.x * e2.z,
+        e1.x * e2.y - e1.y * e2.x));
+    if (vecDot3(n, rd) > 0.0f) {
+        n = vecScale3(n, -1.0f);
+    }
+    return n;
+}
+
+void testPrimitiveSphereRadialNormals()
+{
+    auto primitives = makeSinglePrimitive(makeSphere(Vec3{0.0f, 0.0f, 0.0f}, 0.5f));
+    HostMesh mesh{};
+    expectTrue(ManifoldMeshBuilder::buildSceneMesh(primitives, mesh), "PrimitiveSphereNormalMeshBuild");
+
+    MeshAccelScene scene;
+    expectTrue(scene.build(mesh), "PrimitiveSphereNormalSceneBuild");
+
+    constexpr float radialDotMin = 0.85f;
+    bool allRadialAligned = true;
+    bool foundPosX = false;
+
+    for (const TriangleGpu& tri : scene.trianglesHost()) {
+        const Vec3 centroid = triangleCentroid(tri);
+        const float centroidLength = vecLength3(centroid);
+        if (centroidLength <= 1e-6f) {
+            continue;
+        }
+
+        const Vec3 radial = vecScale3(centroid, 1.0f / centroidLength);
+        if (vecDot3(radial, tri.normal) < radialDotMin) {
+            allRadialAligned = false;
+        }
+
+        const Vec3 hitNormal = orientedTriangleNormal(tri, vecScale3(radial, -1.0f));
+        if (centroid.x > 0.2f && std::fabs(centroid.y) < 0.05f && std::fabs(centroid.z) < 0.05f) {
+            if (vecLength3(vecSub3(hitNormal, vecMake3(1.0f, 0.0f, 0.0f))) < 0.2f) {
+                foundPosX = true;
+            }
+        }
+    }
+
+    expectTrue(allRadialAligned, "PrimitiveSphereRadialNormals");
+    expectTrue(foundPosX, "PrimitiveSpherePosXNormal");
+}
+
 } // namespace
 
 void runProceduralMeshTests();
@@ -221,6 +278,7 @@ int main()
     testCappedConeMeshAabb();
     testSingleSphereTightMeshExtent();
     testTwoSphereSceneMesh();
+    testPrimitiveSphereRadialNormals();
     testMeshSceneBuild();
     runProceduralMeshTests();
 

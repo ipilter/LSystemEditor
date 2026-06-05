@@ -198,6 +198,105 @@ void expectSingleFCylinderOutwardNormals()
     expectTrue(foundSideNegX, "single F -X side normal points -X");
 }
 
+Vec3 orientedTriangleNormal(const TriangleGpu& tri, Vec3 rd)
+{
+    const Vec3 e1 = vecSub3(tri.v1, tri.v0);
+    const Vec3 e2 = vecSub3(tri.v2, tri.v0);
+    Vec3 n = vecNormalize3(vecMake3(
+        e1.y * e2.z - e1.z * e2.y,
+        e1.z * e2.x - e1.x * e2.z,
+        e1.x * e2.y - e1.y * e2.x));
+    if (vecDot3(n, rd) > 0.0f) {
+        n = vecScale3(n, -1.0f);
+    }
+    return n;
+}
+
+void expectSphereRadialNormals(const MeshAccelScene& scene, const char* labelPrefix)
+{
+    constexpr float radialDotMin = 0.85f;
+    constexpr float axisNormalTolerance = 0.2f;
+    constexpr float axisCentroidMin = 0.04f;
+    constexpr float axisCrossMax = 0.03f;
+
+    bool foundPosX = false;
+    bool foundNegX = false;
+    bool foundPosY = false;
+    bool foundNegY = false;
+    bool foundPosZ = false;
+    bool foundNegZ = false;
+    bool allRadialAligned = true;
+
+    for (const TriangleGpu& tri : scene.trianglesHost()) {
+        const Vec3 centroid = triangleCentroid(tri);
+        const float centroidLength = vecLength3(centroid);
+        if (centroidLength <= 1e-6f) {
+            continue;
+        }
+
+        const Vec3 radial = vecScale3(centroid, 1.0f / centroidLength);
+        if (vecDot3(radial, tri.normal) < radialDotMin) {
+            allRadialAligned = false;
+        }
+
+        const Vec3 hitNormal = orientedTriangleNormal(tri, vecScale3(radial, -1.0f));
+        const float ax = std::fabs(centroid.y) + std::fabs(centroid.z);
+        const float ay = std::fabs(centroid.x) + std::fabs(centroid.z);
+        const float az = std::fabs(centroid.x) + std::fabs(centroid.y);
+
+        if (centroid.x > axisCentroidMin && ax < axisCrossMax) {
+            if (normalNear(hitNormal, vecMake3(1.0f, 0.0f, 0.0f), axisNormalTolerance)) {
+                foundPosX = true;
+            }
+        }
+        if (centroid.x < -axisCentroidMin && ax < axisCrossMax) {
+            if (normalNear(hitNormal, vecMake3(-1.0f, 0.0f, 0.0f), axisNormalTolerance)) {
+                foundNegX = true;
+            }
+        }
+        if (centroid.y > axisCentroidMin && ay < axisCrossMax) {
+            if (normalNear(hitNormal, vecMake3(0.0f, 1.0f, 0.0f), axisNormalTolerance)) {
+                foundPosY = true;
+            }
+        }
+        if (centroid.y < -axisCentroidMin && ay < axisCrossMax) {
+            if (normalNear(hitNormal, vecMake3(0.0f, -1.0f, 0.0f), axisNormalTolerance)) {
+                foundNegY = true;
+            }
+        }
+        if (centroid.z > axisCentroidMin && az < axisCrossMax) {
+            if (normalNear(hitNormal, vecMake3(0.0f, 0.0f, 1.0f), axisNormalTolerance)) {
+                foundPosZ = true;
+            }
+        }
+        if (centroid.z < -axisCentroidMin && az < axisCrossMax) {
+            if (normalNear(hitNormal, vecMake3(0.0f, 0.0f, -1.0f), axisNormalTolerance)) {
+                foundNegZ = true;
+            }
+        }
+    }
+
+    expectTrue(allRadialAligned, labelPrefix);
+    expectTrue(foundPosX, "sphere +X patch normal points +X");
+    expectTrue(foundNegX, "sphere -X patch normal points -X");
+    expectTrue(foundPosY, "sphere +Y patch normal points +Y");
+    expectTrue(foundNegY, "sphere -Y patch normal points -Y");
+    expectTrue(foundPosZ, "sphere +Z patch normal points +Z");
+    expectTrue(foundNegZ, "sphere -Z patch normal points -Z");
+}
+
+void expectF0SphereOutwardNormals()
+{
+    HostMesh mesh{};
+    expectTrue(
+        ProceduralMeshBuilder::buildHostMesh("F(0)\n", 0, RootTransform{}, mesh),
+        "F(0) sphere normal test build succeeds");
+
+    MeshAccelScene scene;
+    expectTrue(scene.build(mesh), "F(0) sphere normal test mesh accel scene builds");
+    expectSphereRadialNormals(scene, "F(0) sphere radial normals align with centroid");
+}
+
 } // namespace
 
 void runProceduralMeshTests()
@@ -224,6 +323,10 @@ void runProceduralMeshTests()
 
     {
         expectSingleFCylinderOutwardNormals();
+    }
+
+    {
+        expectF0SphereOutwardNormals();
     }
 
     {

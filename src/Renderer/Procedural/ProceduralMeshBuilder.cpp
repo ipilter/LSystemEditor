@@ -54,6 +54,11 @@ bool ProceduralMeshBuilder::buildHostMesh(
         return false;
     }
 
+    assembled = assembled.CalculateNormals(0);
+    if (!isValidManifold(assembled)) {
+        return false;
+    }
+
     outMesh = meshFromManifold(assembled);
     return !outMesh.triangles.empty();
 }
