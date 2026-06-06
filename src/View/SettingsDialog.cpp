@@ -8,6 +8,7 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QPushButton>
+#include <QDoubleSpinBox>
 #include <QSpinBox>
 #include <QVBoxLayout>
 
@@ -15,6 +16,8 @@ namespace {
 
 constexpr int kMinDebounceMs = 0;
 constexpr int kMaxDebounceMs = 2000;
+constexpr float kMinCreaseAngleDeg = 0.0f;
+constexpr float kMaxCreaseAngleDeg = 180.0f;
 
 QString colorButtonStyleSheet(const QColor& color)
 {
@@ -29,6 +32,7 @@ QString colorButtonStyleSheet(const QColor& color)
 SettingsDialog::SettingsDialog(QWidget* parent)
     : QDialog(parent)
     , m_accelBvhColor(AppSettings::instance().accelBvhColor())
+    , m_creaseAngleDeg(AppSettings::instance().creaseAngleDeg())
 {
     setWindowTitle(QStringLiteral("Settings"));
     setModal(true);
@@ -55,6 +59,17 @@ SettingsDialog::SettingsDialog(QWidget* parent)
         AppSettings::instance().debounceMsFor(DebounceElementIds::kMaxSamples));
     formLayout->addRow(QStringLiteral("Samples spin debounce:"), m_maxSamplesSpinDebounceSpinBox);
 
+    m_creaseAngleSpinBox = new QDoubleSpinBox(this);
+    m_creaseAngleSpinBox->setRange(kMinCreaseAngleDeg, kMaxCreaseAngleDeg);
+    m_creaseAngleSpinBox->setDecimals(1);
+    m_creaseAngleSpinBox->setSuffix(QStringLiteral(" °"));
+    m_creaseAngleSpinBox->setToolTip(
+        QStringLiteral(
+            "Edges with a larger angle between adjacent faces stay sharp; "
+            "smaller angles share averaged vertex normals (smooth shading)."));
+    m_creaseAngleSpinBox->setValue(m_creaseAngleDeg);
+    formLayout->addRow(QStringLiteral("Crease angle:"), m_creaseAngleSpinBox);
+
     m_accelBvhColorButton = new QPushButton(this);
     m_accelBvhColorButton->setToolTip(QStringLiteral("Wireframe color for BVH bounds overlay"));
     connect(m_accelBvhColorButton, &QPushButton::clicked, this, [this]() {
@@ -80,6 +95,7 @@ SettingsDialog::SettingsDialog(QWidget* parent)
         AppSettings::instance().setDebounceMs(
             DebounceElementIds::kMaxSamples,
             m_maxSamplesSpinDebounceSpinBox->value());
+        AppSettings::instance().setCreaseAngleDeg(static_cast<float>(m_creaseAngleSpinBox->value()));
         AppSettings::instance().setAccelBvhColor(m_accelBvhColor);
         accept();
     });

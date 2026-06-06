@@ -2,11 +2,14 @@
 
 #include "AppLog.h"
 #include "CameraGpu.h"
+#include "EnvironmentMap.h"
+#include "PathTracerSampleBudget.h"
 #include "MeshAccel/MeshAccelBoundsMesh.h"
 #include "MeshAccel/MeshAccelScene.h"
 #include "MeshAccel/MeshSceneContent.h"
 #include "PathTracerCuda.h"
 #include "QmcGpuResources.h"
+#include "Wavefront/WavefrontGpuResources.h"
 
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
@@ -67,6 +70,11 @@ struct PathTracerDetail::PathTracerImpl
 
     CameraGpu lastSampleCamera{};
     std::mutex lastSampleCameraMutex;
+
+    std::mutex meshSceneMutex;
+
+    WavefrontGpuResources wavefront;
+    EnvironmentMap environmentMap;
 };
 
 namespace {
@@ -513,12 +521,10 @@ bool ensureSampleEvent(PathTracerDetail::PathTracerImpl* impl, QString* outError
 
 bool canTakeSample(const PathTracerDetail::PathTracerImpl* impl)
 {
-    const int maxSamples = impl->maxSamplesPerPixel.load();
-    if (maxSamples == 0) {
-        return true;
-    }
-    const int previewSteps = impl->previewStepsPerLevel.load();
-    return impl->sampleCount.load() < previewSteps + maxSamples;
+    return canTakeSampleAtIteration(
+        impl->sampleCount.load(),
+        impl->previewStepsPerLevel.load(),
+        impl->maxSamplesPerPixel.load());
 }
 
 void checkCudaGlDeviceAffinity()
@@ -584,7 +590,8 @@ bool initRenderParams(PathTracerDetail::PathTracerImpl* impl, cudaStream_t strea
     const float sunColorG = impl->hostRenderParams.sunColorG;
     const float sunColorB = impl->hostRenderParams.sunColorB;
     const float sunDiskSizeDeg = impl->hostRenderParams.sunDiskSizeDeg;
-    const int secondaryBounceCount = impl->hostRenderParams.secondaryBounceCount;
+    const float sunIntensity = impl->hostRenderParams.sunIntensity;
+    const int maxPathDepth = impl->hostRenderParams.maxPathDepth;
 
     impl->hostRenderParams = RenderParamsGpu{};
     impl->hostRenderParams.backgroundR = backgroundR;
@@ -596,7 +603,8 @@ bool initRenderParams(PathTracerDetail::PathTracerImpl* impl, cudaStream_t strea
     impl->hostRenderParams.sunColorG = sunColorG;
     impl->hostRenderParams.sunColorB = sunColorB;
     impl->hostRenderParams.sunDiskSizeDeg = sunDiskSizeDeg;
-    impl->hostRenderParams.secondaryBounceCount = secondaryBounceCount;
+    impl->hostRenderParams.sunIntensity = sunIntensity;
+    impl->hostRenderParams.maxPathDepth = maxPathDepth;
 
     const cudaError_t allocError = cudaMalloc(&impl->d_renderParams, sizeof(RenderParamsGpu));
     if (allocError != cudaSuccess) {
@@ -654,6 +662,7 @@ void releaseMeshScene(PathTracerDetail::PathTracerImpl* impl)
         return;
     }
 
+    std::lock_guard<std::mutex> meshSceneLock(impl->meshSceneMutex);
     freeRenderParams(impl);
     impl->meshScene.release();
     impl->boundsMesh = MeshAccelBoundsMesh{};
@@ -662,6 +671,7 @@ void releaseMeshScene(PathTracerDetail::PathTracerImpl* impl)
 bool buildAndUploadMeshScene(
     PathTracerDetail::PathTracerImpl* impl,
     const std::vector<ProceduralInstance>& proceduralInstances,
+    const MeshSceneBuildParams& meshParams,
     QString* outError)
 {
     if (impl == nullptr || impl->stream == nullptr) {
@@ -671,7 +681,9 @@ bool buildAndUploadMeshScene(
         return false;
     }
 
-    if (!meshSceneBuild(proceduralInstances, impl->meshScene)) {
+    std::lock_guard<std::mutex> meshSceneLock(impl->meshSceneMutex);
+
+    if (!meshSceneBuild(proceduralInstances, impl->meshScene, meshParams)) {
         if (outError != nullptr) {
             *outError = QStringLiteral("Manifold mesh scene build failed");
         }
@@ -709,6 +721,7 @@ PathTracer::~PathTracer()
     unregisterPboResources(m_impl.get());
     freeCameraGpu(m_impl.get());
     freeQmcGpuResources(&m_impl->qmc);
+    freeWavefrontGpuResources(&m_impl->wavefront);
     freeAccumulator(&m_impl->acc);
     releaseMeshScene(m_impl.get());
     destroySampleEvent(m_impl.get());
@@ -726,7 +739,8 @@ bool PathTracer::configure(
     int height,
     uint32_t pbo0,
     uint32_t pbo1,
-    const std::vector<ProceduralInstance>& proceduralInstances)
+    const std::vector<ProceduralInstance>& proceduralInstances,
+    const MeshSceneBuildParams& meshParams)
 {
     if (width <= 0 || height <= 0 || pbo0 == 0 || pbo1 == 0) {
         AppLog::instance().error(QStringLiteral("PathTracer configure: invalid dimensions or PBO ids"));
@@ -740,6 +754,7 @@ bool PathTracer::configure(
     unregisterPboResources(m_impl.get());
     freeCameraGpu(m_impl.get());
     freeQmcGpuResources(&m_impl->qmc);
+    freeWavefrontGpuResources(&m_impl->wavefront);
     freeAccumulator(&m_impl->acc);
     releaseMeshScene(m_impl.get());
 
@@ -800,8 +815,19 @@ bool PathTracer::configure(
         return false;
     }
 
+    freeWavefrontGpuResources(&m_impl->wavefront);
+    if (!initWavefrontGpuResources(&m_impl->wavefront, width, height)) {
+        AppLog::instance().error(QStringLiteral("PathTracer configure: wavefront buffer init failed"));
+        unregisterPboResources(m_impl.get());
+        freeQmcGpuResources(&m_impl->qmc);
+        freeCameraGpu(m_impl.get());
+        freeAccumulator(&m_impl->acc);
+        releaseMeshScene(m_impl.get());
+        return false;
+    }
+
     QString accelError;
-    if (!buildAndUploadMeshScene(m_impl.get(), proceduralInstances, &accelError)) {
+    if (!buildAndUploadMeshScene(m_impl.get(), proceduralInstances, meshParams, &accelError)) {
         AppLog::instance().error(
             QStringLiteral("PathTracer configure: %1").arg(accelError));
         unregisterPboResources(m_impl.get());
@@ -989,6 +1015,21 @@ int PathTracer::currentSampleCount() const
     return m_impl->sampleCount.load();
 }
 
+int PathTracer::sampleBudgetTotalIterations() const
+{
+    return ::sampleBudgetTotalIterations(
+        m_impl->previewStepsPerLevel.load(),
+        m_impl->maxSamplesPerPixel.load());
+}
+
+bool PathTracer::isSampleBudgetExhausted() const
+{
+    return ::isSampleBudgetExhausted(
+        m_impl->sampleCount.load(),
+        m_impl->previewStepsPerLevel.load(),
+        m_impl->maxSamplesPerPixel.load());
+}
+
 void PathTracer::setCamera(const CameraGpu& camera)
 {
     CameraGpu stored = camera;
@@ -1053,9 +1094,34 @@ void PathTracer::setSunSettings(float azimuthDeg, float elevationDeg, const QCol
     }
 }
 
+void PathTracer::setSunIntensity(float intensity)
+{
+    m_impl->hostRenderParams.sunIntensity = intensity > 0.0f ? intensity : 1.0f;
+
+    if (m_impl->stream == nullptr) {
+        return;
+    }
+
+    QString error;
+    if (!uploadRenderParams(m_impl.get(), m_impl->stream, &error)) {
+        AppLog::instance().error(
+            QStringLiteral("PathTracer sun intensity upload failed: %1").arg(error));
+        return;
+    }
+
+    if (m_impl->configured.load()) {
+        resetAccumulation();
+    }
+}
+
+void PathTracer::setMaxPathDepth(int depth)
+{
+    setSecondaryBounceCount(depth);
+}
+
 void PathTracer::setSecondaryBounceCount(int count)
 {
-    m_impl->hostRenderParams.secondaryBounceCount = count;
+    m_impl->hostRenderParams.maxPathDepth = count < 1 ? 1 : count;
 
     if (m_impl->stream == nullptr) {
         return;
@@ -1068,6 +1134,36 @@ void PathTracer::setSecondaryBounceCount(int count)
         return;
     }
 
+    if (m_impl->configured.load()) {
+        resetAccumulation();
+    }
+}
+
+bool PathTracer::loadEnvironmentMap(const QString& path)
+{
+    QString error;
+    if (!m_impl->environmentMap.loadFromHdr(path, &error)) {
+        AppLog::instance().error(error);
+        return false;
+    }
+
+    if (m_impl->stream != nullptr && !m_impl->environmentMap.upload(m_impl->stream)) {
+        AppLog::instance().error(QStringLiteral("PathTracer environment map upload failed"));
+        return false;
+    }
+
+    if (m_impl->configured.load()) {
+        resetAccumulation();
+    }
+    return true;
+}
+
+void PathTracer::clearEnvironmentMap()
+{
+    m_impl->environmentMap.clear();
+    if (m_impl->stream != nullptr) {
+        m_impl->environmentMap.upload(m_impl->stream);
+    }
     if (m_impl->configured.load()) {
         resetAccumulation();
     }
@@ -1112,14 +1208,16 @@ const MeshAccelBoundsMesh& PathTracer::meshBoundsMesh() const
     return m_impl->boundsMesh;
 }
 
-bool PathTracer::rebuildMeshScene(const std::vector<ProceduralInstance>& proceduralInstances)
+bool PathTracer::rebuildMeshScene(
+    const std::vector<ProceduralInstance>& proceduralInstances,
+    const MeshSceneBuildParams& meshParams)
 {
     if (!m_impl->configured.load()) {
         return false;
     }
 
     QString error;
-    if (!buildAndUploadMeshScene(m_impl.get(), proceduralInstances, &error)) {
+    if (!buildAndUploadMeshScene(m_impl.get(), proceduralInstances, meshParams, &error)) {
         AppLog::instance().error(QStringLiteral("PathTracer rebuild mesh scene: %1").arg(error));
         return false;
     }
@@ -1142,6 +1240,9 @@ void PathTracer::notifyWorker()
 
 void PathTracer::renderLoop()
 {
+    cudaSetDevice(0);
+    cudaFree(nullptr);
+
     while (m_impl->running.load()) {
         if (m_impl->resetRequested.exchange(false)) {
             if (m_impl->acc.d_buffer != nullptr && m_impl->acc.d_samples != nullptr) {
@@ -1198,47 +1299,64 @@ void PathTracer::renderLoop()
             continue;
         }
 
-        if (!m_impl->meshScene.upload(m_impl->stream)) {
-            AppLog::instance().error(QStringLiteral("PathTracer mesh scene upload failed"));
-            continue;
-        }
+        const MeshAccelSceneGpu* deviceScene = nullptr;
+        {
+            std::lock_guard<std::mutex> meshSceneLock(m_impl->meshSceneMutex);
+            if (!m_impl->meshScene.upload(m_impl->stream)) {
+                AppLog::instance().error(QStringLiteral("PathTracer mesh scene upload failed"));
+                continue;
+            }
 
-        const CameraGpu sampleCamera = sampleCameraForFrame(m_impl.get());
-        storeLastSampleCamera(m_impl.get(), sampleCamera);
+            deviceScene = m_impl->meshScene.deviceScene();
+            if (deviceScene == nullptr) {
+                AppLog::instance().error(QStringLiteral("PathTracer mesh scene device pointer is null"));
+                continue;
+            }
 
-        if (!pathTracerSample(
-                m_impl->acc.d_buffer,
-                m_impl->acc.d_samples,
-                m_impl->acc.width,
-                m_impl->acc.height,
-                stride,
-                m_impl->d_camera,
-                m_impl->meshScene.deviceScene(),
-                m_impl->d_renderParams,
-                static_cast<int>(m_impl->visualMode.load()),
-                m_impl->qmc.sobolMatrices,
-                m_impl->qmc.pixelScramble,
-                kMaxSobolDimensions,
-                m_impl->stream)) {
-            AppLog::instance().error(QStringLiteral("PathTracer sample kernel launch failed"));
-            continue;
-        }
+            const CameraGpu sampleCamera = sampleCameraForFrame(m_impl.get());
+            storeLastSampleCamera(m_impl.get(), sampleCamera);
 
-        m_impl->sampleCount.fetch_add(1);
+            if (!m_impl->environmentMap.upload(m_impl->stream)) {
+                AppLog::instance().error(QStringLiteral("PathTracer environment map upload failed"));
+                continue;
+            }
 
-        const cudaError_t recordError =
-            cudaEventRecord(m_impl->sampleCompleteEvent, m_impl->stream);
-        if (recordError != cudaSuccess) {
-            AppLog::instance().error(
-                QStringLiteral("CUDA event record failed: %1").arg(cudaErrorString(recordError)));
-            continue;
-        }
+            if (!pathTracerSample(
+                    m_impl->acc.d_buffer,
+                    m_impl->acc.d_samples,
+                    m_impl->acc.width,
+                    m_impl->acc.height,
+                    stride,
+                    m_impl->d_camera,
+                    deviceScene,
+                    m_impl->d_renderParams,
+                    m_impl->environmentMap.deviceMap(),
+                    static_cast<int>(m_impl->visualMode.load()),
+                    m_impl->qmc.sobolMatrices,
+                    m_impl->qmc.pixelScramble,
+                    kMaxSobolDimensions,
+                    &m_impl->wavefront,
+                    m_impl->stream)) {
+                AppLog::instance().error(QStringLiteral("PathTracer sample kernel launch failed"));
+                continue;
+            }
 
-        const cudaError_t syncError = cudaStreamSynchronize(m_impl->stream);
-        if (syncError != cudaSuccess) {
-            AppLog::instance().error(
-                QStringLiteral("CUDA stream sync after sample failed: %1").arg(cudaErrorString(syncError)));
-            continue;
+            m_impl->sampleCount.fetch_add(1);
+
+            const cudaError_t recordError =
+                cudaEventRecord(m_impl->sampleCompleteEvent, m_impl->stream);
+            if (recordError != cudaSuccess) {
+                AppLog::instance().error(
+                    QStringLiteral("CUDA event record failed: %1").arg(cudaErrorString(recordError)));
+                continue;
+            }
+
+            const cudaError_t syncError = cudaStreamSynchronize(m_impl->stream);
+            if (syncError != cudaSuccess) {
+                AppLog::instance().error(
+                    QStringLiteral("CUDA stream sync after sample failed: %1").arg(cudaErrorString(syncError)));
+                continue;
+            }
         }
 
         FrameReadyCallback callback;

@@ -12,6 +12,7 @@ bool meshSceneBuild(
 
     ProceduralBuildParams proceduralParams{};
     proceduralParams.circularSegments = params.circularSegments;
+    proceduralParams.creaseAngleDeg = params.creaseAngleDeg;
 
     for (const ProceduralInstance& instance : proceduralInstances) {
         HostMesh proceduralMesh{};

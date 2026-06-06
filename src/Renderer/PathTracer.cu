@@ -1,8 +1,9 @@
 #include "CameraDevice.cuh"
 #include "MeshAccelScene.cuh"
+#include "PathIntegratorCore.h"
 #include "QmcSampler.cuh"
 #include "RenderVisualCore.h"
-#include "ShadingCore.h"
+#include "Wavefront/WavefrontPathTracer.h"
 
 #include <cuda_runtime.h>
 #include <vector_types.h>
@@ -34,6 +35,7 @@ __device__ void samplePixel(
     const CameraGpu* camera,
     const MeshAccelSceneGpu* scene,
     const RenderParamsGpu* renderParams,
+    const EnvironmentMapGpu* environmentMap,
     const uint32_t* sobolMatrices,
     const unsigned int* pixelScramble,
     int sobolDimensionCount,
@@ -63,24 +65,30 @@ __device__ void samplePixel(
 
     const Vec3 ro = toVec3(roFloat);
     const Vec3 rd = toVec3(rdFloat);
-    const MeshHit hit =
-        meshAccelTraceRay(ro, rd, scene, 0.0f, ShadingCoreDetail::kRayTMax);
 
     Vec3 rgbVec{};
     switch (visualMode) {
     case static_cast<int>(RenderDebugVisualMode::Off):
-        rgbVec = shadeOffMode(hit, ro, rd, scene, renderParams, ctx, sobolMatrices, sobolDimensionCount);
+        rgbVec = tracePath(ro, rd, scene, renderParams, environmentMap, ctx, sobolMatrices, sobolDimensionCount);
         break;
-    case static_cast<int>(RenderDebugVisualMode::Normals):
-    default:
+    case static_cast<int>(RenderDebugVisualMode::Normals): {
+        const MeshHit hit =
+            meshAccelTraceRay(ro, rd, scene, 0.0f, PathIntegratorDetail::kRayTMax);
         rgbVec = normalToColor(hit.normal, hit.hit, renderParams);
         break;
     }
+    default: {
+        const MeshHit hit =
+            meshAccelTraceRay(ro, rd, scene, 0.0f, PathIntegratorDetail::kRayTMax);
+        rgbVec = normalToColor(hit.normal, hit.hit, renderParams);
+        break;
+    }
+    }
 
     const float3 rgb = toFloat3(rgbVec);
+    const float4 prev = acc[idx];
     const float4 sample = make_float4(rgb.x, rgb.y, rgb.z, 1.0f);
 
-    const float4 prev = acc[idx];
     const float invN = 1.0f / static_cast<float>(n + 1);
     acc[idx] = make_float4(
         (prev.x * static_cast<float>(n) + sample.x) * invN,
@@ -96,6 +104,7 @@ __global__ void sampleKernel(
     const CameraGpu* camera,
     const MeshAccelSceneGpu* scene,
     const RenderParamsGpu* renderParams,
+    const EnvironmentMapGpu* environmentMap,
     const uint32_t* sobolMatrices,
     const unsigned int* pixelScramble,
     int sobolDimensionCount,
@@ -127,6 +136,7 @@ __global__ void sampleKernel(
         camera,
         scene,
         renderParams,
+        environmentMap,
         sobolMatrices,
         pixelScramble,
         sobolDimensionCount,
@@ -211,12 +221,33 @@ bool pathTracerSample(
     const CameraGpu* d_camera,
     const MeshAccelSceneGpu* d_scene,
     const RenderParamsGpu* d_renderParams,
+    const EnvironmentMapGpu* d_environmentMap,
     int visualMode,
     const uint32_t* sobolMatrices,
     const unsigned int* pixelScramble,
     int sobolDimensionCount,
+    WavefrontGpuResources* wavefront,
     cudaStream_t stream)
 {
+    if (wavefront != nullptr) {
+        return pathTracerSampleWavefront(
+            d_buffer,
+            d_samples,
+            width,
+            height,
+            stride,
+            d_camera,
+            d_scene,
+            d_renderParams,
+            d_environmentMap,
+            visualMode,
+            sobolMatrices,
+            pixelScramble,
+            sobolDimensionCount,
+            wavefront,
+            stream);
+    }
+
     if (d_buffer == nullptr || d_samples == nullptr || d_camera == nullptr || d_scene == nullptr ||
         d_renderParams == nullptr || sobolMatrices == nullptr || pixelScramble == nullptr || width <= 0 ||
         height <= 0 || sobolDimensionCount <= 0) {
@@ -233,6 +264,7 @@ bool pathTracerSample(
         d_camera,
         d_scene,
         d_renderParams,
+        d_environmentMap,
         sobolMatrices,
         pixelScramble,
         sobolDimensionCount,

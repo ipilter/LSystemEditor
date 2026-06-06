@@ -56,6 +56,9 @@ public:
     QColor accelBvhColor() const;
     void setAccelBvhColor(const QColor& color);
 
+    float creaseAngleDeg() const;
+    void setCreaseAngleDeg(float value);
+
     const std::vector<ProceduralInstance>& proceduralInstances() const;
     void addProceduralInstance(ProceduralInstance instance);
 
@@ -84,19 +87,21 @@ private:
     static float clampSunElevation(float value);
     static float clampSunDiskSize(float value);
     static int clampSecondaryBounceCount(int value);
+    static float clampCreaseAngleDeg(float value);
 
     QColor m_clearColor;
     QSize m_renderSize;
     int m_maxSamplesPerPixel = 8;
     int m_previewStepsPerLevel = 2;
     RenderDebugVisualMode m_debugVisualMode = RenderDebugVisualMode::Off;
-    float m_sunAzimuthDeg = 135.0f;
+    float m_sunAzimuthDeg = 15.0f;
     float m_sunElevationDeg = 45.0f;
     QColor m_sunColor = QColor(255, 245, 230);
     float m_sunDiskSizeDeg = 0.53f;
-    int m_secondaryBounceCount = 1;
+    int m_secondaryBounceCount = 8;
     MeshAccelBoundsOverlayMode m_boundsOverlayMode = MeshAccelBoundsOverlayMode::Off;
     QColor m_accelBvhColor = QColor(230, 200, 0);
+    float m_creaseAngleDeg = 50.0f;
     std::vector<ProceduralInstance> m_proceduralInstances;
     GLuint m_pboIds[bufferCount] = {0, 0};
 };

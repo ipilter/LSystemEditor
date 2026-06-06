@@ -11,6 +11,8 @@ class QPlainTextEdit;
 class QPushButton;
 class QSpinBox;
 
+enum class RenderAccumulationState;
+
 class MainView : public QWidget
 {
     Q_OBJECT
@@ -31,6 +33,7 @@ public:
     QPushButton* sunColorButton() const;
     QDoubleSpinBox* sunDiskSizeSpinBox() const;
     QSpinBox* secondaryBounceSpinBox() const;
+    QPushButton* loadEnvironmentButton() const;
     QPushButton* startButton() const;
     QPushButton* stopButton() const;
     QPushButton* settingsButton() const;
@@ -39,6 +42,7 @@ public:
     QSpinBox* lsystemIterationsSpinBox() const;
 
     void setIteration(int value);
+    void setRenderState(RenderAccumulationState state, int sampleCount, int budgetTotal);
 
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
@@ -60,7 +64,9 @@ private:
     QPushButton* m_sunColorButton = nullptr;
     QDoubleSpinBox* m_sunDiskSizeSpinBox = nullptr;
     QSpinBox* m_secondaryBounceSpinBox = nullptr;
+    QPushButton* m_loadEnvironmentButton = nullptr;
     QLabel* m_iterationLabel = nullptr;
+    QLabel* m_renderStateLabel = nullptr;
     QPushButton* m_startButton = nullptr;
     QPushButton* m_stopButton = nullptr;
     QPushButton* m_settingsButton = nullptr;

@@ -29,6 +29,10 @@ constexpr const char* kClearColorGreenKey = "clearColorGreen";
 constexpr const char* kClearColorBlueKey = "clearColorBlue";
 constexpr const char* kMaxSamplesPerPixelKey = "maxSamplesPerPixel";
 constexpr const char* kPreviewStepsPerLevelKey = "previewStepsPerLevel";
+constexpr float kDefaultCreaseAngleDeg = 50.0f;
+constexpr float kMinCreaseAngleDeg = 0.0f;
+constexpr float kMaxCreaseAngleDeg = 180.0f;
+constexpr const char* kCreaseAngleDegKey = "creaseAngleDeg";
 constexpr const char* kAccelBvhColorRedKey = "accelBvhColorRed";
 constexpr const char* kAccelBvhColorGreenKey = "accelBvhColorGreen";
 constexpr const char* kAccelBvhColorBlueKey = "accelBvhColorBlue";
@@ -188,6 +192,33 @@ void AppSettings::setAccelBvhColor(const QColor& color)
     save();
 }
 
+float AppSettings::creaseAngleDeg() const
+{
+    return m_creaseAngleDeg;
+}
+
+void AppSettings::setCreaseAngleDeg(float value)
+{
+    const float clamped = clampCreaseAngleDeg(value);
+    if (m_creaseAngleDeg == clamped) {
+        return;
+    }
+
+    m_creaseAngleDeg = clamped;
+    save();
+}
+
+float AppSettings::clampCreaseAngleDeg(float value)
+{
+    if (value < kMinCreaseAngleDeg) {
+        return kMinCreaseAngleDeg;
+    }
+    if (value > kMaxCreaseAngleDeg) {
+        return kMaxCreaseAngleDeg;
+    }
+    return value;
+}
+
 int AppSettings::clampDebounceMs(int value)
 {
     if (value < kMinDebounceMs) {
@@ -341,6 +372,15 @@ void AppSettings::load()
             m_accelBvhColor);
     }
 
+    const QVariant creaseAngleValue = settings.value(kCreaseAngleDegKey);
+    if (creaseAngleValue.isValid()) {
+        bool ok = false;
+        const float creaseAngle = static_cast<float>(creaseAngleValue.toDouble(&ok));
+        if (ok) {
+            m_creaseAngleDeg = clampCreaseAngleDeg(creaseAngle);
+        }
+    }
+
 }
 
 void AppSettings::save()
@@ -364,5 +404,6 @@ void AppSettings::save()
     settings.setValue(kAccelBvhColorRedKey, m_accelBvhColor.red());
     settings.setValue(kAccelBvhColorGreenKey, m_accelBvhColor.green());
     settings.setValue(kAccelBvhColorBlueKey, m_accelBvhColor.blue());
+    settings.setValue(kCreaseAngleDegKey, static_cast<double>(m_creaseAngleDeg));
     settings.sync();
 }

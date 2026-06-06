@@ -11,6 +11,9 @@ struct HostTriangle
     Vec3 v0{};
     Vec3 v1{};
     Vec3 v2{};
+    Vec3 n0{};
+    Vec3 n1{};
+    Vec3 n2{};
     uint32_t materialIndex = 0;
 };
 

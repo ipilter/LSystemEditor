@@ -3,6 +3,7 @@
 #include "AppLog.h"
 #include "AppSettings.h"
 #include "OpenGLViewportWidget.h"
+#include "RenderAccumulationState.h"
 
 #include <QComboBox>
 #include <QDoubleSpinBox>
@@ -33,7 +34,7 @@ constexpr int kDefaultPreviewStepsPerLevel = 1;
 constexpr double kDefaultSunAzimuth = 20.0;
 constexpr double kDefaultSunElevation = 45.0;
 constexpr double kDefaultSunDiskSize = 0.53;
-constexpr int kDefaultSecondaryBounceCount = 1;
+constexpr int kDefaultMaxPathDepth = 8;
 constexpr int kLogMaxBlockCount = 500;
 constexpr int kControlPanelMinWidth = 160;
 constexpr int kControlPanelInitialWidth = 220;
@@ -159,13 +160,17 @@ MainView::MainView(QWidget* parent)
     renderLayout->addLayout(sunDiskRow);
 
     auto* secondaryBounceRow = new QHBoxLayout();
-    secondaryBounceRow->addWidget(new QLabel(QStringLiteral("Sec. bounces:"), renderGroup));
+    secondaryBounceRow->addWidget(new QLabel(QStringLiteral("Max depth:"), renderGroup));
     m_secondaryBounceSpinBox = new QSpinBox(renderGroup);
-    m_secondaryBounceSpinBox->setRange(0, 8);
-    m_secondaryBounceSpinBox->setValue(kDefaultSecondaryBounceCount);
-    m_secondaryBounceSpinBox->setToolTip(QStringLiteral("Number of secondary light bounces"));
+    m_secondaryBounceSpinBox->setRange(1, 12);
+    m_secondaryBounceSpinBox->setValue(kDefaultMaxPathDepth);
+    m_secondaryBounceSpinBox->setToolTip(QStringLiteral("Maximum path depth before Russian roulette"));
     secondaryBounceRow->addWidget(m_secondaryBounceSpinBox);
     renderLayout->addLayout(secondaryBounceRow);
+
+    m_loadEnvironmentButton = new QPushButton(QStringLiteral("Load HDR..."), renderGroup);
+    m_loadEnvironmentButton->setToolTip(QStringLiteral("Load an HDR environment map for image-based lighting"));
+    renderLayout->addWidget(m_loadEnvironmentButton);
 
     auto* boundsOverlayRow = new QHBoxLayout();
     boundsOverlayRow->addWidget(new QLabel(QStringLiteral("Bounds:"), renderGroup));
@@ -184,6 +189,15 @@ MainView::MainView(QWidget* parent)
     iterationRow->addWidget(m_iterationLabel, 1);
     renderLayout->addLayout(iterationRow);
 
+    auto* stateRow = new QHBoxLayout();
+    stateRow->addWidget(new QLabel(QStringLiteral("Status:"), renderGroup));
+    m_renderStateLabel = new QLabel(renderAccumulationStateLabel(RenderAccumulationState::Stopped), renderGroup);
+    m_renderStateLabel->setToolTip(
+        QStringLiteral("Accumulating: adding samples. Budget reached: increase Samples or set 0 for unlimited. "
+                       "Stopped: press Start to resume (resets accumulation)."));
+    stateRow->addWidget(m_renderStateLabel, 1);
+    renderLayout->addLayout(stateRow);
+
     auto* backgroundRow = new QHBoxLayout();
     backgroundRow->addWidget(new QLabel(QStringLiteral("Background:"), renderGroup));
     m_colorButton = new QPushButton(renderGroup);
@@ -195,7 +209,10 @@ MainView::MainView(QWidget* parent)
 
     auto* renderControlRow = new QHBoxLayout();
     m_startButton = new QPushButton(QStringLiteral("Start"), renderGroup);
+    m_startButton->setToolTip(
+        QStringLiteral("Restart rendering and reset accumulated samples to zero."));
     m_stopButton = new QPushButton(QStringLiteral("Stop"), renderGroup);
+    m_stopButton->setToolTip(QStringLiteral("Pause the render worker. Increase Samples to continue without pressing Start."));
     renderControlRow->addWidget(m_startButton);
     renderControlRow->addWidget(m_stopButton);
     renderLayout->addLayout(renderControlRow);
@@ -335,6 +352,11 @@ QSpinBox* MainView::secondaryBounceSpinBox() const
     return m_secondaryBounceSpinBox;
 }
 
+QPushButton* MainView::loadEnvironmentButton() const
+{
+    return m_loadEnvironmentButton;
+}
+
 QPushButton* MainView::startButton() const
 {
     return m_startButton;
@@ -370,6 +392,24 @@ void MainView::setIteration(int value)
     if (m_iterationLabel != nullptr) {
         m_iterationLabel->setText(QString::number(value));
     }
+}
+
+void MainView::setRenderState(RenderAccumulationState state, int sampleCount, int budgetTotal)
+{
+    Q_UNUSED(sampleCount);
+
+    if (m_renderStateLabel == nullptr) {
+        return;
+    }
+
+    QString text = renderAccumulationStateLabel(state);
+    if (budgetTotal >= 0 && state == RenderAccumulationState::BudgetReached) {
+        text += QStringLiteral(" (%1/%2)").arg(sampleCount).arg(budgetTotal);
+    } else if (budgetTotal >= 0 && state == RenderAccumulationState::Accumulating) {
+        text += QStringLiteral(" (%1/%2)").arg(sampleCount).arg(budgetTotal);
+    }
+
+    m_renderStateLabel->setText(text);
 }
 
 bool MainView::eventFilter(QObject* watched, QEvent* event)

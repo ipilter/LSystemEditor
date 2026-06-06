@@ -1,11 +1,14 @@
 #pragma once
 
 #include "Camera3D.h"
+#include "QuadViewCamera2D.h"
 #include "PathTracer.h"
+#include "RenderAccumulationState.h"
 #include "MeshAccelBoundsOverlay.h"
 #include "OriginGizmoOverlay.h"
 
 #include <QColor>
+#include <QString>
 #include <QOpenGLFunctions_4_5_Core>
 #include <QOpenGLWidget>
 #include <QPoint>
@@ -28,9 +31,12 @@ public:
 
     void restartRender();
     void pauseRender();
+    bool loadEnvironmentMap(const QString& path);
+    void clearEnvironmentMap();
 
 signals:
     void iterationChanged(int sampleCount);
+    void renderStateChanged(RenderAccumulationState state, int sampleCount, int budgetTotal);
 
 protected:
     void initializeGL() override;
@@ -39,6 +45,7 @@ protected:
     void mousePressEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;
+    void wheelEvent(QWheelEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;
 
 private slots:
@@ -54,17 +61,21 @@ private:
     void onCameraChanged();
     void rebuildBoundsOverlay();
     void drawSceneOverlays();
+    void ensureRenderWorkerRunning();
+    void emitRenderState();
     GLuint compileShader(GLenum type, const char* source);
     GLuint linkProgram(GLuint vertexShader, GLuint fragmentShader);
 
     SceneModel* m_model = nullptr;
     PathTracer m_pathTracer;
     Camera3D m_camera;
+    QuadViewCamera2D m_quadView;
     MeshAccelBoundsOverlay m_boundsOverlay;
     OriginGizmoOverlay m_originGizmo;
 
     QColor m_clearColor;
     bool m_looking = false;
+    bool m_quadPanning = false;
     QPoint m_lastMousePos;
 
     GLuint m_pbos[2] = {0, 0};

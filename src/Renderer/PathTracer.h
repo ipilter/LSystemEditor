@@ -2,7 +2,9 @@
 
 #include "CameraGpu.h"
 #include "Geometry/GeometryTypes.h"
+#include "RenderAccumulationState.h"
 #include "MeshAccel/MeshAccelBoundsMesh.h"
+#include "MeshAccel/MeshSceneContent.h"
 #include "Procedural/ProceduralTypes.h"
 
 #include <QColor>
@@ -40,7 +42,8 @@ public:
         int height,
         uint32_t pbo0,
         uint32_t pbo1,
-        const std::vector<ProceduralInstance>& proceduralInstances = {});
+        const std::vector<ProceduralInstance>& proceduralInstances = {},
+        const MeshSceneBuildParams& meshParams = {});
 
     void start();
     void stop();
@@ -64,6 +67,9 @@ public:
 
     int currentSampleCount() const;
 
+    int sampleBudgetTotalIterations() const;
+    bool isSampleBudgetExhausted() const;
+
     void setCamera(const CameraGpu& camera);
 
     CameraGpu lastSampleCamera() const;
@@ -72,14 +78,21 @@ public:
     RenderDebugVisualMode visualMode() const;
 
     void setSunSettings(float azimuthDeg, float elevationDeg, const QColor& color, float diskSizeDeg);
+    void setSunIntensity(float intensity);
+    void setMaxPathDepth(int depth);
     void setSecondaryBounceCount(int count);
+
+    bool loadEnvironmentMap(const QString& path);
+    void clearEnvironmentMap();
 
     void setClearColor(const QColor& color);
 
     void rebuildMeshBoundsMesh(const QColor& boundsColor);
     const MeshAccelBoundsMesh& meshBoundsMesh() const;
 
-    bool rebuildMeshScene(const std::vector<ProceduralInstance>& proceduralInstances = {});
+    bool rebuildMeshScene(
+        const std::vector<ProceduralInstance>& proceduralInstances = {},
+        const MeshSceneBuildParams& meshParams = {});
 
 private:
     void renderLoop();

@@ -141,11 +141,40 @@ bool normalNear(Vec3 actual, Vec3 expected, float tolerance)
     return vecLength3(vecSub3(actual, expected)) <= tolerance;
 }
 
+Vec3 interpolatedTriangleNormal(const TriangleGpu& tri, float u, float v)
+{
+    return vecNormalize3(vecAdd3(
+        vecAdd3(vecScale3(tri.n0, 1.0f - u - v), vecScale3(tri.n1, u)),
+        vecScale3(tri.n2, v)));
+}
+
+Vec3 centroidInterpolatedNormal(const TriangleGpu& tri)
+{
+    return interpolatedTriangleNormal(tri, 1.0f / 3.0f, 1.0f / 3.0f);
+}
+
+bool cornerNormalsEqual(const TriangleGpu& tri, float tolerance)
+{
+    return normalNear(tri.n0, tri.n1, tolerance) && normalNear(tri.n1, tri.n2, tolerance);
+}
+
+Vec3 horizontalRadialNormal(Vec3 centroid)
+{
+    const float length = vecLength3(vecMake3(centroid.x, centroid.y, 0.0f));
+    if (length <= 1e-6f) {
+        return vecMake3(0.0f, 0.0f, 0.0f);
+    }
+    return vecScale3(vecMake3(centroid.x, centroid.y, 0.0f), 1.0f / length);
+}
+
 void expectSingleFCylinderOutwardNormals()
 {
+    ProceduralBuildParams buildParams{};
+    buildParams.creaseAngleDeg = 50.0f;
+
     HostMesh mesh{};
     expectTrue(
-        ProceduralMeshBuilder::buildHostMesh("F\n", 0, RootTransform{}, mesh),
+        ProceduralMeshBuilder::buildHostMesh("F\n", 0, RootTransform{}, mesh, buildParams),
         "single F normal test build succeeds");
 
     MeshAccelScene scene;
@@ -153,20 +182,26 @@ void expectSingleFCylinderOutwardNormals()
 
     bool foundStartCap = false;
     bool foundEndCap = false;
-    bool foundSidePosY = false;
-    bool foundSideNegX = false;
+    bool foundSmoothSide = false;
+    bool foundFlatCapNormals = false;
+    bool foundSmoothSideCornerNormals = false;
 
     constexpr float normalTolerance = 0.15f;
     constexpr float capCentroidTolerance = 0.06f;
     constexpr float sideCentroidTolerance = 0.04f;
+    constexpr float radialDotMin = 0.85f;
+    constexpr float cornerNormalTolerance = 0.05f;
 
     for (const TriangleGpu& tri : scene.trianglesHost()) {
         const Vec3 centroid = triangleCentroid(tri);
-        const Vec3 normal = tri.normal;
+        const Vec3 normal = centroidInterpolatedNormal(tri);
 
         if (centroid.z > -capCentroidTolerance && std::fabs(centroid.x) < 0.15f && std::fabs(centroid.y) < 0.15f) {
             if (normalNear(normal, vecMake3(0.0f, 0.0f, 1.0f), normalTolerance)) {
                 foundStartCap = true;
+            }
+            if (cornerNormalsEqual(tri, cornerNormalTolerance)) {
+                foundFlatCapNormals = true;
             }
         }
 
@@ -175,37 +210,32 @@ void expectSingleFCylinderOutwardNormals()
             if (normalNear(normal, vecMake3(0.0f, 0.0f, -1.0f), normalTolerance)) {
                 foundEndCap = true;
             }
-        }
-
-        if (centroid.y > 0.05f && std::fabs(centroid.x) < sideCentroidTolerance && centroid.z <= 0.0f
-            && centroid.z >= -0.5f) {
-            if (normalNear(normal, vecMake3(0.0f, 1.0f, 0.0f), normalTolerance)) {
-                foundSidePosY = true;
+            if (cornerNormalsEqual(tri, cornerNormalTolerance)) {
+                foundFlatCapNormals = true;
             }
         }
 
-        if (centroid.x < -0.05f && std::fabs(centroid.y) < sideCentroidTolerance && centroid.z <= 0.0f
-            && centroid.z >= -0.5f) {
-            if (normalNear(normal, vecMake3(-1.0f, 0.0f, 0.0f), normalTolerance)) {
-                foundSideNegX = true;
+        const Vec3 radial = horizontalRadialNormal(centroid);
+        if (vecLength3(radial) > 0.5f && centroid.z <= 0.0f && centroid.z >= -0.5f) {
+            if (vecDot3(normal, radial) > radialDotMin) {
+                foundSmoothSide = true;
+            }
+            if (!cornerNormalsEqual(tri, cornerNormalTolerance)) {
+                foundSmoothSideCornerNormals = true;
             }
         }
     }
 
     expectTrue(foundStartCap, "single F start cap normal points +Z");
     expectTrue(foundEndCap, "single F end cap normal points -Z");
-    expectTrue(foundSidePosY, "single F +Y side normal points +Y");
-    expectTrue(foundSideNegX, "single F -X side normal points -X");
+    expectTrue(foundSmoothSide, "single F side normal aligns with radial direction");
+    expectTrue(foundFlatCapNormals, "single F cap triangles use flat corner normals");
+    expectTrue(foundSmoothSideCornerNormals, "single F side triangles use smooth corner normals");
 }
 
 Vec3 orientedTriangleNormal(const TriangleGpu& tri, Vec3 rd)
 {
-    const Vec3 e1 = vecSub3(tri.v1, tri.v0);
-    const Vec3 e2 = vecSub3(tri.v2, tri.v0);
-    Vec3 n = vecNormalize3(vecMake3(
-        e1.y * e2.z - e1.z * e2.y,
-        e1.z * e2.x - e1.x * e2.z,
-        e1.x * e2.y - e1.y * e2.x));
+    Vec3 n = centroidInterpolatedNormal(tri);
     if (vecDot3(n, rd) > 0.0f) {
         n = vecScale3(n, -1.0f);
     }
@@ -235,7 +265,7 @@ void expectSphereRadialNormals(const MeshAccelScene& scene, const char* labelPre
         }
 
         const Vec3 radial = vecScale3(centroid, 1.0f / centroidLength);
-        if (vecDot3(radial, tri.normal) < radialDotMin) {
+        if (vecDot3(radial, centroidInterpolatedNormal(tri)) < radialDotMin) {
             allRadialAligned = false;
         }
 

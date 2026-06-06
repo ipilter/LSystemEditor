@@ -1,13 +1,18 @@
 #include "OpenGLViewportWidget.h"
 
 #include "AppLog.h"
+#include "MeshAccel/MeshSceneContent.h"
 #include "SceneModel.h"
 
 #include <QKeyEvent>
 #include <QMetaObject>
 #include <QMouseEvent>
 #include <QSurfaceFormat>
+#include <QWheelEvent>
 
+#include <glm/gtc/type_ptr.hpp>
+
+#include <cmath>
 #include <utility>
 
 namespace {
@@ -16,13 +21,14 @@ constexpr const char* kVertexShader = R"(#version 460 core
 layout(location = 0) in vec2 aPos;
 layout(location = 1) in vec2 aTexCoord;
 
+uniform mat4 uViewProj;
 uniform vec2 uQuadScale;
 
 out vec2 vTexCoord;
 
 void main()
 {
-    gl_Position = vec4(aPos * uQuadScale, 0.0, 1.0);
+    gl_Position = uViewProj * vec4(aPos * uQuadScale, 0.0, 1.0);
     vTexCoord = aTexCoord;
 }
 )";
@@ -54,6 +60,7 @@ constexpr unsigned int kQuadIndices[] = {
 
 constexpr float kMoveSpeed = 0.05f;
 constexpr float kMouseSensitivity = 0.15f;
+constexpr float kWheelZoomBase = 1.001f;
 
 std::pair<float, float> aspectFitNdcScale(int widgetW, int widgetH, int renderW, int renderH)
 {
@@ -93,6 +100,15 @@ void letterboxViewportRect(int widgetW, int widgetH, int renderW, int renderH, i
         outX = 0;
         outY = (widgetH - outH) / 2;
     }
+}
+
+MeshSceneBuildParams meshSceneBuildParamsForModel(const SceneModel* model)
+{
+    MeshSceneBuildParams params{};
+    if (model != nullptr) {
+        params.creaseAngleDeg = model->creaseAngleDeg();
+    }
+    return params;
 }
 
 } // namespace
@@ -172,18 +188,30 @@ void OpenGLViewportWidget::setSceneModel(SceneModel* model)
         const int current = m_pathTracer.currentSampleCount();
         m_pathTracer.setMaxSamplesPerPixel(max);
 
-        if (m_renderPaused || max == 0) {
+        if (m_renderPaused) {
+            emitRenderState();
+            return;
+        }
+
+        if (max == 0) {
+            ensureRenderWorkerRunning();
+            emitRenderState();
             return;
         }
 
         const int previewSteps = m_model->previewStepsPerLevel();
         if (current >= previewSteps + max) {
             restartRender();
+            return;
         }
+
+        ensureRenderWorkerRunning();
+        emitRenderState();
     });
 
     connect(m_model, &SceneModel::previewStepsPerLevelChanged, this, [this](int steps) {
         m_pathTracer.setPreviewStepsPerLevel(steps);
+        emitRenderState();
     });
 
     connect(m_model, &SceneModel::debugVisualModeChanged, this, [this](RenderDebugVisualMode mode) {
@@ -216,7 +244,8 @@ void OpenGLViewportWidget::setSceneModel(SceneModel* model)
             return;
         }
         makeCurrent();
-        if (!m_pathTracer.rebuildMeshScene(m_model->proceduralInstances())) {
+        if (!m_pathTracer.rebuildMeshScene(
+                m_model->proceduralInstances(), meshSceneBuildParamsForModel(m_model))) {
             doneCurrent();
             return;
         }
@@ -319,6 +348,8 @@ void OpenGLViewportWidget::paintGL()
         const int renderW = m_model->renderSize().width();
         const int renderH = m_model->renderSize().height();
         const auto [sx, sy] = aspectFitNdcScale(width(), height(), renderW, renderH);
+        const glm::mat4 viewProj = m_quadView.viewProjMatrix(sx, sy);
+        glUniformMatrix4fv(glGetUniformLocation(m_program, "uViewProj"), 1, GL_FALSE, glm::value_ptr(viewProj));
         glUniform2f(glGetUniformLocation(m_program, "uQuadScale"), sx, sy);
 
         glBindVertexArray(m_vao);
@@ -341,7 +372,7 @@ void OpenGLViewportWidget::rebuildBoundsOverlay()
 
 void OpenGLViewportWidget::drawSceneOverlays()
 {
-    if (m_model == nullptr) {
+    if (m_model == nullptr || !m_quadView.isDefault()) {
         return;
     }
 
@@ -386,16 +417,39 @@ void OpenGLViewportWidget::drawSceneOverlays()
 
 void OpenGLViewportWidget::mousePressEvent(QMouseEvent* event)
 {
-    if (event->button() == Qt::LeftButton) {
-        setFocus();
-        m_looking = true;
-        m_lastMousePos = event->pos();
-        event->accept();
+    if (event->button() != Qt::LeftButton) {
+        return;
     }
+
+    setFocus();
+    m_lastMousePos = event->pos();
+
+    if (event->modifiers() & Qt::ControlModifier) {
+        m_quadPanning = true;
+        event->accept();
+        return;
+    }
+
+    m_looking = true;
+    event->accept();
 }
 
 void OpenGLViewportWidget::mouseMoveEvent(QMouseEvent* event)
 {
+    if (m_quadPanning) {
+        const QPoint delta = event->pos() - m_lastMousePos;
+        m_lastMousePos = event->pos();
+
+        if (width() > 0 && height() > 0) {
+            const float ndcDeltaX = -2.0f * static_cast<float>(delta.x()) / static_cast<float>(width());
+            const float ndcDeltaY = 2.0f * static_cast<float>(delta.y()) / static_cast<float>(height());
+            m_quadView.pan(ndcDeltaX, ndcDeltaY);
+            update();
+        }
+        event->accept();
+        return;
+    }
+
     if (!m_looking) {
         return;
     }
@@ -414,8 +468,36 @@ void OpenGLViewportWidget::mouseReleaseEvent(QMouseEvent* event)
 {
     if (event->button() == Qt::LeftButton) {
         m_looking = false;
+        m_quadPanning = false;
         event->accept();
     }
+}
+
+void OpenGLViewportWidget::wheelEvent(QWheelEvent* event)
+{
+    if (!(event->modifiers() & Qt::ControlModifier)
+        || !m_showDisplayTexture
+        || !m_textureAllocated
+        || m_texture == 0
+        || m_model == nullptr) {
+        event->ignore();
+        return;
+    }
+
+    const int renderW = m_model->renderSize().width();
+    const int renderH = m_model->renderSize().height();
+    if (renderW <= 0 || renderH <= 0 || width() <= 0 || height() <= 0) {
+        event->ignore();
+        return;
+    }
+
+    const auto [cursorNdcX, cursorNdcY] =
+        QuadViewCamera2D::widgetToNdc(event->position().x(), event->position().y(), width(), height());
+    const auto [sx, sy] = aspectFitNdcScale(width(), height(), renderW, renderH);
+    const float factor = std::pow(kWheelZoomBase, static_cast<float>(event->angleDelta().y()));
+    m_quadView.zoomAt(factor, cursorNdcX, cursorNdcY, sx, sy);
+    update();
+    event->accept();
 }
 
 void OpenGLViewportWidget::keyPressEvent(QKeyEvent* event)
@@ -468,6 +550,37 @@ void OpenGLViewportWidget::dispatchFrameUpdate()
 void OpenGLViewportWidget::notifyIterationChanged()
 {
     emit iterationChanged(m_pathTracer.currentSampleCount());
+    emitRenderState();
+}
+
+void OpenGLViewportWidget::ensureRenderWorkerRunning()
+{
+    if (m_renderPaused || m_model == nullptr) {
+        return;
+    }
+
+    if (!m_pathTracer.isRunning()) {
+        m_pathTracer.start();
+    }
+}
+
+void OpenGLViewportWidget::emitRenderState()
+{
+    if (m_model == nullptr) {
+        return;
+    }
+
+    const RenderAccumulationState state = renderAccumulationState(
+        m_pathTracer.isRunning(),
+        m_renderPaused,
+        m_pathTracer.currentSampleCount(),
+        m_model->previewStepsPerLevel(),
+        m_model->maxSamplesPerPixel());
+
+    emit renderStateChanged(
+        state,
+        m_pathTracer.currentSampleCount(),
+        m_pathTracer.sampleBudgetTotalIterations());
 }
 
 void OpenGLViewportWidget::restartRender()
@@ -480,6 +593,7 @@ void OpenGLViewportWidget::restartRender()
         m_pathTracer.start();
     }
     emit iterationChanged(0);
+    emitRenderState();
     update();
 }
 
@@ -487,6 +601,7 @@ void OpenGLViewportWidget::pauseRender()
 {
     m_pathTracer.stop();
     m_renderPaused = true;
+    emitRenderState();
 }
 
 void OpenGLViewportWidget::syncCameraToPathTracer()
@@ -506,6 +621,21 @@ void OpenGLViewportWidget::syncSunSettingsToPathTracer()
         m_model->sunColor(),
         m_model->sunDiskSizeDeg());
     m_pathTracer.setSecondaryBounceCount(m_model->secondaryBounceCount());
+}
+
+bool OpenGLViewportWidget::loadEnvironmentMap(const QString& path)
+{
+    if (!m_pathTracer.loadEnvironmentMap(path)) {
+        return false;
+    }
+    update();
+    return true;
+}
+
+void OpenGLViewportWidget::clearEnvironmentMap()
+{
+    m_pathTracer.clearEnvironmentMap();
+    update();
 }
 
 void OpenGLViewportWidget::onCameraChanged()
@@ -556,7 +686,13 @@ void OpenGLViewportWidget::recreateGpuBuffers()
     }
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
-    if (!m_pathTracer.configure(w, h, m_pbos[0], m_pbos[1], m_model->proceduralInstances())) {
+    if (!m_pathTracer.configure(
+            w,
+            h,
+            m_pbos[0],
+            m_pbos[1],
+            m_model->proceduralInstances(),
+            meshSceneBuildParamsForModel(m_model))) {
         AppLog::instance().error(QStringLiteral("PathTracer configure failed for %1x%2").arg(w).arg(h));
         return;
     }

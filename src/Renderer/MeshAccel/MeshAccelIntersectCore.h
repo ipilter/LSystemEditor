@@ -92,10 +92,9 @@ MESH_ACCEL_CORE_FN bool meshAccelRayTriangle(
     }
 
     outT = t;
-    Vec3 n = vecNormalize3(vecMake3(
-        e1.y * e2.z - e1.z * e2.y,
-        e1.z * e2.x - e1.x * e2.z,
-        e1.x * e2.y - e1.y * e2.x));
+    Vec3 n = vecNormalize3(vecAdd3(
+        vecAdd3(vecScale3(tri.n0, 1.0f - u - v), vecScale3(tri.n1, u)),
+        vecScale3(tri.n2, v)));
     if (vecDot3(n, rd) > 0.0f) {
         n = vecScale3(n, -1.0f);
     }
@@ -168,8 +167,38 @@ MESH_ACCEL_CORE_FN MeshHit meshAccelTraceRay(
 
         const int left = static_cast<int>(node.leftIndex);
         const int right = static_cast<int>(node.rightIndex);
-        stack[stackSize++] = left;
-        stack[stackSize++] = right;
+
+        float leftEnter = 0.0f;
+        float leftExit = 0.0f;
+        float rightEnter = 0.0f;
+        float rightExit = 0.0f;
+        bool leftHit = false;
+        bool rightHit = false;
+
+        if (left >= 0 && left < static_cast<int>(scene->bvhNodeCount)) {
+            const MeshBvhNode& leftNode = scene->bvhNodes[left];
+            leftHit = meshAccelRayAabb(
+                ro, rd, invRd, leftNode.boundsMin, leftNode.boundsMax, tMin, closestT, leftEnter, leftExit);
+        }
+        if (right >= 0 && right < static_cast<int>(scene->bvhNodeCount)) {
+            const MeshBvhNode& rightNode = scene->bvhNodes[right];
+            rightHit = meshAccelRayAabb(
+                ro, rd, invRd, rightNode.boundsMin, rightNode.boundsMax, tMin, closestT, rightEnter, rightExit);
+        }
+
+        if (leftHit && rightHit) {
+            if (leftEnter < rightEnter) {
+                stack[stackSize++] = right;
+                stack[stackSize++] = left;
+            } else {
+                stack[stackSize++] = left;
+                stack[stackSize++] = right;
+            }
+        } else if (leftHit) {
+            stack[stackSize++] = left;
+        } else if (rightHit) {
+            stack[stackSize++] = right;
+        }
     }
 
     if (closestT < tMax) {

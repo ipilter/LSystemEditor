@@ -7,6 +7,7 @@
 #include "SceneModel.h"
 #include "SettingsDialog.h"
 #include <QColorDialog>
+#include <QFileDialog>
 #include <QDialog>
 #include <QPlainTextEdit>
 #include <QComboBox>
@@ -145,7 +146,17 @@ SceneController::SceneController(SceneModel* model, MainView* view, QObject* par
     connect(m_view->stopButton(), &QPushButton::clicked, this, &SceneController::onStopButtonClicked);
     connect(m_view->settingsButton(), &QPushButton::clicked, this, &SceneController::onSettingsButtonClicked);
     connect(m_view->addPrimitiveButton(), &QPushButton::clicked, this, &SceneController::onAddPrimitiveButtonClicked);
+    connect(
+        m_view->loadEnvironmentButton(),
+        &QPushButton::clicked,
+        this,
+        &SceneController::onLoadEnvironmentButtonClicked);
     connect(m_view->viewport(), &OpenGLViewportWidget::iterationChanged, m_view, &MainView::setIteration);
+    connect(
+        m_view->viewport(),
+        &OpenGLViewportWidget::renderStateChanged,
+        m_view,
+        &MainView::setRenderState);
     connect(&AppSettings::instance(), &AppSettings::debounceMsChanged, this,
             [this](const QString& elementId, int ms) {
                 if (elementId == DebounceElementIds::kRenderSize) {
@@ -270,8 +281,23 @@ void SceneController::onSettingsButtonClicked()
 {
     SettingsDialog dialog(m_view);
     if (dialog.exec() == QDialog::Accepted) {
+        m_model->setCreaseAngleDeg(AppSettings::instance().creaseAngleDeg());
         m_model->setAccelBvhColor(AppSettings::instance().accelBvhColor());
     }
+}
+
+void SceneController::onLoadEnvironmentButtonClicked()
+{
+    const QString path = QFileDialog::getOpenFileName(
+        m_view,
+        QStringLiteral("Load HDR Environment"),
+        QString(),
+        QStringLiteral("HDR Images (*.hdr);;All Files (*.*)"));
+    if (path.isEmpty()) {
+        return;
+    }
+
+    m_view->viewport()->loadEnvironmentMap(path);
 }
 
 void SceneController::onAddPrimitiveButtonClicked()

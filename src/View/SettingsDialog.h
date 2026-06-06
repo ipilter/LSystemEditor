@@ -4,6 +4,7 @@
 #include <QDialog>
 
 class QPushButton;
+class QDoubleSpinBox;
 class QSpinBox;
 
 class SettingsDialog : public QDialog
@@ -18,6 +19,8 @@ private:
 
     QSpinBox* m_renderSizeSpinDebounceSpinBox = nullptr;
     QSpinBox* m_maxSamplesSpinDebounceSpinBox = nullptr;
+    QDoubleSpinBox* m_creaseAngleSpinBox = nullptr;
     QPushButton* m_accelBvhColorButton = nullptr;
     QColor m_accelBvhColor;
+    float m_creaseAngleDeg = 50.0f;
 };

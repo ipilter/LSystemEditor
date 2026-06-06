@@ -14,15 +14,10 @@ TriangleGpu makeTriangleGpu(const HostTriangle& tri)
     gpu.v0 = tri.v0;
     gpu.v1 = tri.v1;
     gpu.v2 = tri.v2;
+    gpu.n0 = tri.n0;
+    gpu.n1 = tri.n1;
+    gpu.n2 = tri.n2;
     gpu.materialIndex = tri.materialIndex;
-
-    const Vec3 e1 = vecSub3(tri.v1, tri.v0);
-    const Vec3 e2 = vecSub3(tri.v2, tri.v0);
-    const Vec3 cross = vecMake3(
-        e1.y * e2.z - e1.z * e2.y,
-        e1.z * e2.x - e1.x * e2.z,
-        e1.x * e2.y - e1.y * e2.x);
-    gpu.normal = vecNormalize3(cross);
     return gpu;
 }
 
@@ -34,7 +29,50 @@ MaterialGpu defaultMaterial()
     material.b = 0.8f;
     material.roughness = 0.5f;
     material.metallic = 0.0f;
+    material.emission = 0.0f;
+    material.ior = 1.5f;
+    material.transmission = 0.0f;
     return material;
+}
+
+void buildEmissiveTriangleList(
+    const std::vector<TriangleGpu>& triangles,
+    const std::vector<MaterialGpu>& materials,
+    std::vector<uint32_t>& outIndices)
+{
+    outIndices.clear();
+    for (uint32_t triIndex = 0; triIndex < triangles.size(); ++triIndex) {
+        const TriangleGpu& tri = triangles[triIndex];
+        if (tri.materialIndex >= materials.size()) {
+            continue;
+        }
+        const MaterialGpu& material = materials[tri.materialIndex];
+        if (material.emission > 0.0f) {
+            outIndices.push_back(triIndex);
+        }
+    }
+}
+
+template<typename T>
+bool uploadHostVector(T** devicePtr, const std::vector<T>& hostData, cudaStream_t stream)
+{
+    if (devicePtr == nullptr) {
+        return false;
+    }
+
+    if (hostData.empty()) {
+        *devicePtr = nullptr;
+        return true;
+    }
+
+    const size_t bytes = hostData.size() * sizeof(T);
+    void* deviceAllocation = nullptr;
+    if (cudaMalloc(&deviceAllocation, bytes) != cudaSuccess || deviceAllocation == nullptr) {
+        return false;
+    }
+
+    *devicePtr = static_cast<T*>(deviceAllocation);
+    return cudaMemcpyAsync(*devicePtr, hostData.data(), bytes, cudaMemcpyHostToDevice, stream) == cudaSuccess;
 }
 
 } // namespace
@@ -51,6 +89,7 @@ void MeshAccelScene::clear()
     m_bvhNodes.clear();
     m_triangles.clear();
     m_materials.clear();
+    m_emissiveTriangleIndices.clear();
     m_hostScene = MeshAccelSceneGpu{};
     m_built = false;
     m_deviceDirty = true;
@@ -88,14 +127,18 @@ bool MeshAccelScene::build(const HostMesh& mesh)
         return false;
     }
 
+    buildEmissiveTriangleList(m_triangles, m_materials, m_emissiveTriangleIndices);
+
     m_hostScene = MeshAccelSceneGpu{};
     m_hostScene.bvhNodes = m_bvhNodes.data();
     m_hostScene.triangles = m_triangles.data();
     m_hostScene.materials = m_materials.data();
+    m_hostScene.emissiveTriangleIndices = m_emissiveTriangleIndices.data();
     m_hostScene.bvhNodeCount = static_cast<uint32_t>(m_bvhNodes.size());
     m_hostScene.triangleCount = static_cast<uint32_t>(m_triangles.size());
     m_hostScene.bvhRootIndex = bvhRootIndex;
     m_hostScene.materialCount = static_cast<uint32_t>(m_materials.size());
+    m_hostScene.emissiveTriangleCount = static_cast<uint32_t>(m_emissiveTriangleIndices.size());
 
     m_built = true;
     m_deviceDirty = true;
@@ -129,6 +172,10 @@ void MeshAccelScene::release()
         cudaFree(m_dMaterials);
         m_dMaterials = nullptr;
     }
+    if (m_dEmissiveTriangleIndices != nullptr) {
+        cudaFree(m_dEmissiveTriangleIndices);
+        m_dEmissiveTriangleIndices = nullptr;
+    }
     if (m_dScene != nullptr) {
         cudaFree(m_dScene);
         m_dScene = nullptr;
@@ -142,7 +189,9 @@ bool MeshAccelScene::upload(cudaStream_t stream)
         return false;
     }
 
-    if (!m_deviceDirty && m_dBvhNodes != nullptr && m_dTriangles != nullptr) {
+    const bool deviceBuffersReady = m_dBvhNodes != nullptr && m_dTriangles != nullptr &&
+        (m_materials.empty() || m_dMaterials != nullptr);
+    if (!m_deviceDirty && deviceBuffersReady) {
         return true;
     }
 
@@ -158,30 +207,28 @@ bool MeshAccelScene::upload(cudaStream_t stream)
         cudaFree(m_dMaterials);
         m_dMaterials = nullptr;
     }
+    if (m_dEmissiveTriangleIndices != nullptr) {
+        cudaFree(m_dEmissiveTriangleIndices);
+        m_dEmissiveTriangleIndices = nullptr;
+    }
 
-    auto allocAndCopy = [stream](auto** devicePtr, const auto& hostData) -> bool {
-        using ValueType = typename std::decay<decltype(hostData[0])>::type;
-        if (hostData.empty()) {
-            *devicePtr = nullptr;
-            return true;
-        }
-
-        const size_t bytes = hostData.size() * sizeof(ValueType);
-        if (cudaMalloc(devicePtr, bytes) != cudaSuccess) {
-            return false;
-        }
-        return cudaMemcpyAsync(*devicePtr, hostData.data(), bytes, cudaMemcpyHostToDevice, stream) == cudaSuccess;
+    const auto uploadBuffer = [stream](auto* devicePtr, const auto& hostData) -> bool {
+        return uploadHostVector(devicePtr, hostData, stream);
     };
 
-    if (!allocAndCopy(&m_dBvhNodes, m_bvhNodes)) {
+    if (!uploadBuffer(&m_dBvhNodes, m_bvhNodes)) {
         release();
         return false;
     }
-    if (!allocAndCopy(&m_dTriangles, m_triangles)) {
+    if (!uploadBuffer(&m_dTriangles, m_triangles)) {
         release();
         return false;
     }
-    if (!allocAndCopy(&m_dMaterials, m_materials)) {
+    if (!uploadBuffer(&m_dMaterials, m_materials)) {
+        release();
+        return false;
+    }
+    if (!uploadBuffer(&m_dEmissiveTriangleIndices, m_emissiveTriangleIndices)) {
         release();
         return false;
     }
@@ -190,10 +237,12 @@ bool MeshAccelScene::upload(cudaStream_t stream)
     deviceScene.bvhNodes = m_dBvhNodes;
     deviceScene.triangles = m_dTriangles;
     deviceScene.materials = m_dMaterials;
+    deviceScene.emissiveTriangleIndices = m_dEmissiveTriangleIndices;
     deviceScene.bvhNodeCount = static_cast<uint32_t>(m_bvhNodes.size());
     deviceScene.triangleCount = static_cast<uint32_t>(m_triangles.size());
     deviceScene.bvhRootIndex = m_hostScene.bvhRootIndex;
     deviceScene.materialCount = static_cast<uint32_t>(m_materials.size());
+    deviceScene.emissiveTriangleCount = static_cast<uint32_t>(m_emissiveTriangleIndices.size());
 
     if (cudaMemcpyAsync(m_dScene, &deviceScene, sizeof(MeshAccelSceneGpu), cudaMemcpyHostToDevice, stream)
         != cudaSuccess) {

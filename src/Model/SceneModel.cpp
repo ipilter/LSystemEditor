@@ -16,8 +16,10 @@ constexpr float kMinSunElevation = -90.0f;
 constexpr float kMaxSunElevation = 90.0f;
 constexpr float kMinSunDiskSize = 0.1f;
 constexpr float kMaxSunDiskSize = 30.0f;
-constexpr int kMinSecondaryBounceCount = 0;
-constexpr int kMaxSecondaryBounceCount = 8;
+constexpr int kMinSecondaryBounceCount = 1;
+constexpr int kMaxSecondaryBounceCount = 12;
+constexpr float kMinCreaseAngleDeg = 0.0f;
+constexpr float kMaxCreaseAngleDeg = 180.0f;
 } // namespace
 
 SceneModel::SceneModel(QObject* parent)
@@ -27,6 +29,7 @@ SceneModel::SceneModel(QObject* parent)
     , m_maxSamplesPerPixel(AppSettings::instance().maxSamplesPerPixel())
     , m_previewStepsPerLevel(AppSettings::instance().previewStepsPerLevel())
     , m_accelBvhColor(AppSettings::instance().accelBvhColor())
+    , m_creaseAngleDeg(AppSettings::instance().creaseAngleDeg())
 {
 }
 
@@ -230,6 +233,23 @@ void SceneModel::setAccelBvhColor(const QColor& color)
     emit accelBvhColorChanged(m_accelBvhColor);
 }
 
+float SceneModel::creaseAngleDeg() const
+{
+    return m_creaseAngleDeg;
+}
+
+void SceneModel::setCreaseAngleDeg(float value)
+{
+    const float clamped = clampCreaseAngleDeg(value);
+    if (m_creaseAngleDeg == clamped) {
+        return;
+    }
+
+    m_creaseAngleDeg = clamped;
+    AppSettings::instance().setCreaseAngleDeg(clamped);
+    emit sceneChanged();
+}
+
 const std::vector<ProceduralInstance>& SceneModel::proceduralInstances() const
 {
     return m_proceduralInstances;
@@ -360,4 +380,15 @@ MeshAccelBoundsOverlayMode SceneModel::clampBoundsOverlayMode(MeshAccelBoundsOve
         return MeshAccelBoundsOverlayMode::Off;
     }
     }
+}
+
+float SceneModel::clampCreaseAngleDeg(float value)
+{
+    if (value < kMinCreaseAngleDeg) {
+        return kMinCreaseAngleDeg;
+    }
+    if (value > kMaxCreaseAngleDeg) {
+        return kMaxCreaseAngleDeg;
+    }
+    return value;
 }

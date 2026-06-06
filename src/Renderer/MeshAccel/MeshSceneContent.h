@@ -8,6 +8,7 @@
 struct MeshSceneBuildParams
 {
     int circularSegments = 32;
+    float creaseAngleDeg = 50.0f;
 };
 
 bool meshSceneBuild(

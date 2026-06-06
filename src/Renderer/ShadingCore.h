@@ -19,8 +19,28 @@ constexpr float kRayTMax = 1.0e6f;
 constexpr float kShadowBias = 1.0e-4f;
 constexpr float kPi = 3.14159265f;
 constexpr float kDegToRad = kPi / 180.0f;
+constexpr int kDirectShadowSamples = 4;
+constexpr int kSunSampleDimCount = kDirectShadowSamples * 2;
 
 } // namespace ShadingCoreDetail
+
+SHADING_CORE_FN int sunSampleDimBaseForBounce(int bounceIndex)
+{
+    if (bounceIndex <= 0) {
+        return 2;
+    }
+    return 2 + ShadingCoreDetail::kSunSampleDimCount +
+        (bounceIndex - 1) * (2 + ShadingCoreDetail::kSunSampleDimCount) + 2;
+}
+
+SHADING_CORE_FN int reflectionSampleDimBaseForBounce(int bounceIndex)
+{
+    if (bounceIndex <= 0) {
+        return -1;
+    }
+    return 2 + ShadingCoreDetail::kSunSampleDimCount +
+        (bounceIndex - 1) * (2 + ShadingCoreDetail::kSunSampleDimCount);
+}
 
 SHADING_CORE_FN Vec3 sunDirectionFromAngles(float azimuthDeg, float elevationDeg)
 {
@@ -159,6 +179,47 @@ SHADING_CORE_FN Vec3 evaluateDirectBrdf(
         specular);
 }
 
+SHADING_CORE_FN Vec3 evaluateDirectLightingWithOcclusion(
+    Vec3 position,
+    Vec3 normal,
+    Vec3 viewDir,
+    const MaterialGpu& material,
+    const MeshAccelSceneGpu* scene,
+    const RenderParamsGpu* params,
+    SampleContext& ctx,
+    int sunDimBase,
+    const uint32_t* sobolMatrices,
+    int sobolDimensionCount,
+    const int* precomputedOccluded,
+    int precomputedOccludedOffset)
+{
+    Vec3 lighting = vecMake3(0.0f, 0.0f, 0.0f);
+    const float invSamples = 1.0f / static_cast<float>(ShadingCoreDetail::kDirectShadowSamples);
+
+    for (int sampleIndex = 0; sampleIndex < ShadingCoreDetail::kDirectShadowSamples; ++sampleIndex) {
+        ctx.dimension = sunDimBase + sampleIndex * 2;
+        const float sunU1 = qmcNext1D(ctx, sobolMatrices, sobolDimensionCount);
+        ctx.dimension = sunDimBase + sampleIndex * 2 + 1;
+        const float sunU2 = qmcNext1D(ctx, sobolMatrices, sobolDimensionCount);
+
+        const Vec3 lightDir = sampleSunDirection(params, sunU1, sunU2);
+        const bool occluded = precomputedOccluded != nullptr
+            ? (precomputedOccluded[precomputedOccludedOffset + sampleIndex] != 0)
+            : isShadowed(position, normal, lightDir, scene);
+        if (occluded) {
+            continue;
+        }
+
+        const Vec3 baseColor = vecMake3(material.r, material.g, material.b);
+        const Vec3 lightColor = sunColorFromParams(params);
+        const Vec3 contribution =
+            evaluateDirectBrdf(normal, viewDir, lightDir, baseColor, material, lightColor);
+        lighting = vecAdd3(lighting, vecScale3(contribution, invSamples));
+    }
+
+    return lighting;
+}
+
 SHADING_CORE_FN Vec3 evaluateDirectLighting(
     Vec3 position,
     Vec3 normal,
@@ -166,20 +227,27 @@ SHADING_CORE_FN Vec3 evaluateDirectLighting(
     const MaterialGpu& material,
     const MeshAccelSceneGpu* scene,
     const RenderParamsGpu* params,
-    float sunU1,
-    float sunU2)
+    SampleContext& ctx,
+    int sunDimBase,
+    const uint32_t* sobolMatrices,
+    int sobolDimensionCount)
 {
-    const Vec3 lightDir = sampleSunDirection(params, sunU1, sunU2);
-    if (isShadowed(position, normal, lightDir, scene)) {
-        return vecMake3(0.0f, 0.0f, 0.0f);
-    }
-
-    const Vec3 baseColor = vecMake3(material.r, material.g, material.b);
-    const Vec3 lightColor = sunColorFromParams(params);
-    return evaluateDirectBrdf(normal, viewDir, lightDir, baseColor, material, lightColor);
+    return evaluateDirectLightingWithOcclusion(
+        position,
+        normal,
+        viewDir,
+        material,
+        scene,
+        params,
+        ctx,
+        sunDimBase,
+        sobolMatrices,
+        sobolDimensionCount,
+        nullptr,
+        0);
 }
 
-SHADING_CORE_FN Vec3 shadeOffMode(
+SHADING_CORE_FN Vec3 shadeOffModeWithPrimaryOcclusion(
     const MeshHit& hit,
     Vec3 rayOrigin,
     Vec3 rayDir,
@@ -187,7 +255,9 @@ SHADING_CORE_FN Vec3 shadeOffMode(
     const RenderParamsGpu* params,
     SampleContext& ctx,
     const uint32_t* sobolMatrices,
-    int sobolDimensionCount)
+    int sobolDimensionCount,
+    const int* primaryShadowOccluded,
+    int primaryShadowOccludedOffset)
 {
     if (!hit.hit) {
         return renderMissBackground(params);
@@ -198,12 +268,19 @@ SHADING_CORE_FN Vec3 shadeOffMode(
     const Vec3 viewDir = vecScale3(rayDir, -1.0f);
     const MaterialGpu material = fetchMaterial(scene, hit.triangleIndex);
 
-    ctx.dimension = 2;
-    const float sunU1 = qmcNext1D(ctx, sobolMatrices, sobolDimensionCount);
-    ctx.dimension = 3;
-    const float sunU2 = qmcNext1D(ctx, sobolMatrices, sobolDimensionCount);
-
-    Vec3 radiance = evaluateDirectLighting(position, normal, viewDir, material, scene, params, sunU1, sunU2);
+    Vec3 radiance = evaluateDirectLightingWithOcclusion(
+        position,
+        normal,
+        viewDir,
+        material,
+        scene,
+        params,
+        ctx,
+        sunSampleDimBaseForBounce(0),
+        sobolMatrices,
+        sobolDimensionCount,
+        primaryShadowOccluded,
+        primaryShadowOccludedOffset);
 
     int bounceCount = 0;
     if (params != nullptr && params->secondaryBounceCount > 0) {
@@ -220,10 +297,10 @@ SHADING_CORE_FN Vec3 shadeOffMode(
     MaterialGpu currentMaterial = material;
 
     for (int bounce = 0; bounce < bounceCount; ++bounce) {
-        const int dimBase = 4 + bounce * 4;
-        ctx.dimension = dimBase;
+        const int reflectDimBase = reflectionSampleDimBaseForBounce(bounce + 1);
+        ctx.dimension = reflectDimBase;
         const float u1 = qmcNext1D(ctx, sobolMatrices, sobolDimensionCount);
-        ctx.dimension = dimBase + 1;
+        ctx.dimension = reflectDimBase + 1;
         const float u2 = qmcNext1D(ctx, sobolMatrices, sobolDimensionCount);
 
         const Vec3 outgoing =
@@ -256,11 +333,6 @@ SHADING_CORE_FN Vec3 shadeOffMode(
         incomingDir = outgoing;
         currentMaterial = fetchMaterial(scene, bounceHit.triangleIndex);
 
-        ctx.dimension = dimBase + 2;
-        const float bounceSunU1 = qmcNext1D(ctx, sobolMatrices, sobolDimensionCount);
-        ctx.dimension = dimBase + 3;
-        const float bounceSunU2 = qmcNext1D(ctx, sobolMatrices, sobolDimensionCount);
-
         const Vec3 bounceDirect = evaluateDirectLighting(
             currentPos,
             currentNormal,
@@ -268,8 +340,10 @@ SHADING_CORE_FN Vec3 shadeOffMode(
             currentMaterial,
             scene,
             params,
-            bounceSunU1,
-            bounceSunU2);
+            ctx,
+            sunSampleDimBaseForBounce(bounce + 1),
+            sobolMatrices,
+            sobolDimensionCount);
 
         radiance = vecAdd3(radiance, vecMake3(
             throughput.x * bounceDirect.x,
@@ -278,6 +352,29 @@ SHADING_CORE_FN Vec3 shadeOffMode(
     }
 
     return radiance;
+}
+
+SHADING_CORE_FN Vec3 shadeOffMode(
+    const MeshHit& hit,
+    Vec3 rayOrigin,
+    Vec3 rayDir,
+    const MeshAccelSceneGpu* scene,
+    const RenderParamsGpu* params,
+    SampleContext& ctx,
+    const uint32_t* sobolMatrices,
+    int sobolDimensionCount)
+{
+    return shadeOffModeWithPrimaryOcclusion(
+        hit,
+        rayOrigin,
+        rayDir,
+        scene,
+        params,
+        ctx,
+        sobolMatrices,
+        sobolDimensionCount,
+        nullptr,
+        0);
 }
 
 #undef SHADING_CORE_FN

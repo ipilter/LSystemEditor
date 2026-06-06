@@ -65,6 +65,7 @@ struct ProceduralBuildParams
     float hermiteTension = 1.0f;
     float segmentRefineTolerance = 0.01f;
     float globalRefineTolerance = 0.01f;
+    float creaseAngleDeg = 50.0f;
     TurtleParams turtle{};
 };
 

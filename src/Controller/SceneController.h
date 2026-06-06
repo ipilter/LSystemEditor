@@ -37,6 +37,7 @@ private:
     void onStopButtonClicked();
     void onSettingsButtonClicked();
     void onAddPrimitiveButtonClicked();
+    void onLoadEnvironmentButtonClicked();
     void syncColorButtonStyle();
     void syncRenderSpinBoxes();
     void syncMaxSamplesSpinBox();

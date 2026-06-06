@@ -11,17 +11,7 @@
 
 struct MeshAccelSceneGpu;
 
-bool pathTracerClearAccumulator(
-    float4* d_buffer,
-    uint32_t* d_samples,
-    int width,
-    int height,
-    float backgroundR,
-    float backgroundG,
-    float backgroundB,
-    cudaStream_t stream);
-
-bool pathTracerSample(
+bool pathTracerSampleWavefront(
     float4* d_buffer,
     uint32_t* d_samples,
     int width,
@@ -36,18 +26,4 @@ bool pathTracerSample(
     const unsigned int* pixelScramble,
     int sobolDimensionCount,
     WavefrontGpuResources* wavefront,
-    cudaStream_t stream);
-
-bool pathTracerCopyToPbo(
-    const float4* acc,
-    uchar4* pbo,
-    int width,
-    int height,
-    int stride,
-    cudaStream_t stream);
-
-bool pathTracerInitPixelScramble(
-    unsigned int* scrambles,
-    int count,
-    unsigned int globalSeed,
     cudaStream_t stream);

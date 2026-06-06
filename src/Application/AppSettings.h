@@ -44,6 +44,9 @@ public:
     QColor accelBvhColor() const;
     void setAccelBvhColor(const QColor& color);
 
+    float creaseAngleDeg() const;
+    void setCreaseAngleDeg(float value);
+
     void load();
     void save();
 
@@ -55,6 +58,7 @@ private:
     static int clampRenderDimension(int value);
     static int clampMaxSamplesPerPixel(int value);
     static int clampPreviewStepsPerLevel(int value);
+    static float clampCreaseAngleDeg(float value);
     void seedDefaultDebounceValues();
 
     static AppSettings* s_instance;
@@ -65,4 +69,5 @@ private:
     int m_maxSamplesPerPixel = 1024;
     int m_previewStepsPerLevel = 0;
     QColor m_accelBvhColor = QColor(230, 200, 0);
+    float m_creaseAngleDeg = 50.0f;
 };

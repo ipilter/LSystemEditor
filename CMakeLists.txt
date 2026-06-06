@@ -69,6 +69,17 @@ FetchContent_Declare(manifold
     GIT_SHALLOW    TRUE)
 FetchContent_MakeAvailable(manifold)
 
+FetchContent_Declare(stb
+    GIT_REPOSITORY https://github.com/nothings/stb.git
+    GIT_TAG        master
+    GIT_SHALLOW    TRUE)
+FetchContent_GetProperties(stb)
+if(NOT stb_POPULATED)
+    FetchContent_Populate(stb)
+endif()
+add_library(stb_image INTERFACE)
+target_include_directories(stb_image INTERFACE ${stb_SOURCE_DIR})
+
 file(GLOB_RECURSE PATHTRACER_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cu"
@@ -145,6 +156,7 @@ target_link_libraries(pathtracer PRIVATE
     pathtracer_sampling
     pathtracer_mesh_builder
     pathtracer_mesh_accel
+    stb_image
     Qt6::Widgets
     Qt6::OpenGL
     Qt6::OpenGLWidgets
@@ -213,3 +225,30 @@ target_include_directories(mesh_accel_tests PRIVATE
 set_target_properties(mesh_accel_tests PROPERTIES FOLDER "tests")
 
 add_test(NAME MeshAccel COMMAND mesh_accel_tests)
+
+add_executable(path_tracer_budget_tests tests/PathTracerBudgetTests.cpp)
+target_include_directories(path_tracer_budget_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer")
+set_target_properties(path_tracer_budget_tests PROPERTIES FOLDER "tests")
+
+add_test(NAME PathTracerBudget COMMAND path_tracer_budget_tests)
+
+add_executable(bsdf_core_tests tests/BsdfCoreTests.cpp)
+target_include_directories(bsdf_core_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Sampling"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Geometry"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/MeshAccel")
+set_target_properties(bsdf_core_tests PROPERTIES FOLDER "tests")
+
+add_test(NAME BsdfCore COMMAND bsdf_core_tests)
+
+add_executable(path_integrator_tests tests/PathIntegratorTests.cpp)
+target_include_directories(path_integrator_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Sampling"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Geometry"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/MeshAccel")
+set_target_properties(path_integrator_tests PROPERTIES FOLDER "tests")
+
+add_test(NAME PathIntegrator COMMAND path_integrator_tests)
