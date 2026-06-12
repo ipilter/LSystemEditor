@@ -52,8 +52,6 @@ if(NOT glm_FOUND)
     target_include_directories(glm INTERFACE ${glm_SOURCE_DIR})
 endif()
 
-add_subdirectory(src/LSystemLib)
-
 set(MANIFOLD_TEST OFF CACHE BOOL "" FORCE)
 set(MANIFOLD_PYBIND OFF CACHE BOOL "" FORCE)
 set(MANIFOLD_JSBIND OFF CACHE BOOL "" FORCE)
@@ -80,175 +78,11 @@ endif()
 add_library(stb_image INTERFACE)
 target_include_directories(stb_image INTERFACE ${stb_SOURCE_DIR})
 
-file(GLOB_RECURSE PATHTRACER_SOURCES CONFIGURE_DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cu"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/*.hpp")
-
-set(PATHTRACER_SAMPLING_SOURCES
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Sampling/SobolDirectionData.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Sampling/SobolTables.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Sampling/QmcGpuResources.cpp")
-
-set(PATHTRACER_MESH_BUILDER_SOURCES
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/MeshBuilder/ManifoldMeshConvert.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Procedural/Turtle.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Procedural/Spline.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Procedural/Loft.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Procedural/ProceduralAssembly.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Procedural/ProceduralMeshBuilder.cpp")
-
-set(PATHTRACER_MESH_ACCEL_SOURCES
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/MeshAccel/MeshBvhBuilder.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/MeshAccel/MeshAccelScene.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/MeshAccel/MeshSceneContent.cpp")
-
-list(FILTER PATHTRACER_SOURCES EXCLUDE REGEX ".*/Renderer/Sampling/(SobolDirectionData|SobolTables|QmcGpuResources)\\.cpp$")
-list(FILTER PATHTRACER_SOURCES EXCLUDE REGEX ".*/Renderer/MeshBuilder/ManifoldMeshConvert\\.cpp$")
-list(FILTER PATHTRACER_SOURCES EXCLUDE REGEX ".*/Renderer/Procedural/.*\\.cpp$")
-list(FILTER PATHTRACER_SOURCES EXCLUDE REGEX ".*/Renderer/MeshAccel/(MeshBvhBuilder|MeshAccelScene|MeshSceneContent)\\.cpp$")
-list(FILTER PATHTRACER_SOURCES EXCLUDE REGEX ".*/View/AddSdfDialog\\.cpp$")
-list(FILTER PATHTRACER_SOURCES EXCLUDE REGEX ".*/Renderer/Sdf/.*")
-list(FILTER PATHTRACER_SOURCES EXCLUDE REGEX ".*/LSystemLib/.*")
-
-add_library(pathtracer_sampling STATIC ${PATHTRACER_SAMPLING_SOURCES})
-target_include_directories(pathtracer_sampling PUBLIC
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Sampling")
-target_link_libraries(pathtracer_sampling PUBLIC CUDA::cudart Qt6::Core)
-set_target_properties(pathtracer_sampling PROPERTIES FOLDER "src")
-
-add_library(pathtracer_mesh_builder STATIC ${PATHTRACER_MESH_BUILDER_SOURCES})
-target_include_directories(pathtracer_mesh_builder PUBLIC
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/MeshBuilder"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Procedural"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Geometry"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Model")
-target_link_libraries(pathtracer_mesh_builder PUBLIC manifold LSystemLib)
-set_target_properties(pathtracer_mesh_builder PROPERTIES FOLDER "src")
-
-add_library(pathtracer_mesh_accel STATIC ${PATHTRACER_MESH_ACCEL_SOURCES})
-target_include_directories(pathtracer_mesh_accel PUBLIC
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/MeshAccel"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/MeshBuilder"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Procedural"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Geometry"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Model")
-target_link_libraries(pathtracer_mesh_accel PUBLIC pathtracer_mesh_builder CUDA::cudart)
-set_target_properties(pathtracer_mesh_accel PROPERTIES FOLDER "src")
-
-add_executable(pathtracer WIN32 ${PATHTRACER_SOURCES})
-target_include_directories(pathtracer PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Application"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Sampling"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Geometry"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/MeshBuilder"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Procedural"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/MeshAccel"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/View"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Controller"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Model")
-target_link_libraries(pathtracer PRIVATE
-    pathtracer_sampling
-    pathtracer_mesh_builder
-    pathtracer_mesh_accel
-    stb_image
-    Qt6::Widgets
-    Qt6::OpenGL
-    Qt6::OpenGLWidgets
-    CUDA::cudart
-    glm::glm)
-set_target_properties(pathtracer PROPERTIES
-    OUTPUT_NAME pathtracer
-    AUTOMOC ON
-    FOLDER "src")
-
-source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}/src" PREFIX "" FILES ${PATHTRACER_SOURCES})
-
-target_sources(pathtracer PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt")
-set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt" PROPERTIES HEADER_FILE_ONLY TRUE)
-source_group("" FILES "${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt")
-
-find_program(WINDEPLOYQT_EXECUTABLE windeployqt
-    HINTS "$ENV{QTDIR}/bin"
-    DOC "Qt deployment tool")
-
-if(WIN32 AND WINDEPLOYQT_EXECUTABLE)
-    add_custom_command(TARGET pathtracer POST_BUILD
-        COMMAND PowerShell -NoProfile -ExecutionPolicy Bypass -Command
-            "if (-not (Test-Path '$<TARGET_FILE_DIR:pathtracer>/Qt6OpenGLWidgetsd.dll')) { & '${WINDEPLOYQT_EXECUTABLE}' --no-translations --no-opengl-sw '$<TARGET_FILE:pathtracer>' }"
-        COMMENT "Deploying Qt debug redistributables if needed"
-        CONFIG Debug)
-    add_custom_command(TARGET pathtracer POST_BUILD
-        COMMAND PowerShell -NoProfile -ExecutionPolicy Bypass -Command
-            "if (-not (Test-Path '$<TARGET_FILE_DIR:pathtracer>/Qt6OpenGLWidgets.dll')) { & '${WINDEPLOYQT_EXECUTABLE}' --no-translations --no-compiler-runtime --no-opengl-sw '$<TARGET_FILE:pathtracer>' }"
-        COMMENT "Deploying Qt release redistributables if needed"
-        CONFIG Release)
-endif()
-
-if(WIN32)
-    set(CUDA_RUNTIME_DLL "${CUDAToolkit_BIN_DIR}/x64/cudart64_13.dll")
-    if(NOT EXISTS "${CUDA_RUNTIME_DLL}")
-        set(CUDA_RUNTIME_DLL "${CUDAToolkit_BIN_DIR}/cudart64_13.dll")
-    endif()
-    add_custom_command(TARGET pathtracer POST_BUILD
-        COMMAND PowerShell -NoProfile -ExecutionPolicy Bypass -Command
-            "if (-not (Test-Path '$<TARGET_FILE_DIR:pathtracer>/cudart64_13.dll')) { if (Test-Path '${CUDA_RUNTIME_DLL}') { Copy-Item -Force '${CUDA_RUNTIME_DLL}' '$<TARGET_FILE_DIR:pathtracer>/cudart64_13.dll' } else { Write-Warning 'CUDA runtime DLL not found at ${CUDA_RUNTIME_DLL}' } }"
-        COMMENT "Copying CUDA runtime if needed"
-    )
-endif()
-
 enable_testing()
 
-add_executable(qmc_sampling_tests tests/QmcSamplerTests.cpp)
-target_link_libraries(qmc_sampling_tests PRIVATE pathtracer_sampling)
-target_include_directories(qmc_sampling_tests PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Sampling"
-    "${CMAKE_CURRENT_SOURCE_DIR}/tests")
-set_target_properties(qmc_sampling_tests PROPERTIES FOLDER "tests")
+add_subdirectory(LSystemLib)
+add_subdirectory(Application)
+add_subdirectory(PathTracerLib)
 
-add_test(NAME QmcSampling COMMAND qmc_sampling_tests)
-
-add_executable(mesh_accel_tests tests/MeshAccelTests.cpp tests/ProceduralMeshTests.cpp)
-target_link_libraries(mesh_accel_tests PRIVATE pathtracer_mesh_accel Qt6::Gui)
-target_include_directories(mesh_accel_tests PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/MeshAccel"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/MeshBuilder"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Procedural"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Geometry"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Model"
-    "${CMAKE_CURRENT_SOURCE_DIR}/tests")
-set_target_properties(mesh_accel_tests PROPERTIES FOLDER "tests")
-
-add_test(NAME MeshAccel COMMAND mesh_accel_tests)
-
-add_executable(path_tracer_budget_tests tests/PathTracerBudgetTests.cpp)
-target_include_directories(path_tracer_budget_tests PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer")
-set_target_properties(path_tracer_budget_tests PROPERTIES FOLDER "tests")
-
-add_test(NAME PathTracerBudget COMMAND path_tracer_budget_tests)
-
-add_executable(bsdf_core_tests tests/BsdfCoreTests.cpp)
-target_include_directories(bsdf_core_tests PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Sampling"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Geometry"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/MeshAccel")
-set_target_properties(bsdf_core_tests PROPERTIES FOLDER "tests")
-
-add_test(NAME BsdfCore COMMAND bsdf_core_tests)
-
-add_executable(path_integrator_tests tests/PathIntegratorTests.cpp)
-target_include_directories(path_integrator_tests PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Sampling"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/Geometry"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/MeshAccel")
-set_target_properties(path_integrator_tests PROPERTIES FOLDER "tests")
-
-add_test(NAME PathIntegrator COMMAND path_integrator_tests)
+application_add_pathtracer_executable()
+application_add_pathtracer_tests()
