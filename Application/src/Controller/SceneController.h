@@ -31,6 +31,8 @@ private:
     void onStopButtonClicked();
     void onSettingsButtonClicked();
     void onAddPrimitiveButtonClicked();
+    void onEnvironmentHdrBrowseClicked();
+    void syncEnvironmentHdrPath();
     void syncColorButtonStyle();
     void syncRenderSpinBoxes();
     void syncMaxSamplesSpinBox();

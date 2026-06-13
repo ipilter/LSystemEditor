@@ -47,6 +47,9 @@ public:
     float creaseAngleDeg() const;
     void setCreaseAngleDeg(float value);
 
+    QString environmentHdrPath() const;
+    void setEnvironmentHdrPath(const QString& path);
+
     void load();
     void save();
 
@@ -70,4 +73,5 @@ private:
     int m_previewStepsPerLevel = 0;
     QColor m_accelBvhColor = QColor(230, 200, 0);
     float m_creaseAngleDeg = 50.0f;
+    QString m_environmentHdrPath;
 };

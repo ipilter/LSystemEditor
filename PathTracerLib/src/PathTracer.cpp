@@ -2,11 +2,13 @@
 
 #include "AppLog.h"
 #include "CameraGpu.h"
+#include "EnvironmentMap.h"
 #include "PathTracerSampleBudget.h"
 #include "MeshAccel/MeshAccelBoundsMesh.h"
 #include "MeshAccel/MeshAccelScene.h"
 #include "MeshAccel/MeshSceneContent.h"
 #include "PathTracerCuda.h"
+#include "RenderTypes.h"
 
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
@@ -18,6 +20,7 @@
 #include <vector_types.h>
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <mutex>
 #include <thread>
@@ -63,6 +66,13 @@ struct PathTracerDetail::PathTracerImpl
 
     MeshAccelScene meshScene;
     MeshAccelBoundsMesh boundsMesh;
+
+    EnvironmentMap environmentMap;
+    RenderParamsGpu hostRenderParams{};
+    RenderParamsGpu* d_renderParams = nullptr;
+    QString environmentHdrPath;
+    std::atomic<bool> environmentDirty{true};
+    std::atomic<bool> renderParamsDirty{true};
 
     CameraGpu lastSampleCamera{};
     std::mutex lastSampleCameraMutex;
@@ -361,6 +371,125 @@ void freeCameraGpu(PathTracerDetail::PathTracerImpl* impl)
     impl->d_camera = nullptr;
 }
 
+void freeRenderParamsGpu(PathTracerDetail::PathTracerImpl* impl)
+{
+    if (impl == nullptr || impl->d_renderParams == nullptr) {
+        return;
+    }
+
+    cudaFree(impl->d_renderParams);
+    impl->d_renderParams = nullptr;
+}
+
+bool initRenderParamsGpu(PathTracerDetail::PathTracerImpl* impl, QString* outError)
+{
+    if (impl == nullptr) {
+        if (outError != nullptr) {
+            *outError = QStringLiteral("invalid path tracer impl");
+        }
+        return false;
+    }
+
+    freeRenderParamsGpu(impl);
+
+    cudaError_t error = cudaMalloc(&impl->d_renderParams, sizeof(RenderParamsGpu));
+    if (error != cudaSuccess) {
+        if (outError != nullptr) {
+            *outError = cudaErrorString(error);
+        }
+        return false;
+    }
+
+    impl->hostRenderParams = RenderParamsGpu{};
+    impl->hostRenderParams.backgroundR = impl->backgroundR;
+    impl->hostRenderParams.backgroundG = impl->backgroundG;
+    impl->hostRenderParams.backgroundB = impl->backgroundB;
+    impl->renderParamsDirty.store(true);
+    return true;
+}
+
+bool uploadRenderParamsIfDirty(PathTracerDetail::PathTracerImpl* impl, cudaStream_t stream, QString* outError)
+{
+    if (impl == nullptr || impl->d_renderParams == nullptr) {
+        if (outError != nullptr) {
+            *outError = QStringLiteral("render params not configured");
+        }
+        return false;
+    }
+
+    impl->hostRenderParams.backgroundR = impl->backgroundR;
+    impl->hostRenderParams.backgroundG = impl->backgroundG;
+    impl->hostRenderParams.backgroundB = impl->backgroundB;
+
+    if (!impl->renderParamsDirty.load()) {
+        return true;
+    }
+
+    const cudaError_t error = cudaMemcpyAsync(
+        impl->d_renderParams,
+        &impl->hostRenderParams,
+        sizeof(RenderParamsGpu),
+        cudaMemcpyHostToDevice,
+        stream);
+    if (error != cudaSuccess) {
+        if (outError != nullptr) {
+            *outError = cudaErrorString(error);
+        }
+        return false;
+    }
+
+    impl->renderParamsDirty.store(false);
+    return true;
+}
+
+bool reloadEnvironmentMap(PathTracerDetail::PathTracerImpl* impl, cudaStream_t stream, QString* outError)
+{
+    if (impl == nullptr) {
+        return false;
+    }
+
+    if (impl->environmentHdrPath.isEmpty()) {
+        impl->environmentMap.clear();
+        impl->environmentMap.upload(stream);
+        impl->environmentDirty.store(false);
+        return true;
+    }
+
+    QString loadError;
+    if (!impl->environmentMap.loadFromHdr(impl->environmentHdrPath, &loadError)) {
+        if (outError != nullptr) {
+            *outError = loadError;
+        }
+        impl->environmentMap.clear();
+        impl->environmentMap.upload(stream);
+        impl->environmentDirty.store(false);
+        return false;
+    }
+
+    if (!impl->environmentMap.upload(stream)) {
+        if (outError != nullptr) {
+            *outError = QStringLiteral("environment map upload failed");
+        }
+        return false;
+    }
+
+    impl->environmentDirty.store(false);
+    return true;
+}
+
+bool uploadEnvironmentIfDirty(PathTracerDetail::PathTracerImpl* impl, cudaStream_t stream, QString* outError)
+{
+    if (impl == nullptr) {
+        return false;
+    }
+
+    if (!impl->environmentDirty.load()) {
+        return true;
+    }
+
+    return reloadEnvironmentMap(impl, stream, outError);
+}
+
 CameraGpu defaultCameraGpu()
 {
     CameraGpu camera{};
@@ -562,6 +691,78 @@ void releaseMeshScene(PathTracerDetail::PathTracerImpl* impl)
     impl->boundsMesh = MeshAccelBoundsMesh{};
 }
 
+enum class SampleWaitResult
+{
+    Completed,
+    ResetDuringWait,
+    Stopped,
+    Error
+};
+
+SampleWaitResult waitForSampleEvent(
+    cudaEvent_t event,
+    const std::atomic<bool>& running,
+    const std::atomic<bool>& resetRequested,
+    QString* outError)
+{
+    bool resetSeen = false;
+    for (;;) {
+        if (!running.load()) {
+            return SampleWaitResult::Stopped;
+        }
+        if (resetRequested.load()) {
+            resetSeen = true;
+        }
+
+        const cudaError_t queryError = cudaEventQuery(event);
+        if (queryError == cudaSuccess) {
+            return resetSeen ? SampleWaitResult::ResetDuringWait : SampleWaitResult::Completed;
+        }
+        if (queryError != cudaErrorNotReady) {
+            if (outError != nullptr) {
+                *outError = cudaErrorString(queryError);
+            }
+            return SampleWaitResult::Error;
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+}
+
+struct RenderPipelineTiming
+{
+    std::atomic<int> completedSamples{0};
+    std::atomic<uint64_t> totalGpuWaitUs{0};
+    std::atomic<uint64_t> totalPublishMutexWaitUs{0};
+    std::atomic<uint64_t> publishMutexWaitSamples{0};
+    std::chrono::steady_clock::time_point resetRequestTime{};
+    std::atomic<bool> resetTimingActive{false};
+};
+
+RenderPipelineTiming g_renderPipelineTiming;
+
+constexpr int kPipelineTimingLogInterval = 128;
+
+void logPipelineTimingIfDue()
+{
+    const int count = g_renderPipelineTiming.completedSamples.load();
+    if (count <= 0 || count % kPipelineTimingLogInterval != 0) {
+        return;
+    }
+
+    const uint64_t gpuSamples = static_cast<uint64_t>(count);
+    const uint64_t avgGpuWaitUs = g_renderPipelineTiming.totalGpuWaitUs.load() / gpuSamples;
+    const uint64_t publishSamples = g_renderPipelineTiming.publishMutexWaitSamples.load();
+    const uint64_t avgPublishMutexWaitUs =
+        publishSamples > 0 ? g_renderPipelineTiming.totalPublishMutexWaitUs.load() / publishSamples : 0;
+
+    AppLog::instance().info(
+        QStringLiteral("Render pipeline timing (last %1 samples): avg GPU wait %2 ms, avg publish mutex wait %3 ms")
+            .arg(kPipelineTimingLogInterval)
+            .arg(static_cast<double>(avgGpuWaitUs) / 1000.0, 0, 'f', 2)
+            .arg(static_cast<double>(avgPublishMutexWaitUs) / 1000.0, 0, 'f', 2));
+}
+
 bool buildAndUploadMeshScene(
     PathTracerDetail::PathTracerImpl* impl,
     const std::vector<ProceduralInstance>& proceduralInstances,
@@ -614,6 +815,8 @@ PathTracer::~PathTracer()
     stop();
     unregisterPboResources(m_impl.get());
     freeCameraGpu(m_impl.get());
+    freeRenderParamsGpu(m_impl.get());
+    m_impl->environmentMap.release();
     freeAccumulator(&m_impl->acc);
     releaseMeshScene(m_impl.get());
     destroySampleEvent(m_impl.get());
@@ -645,6 +848,8 @@ bool PathTracer::configure(
 
     unregisterPboResources(m_impl.get());
     freeCameraGpu(m_impl.get());
+    freeRenderParamsGpu(m_impl.get());
+    m_impl->environmentMap.release();
     freeAccumulator(&m_impl->acc);
     releaseMeshScene(m_impl.get());
 
@@ -693,6 +898,22 @@ bool PathTracer::configure(
         unregisterPboResources(m_impl.get());
         freeAccumulator(&m_impl->acc);
         return false;
+    }
+
+    if (!initRenderParamsGpu(m_impl.get(), &error)) {
+        AppLog::instance().error(
+            QStringLiteral("PathTracer configure: render params allocation failed: %1").arg(error));
+        unregisterPboResources(m_impl.get());
+        freeCameraGpu(m_impl.get());
+        freeAccumulator(&m_impl->acc);
+        return false;
+    }
+
+    if (!reloadEnvironmentMap(m_impl.get(), m_impl->stream, &error)) {
+        if (!m_impl->environmentHdrPath.isEmpty()) {
+            AppLog::instance().warning(
+                QStringLiteral("PathTracer configure: environment map load failed: %1").arg(error));
+        }
     }
 
     QString accelError;
@@ -764,6 +985,8 @@ void PathTracer::stop()
 
 void PathTracer::resetAccumulation()
 {
+    g_renderPipelineTiming.resetRequestTime = std::chrono::steady_clock::now();
+    g_renderPipelineTiming.resetTimingActive.store(true);
     m_impl->resetRequested.store(true);
     notifyWorker();
 }
@@ -795,7 +1018,13 @@ bool PathTracer::publishDisplayFrame(int slot)
         return false;
     }
 
+    const auto mutexWaitStart = std::chrono::steady_clock::now();
     std::lock_guard<std::mutex> streamLock(m_impl->streamMutex);
+    const auto mutexWaitEnd = std::chrono::steady_clock::now();
+    const auto mutexWaitUs = static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::microseconds>(mutexWaitEnd - mutexWaitStart).count());
+    g_renderPipelineTiming.totalPublishMutexWaitUs.fetch_add(mutexWaitUs);
+    g_renderPipelineTiming.publishMutexWaitSamples.fetch_add(1);
 
     QString error;
     const cudaError_t waitError =
@@ -924,10 +1153,40 @@ void PathTracer::setClearColor(const QColor& color)
     m_impl->backgroundR = static_cast<float>(color.redF());
     m_impl->backgroundG = static_cast<float>(color.greenF());
     m_impl->backgroundB = static_cast<float>(color.blueF());
+    m_impl->renderParamsDirty.store(true);
 
     if (m_impl->configured.load()) {
         resetAccumulation();
     }
+}
+
+void PathTracer::setEnvironmentHdrPath(const QString& path)
+{
+    const QString normalized = path.trimmed();
+    if (m_impl->environmentHdrPath == normalized) {
+        return;
+    }
+
+    m_impl->environmentHdrPath = normalized;
+    m_impl->environmentDirty.store(true);
+
+    if (m_impl->configured.load() && m_impl->stream != nullptr) {
+        QString error;
+        std::lock_guard<std::mutex> streamLock(m_impl->streamMutex);
+        if (!reloadEnvironmentMap(m_impl.get(), m_impl->stream, &error)) {
+            if (!normalized.isEmpty()) {
+                AppLog::instance().warning(
+                    QStringLiteral("Environment map load failed: %1").arg(error));
+            }
+            cudaStreamSynchronize(m_impl->stream);
+        }
+        resetAccumulation();
+    }
+}
+
+QString PathTracer::environmentHdrPath() const
+{
+    return m_impl->environmentHdrPath;
 }
 
 void PathTracer::rebuildMeshBoundsMesh(const QColor& boundsColor)
@@ -978,20 +1237,43 @@ void PathTracer::renderLoop()
 
     while (m_impl->running.load()) {
         if (m_impl->resetRequested.exchange(false)) {
-            std::lock_guard<std::mutex> streamLock(m_impl->streamMutex);
-            if (m_impl->acc.d_buffer != nullptr && m_impl->acc.d_samples != nullptr) {
-                QString clearError;
-                if (!clearAccumulator(m_impl.get(), &clearError)) {
-                    AppLog::instance().error(
-                        QStringLiteral("PathTracer accumulator reset failed: %1").arg(clearError));
+            bool clearLaunched = false;
+            {
+                std::lock_guard<std::mutex> streamLock(m_impl->streamMutex);
+                if (m_impl->acc.d_buffer != nullptr && m_impl->acc.d_samples != nullptr) {
+                    QString clearError;
+                    if (!clearAccumulator(m_impl.get(), &clearError)) {
+                        AppLog::instance().error(
+                            QStringLiteral("PathTracer accumulator reset failed: %1").arg(clearError));
+                    } else {
+                        clearLaunched = true;
+                    }
                 }
             }
+
+            if (clearLaunched) {
+                const cudaError_t syncError = cudaStreamSynchronize(m_impl->stream);
+                if (syncError != cudaSuccess) {
+                    AppLog::instance().error(
+                        QStringLiteral("CUDA stream sync after accumulator reset failed: %1")
+                            .arg(cudaErrorString(syncError)));
+                }
+            }
+
             m_impl->sampleCount.store(0);
             m_impl->lastSamplingStride.store(
                 displayStrideFallback(
                     m_impl->previewStepsPerLevel.load(),
                     m_impl->acc.width,
                     m_impl->acc.height));
+
+            if (g_renderPipelineTiming.resetTimingActive.exchange(false)) {
+                const auto resetDone = std::chrono::steady_clock::now();
+                const auto resetLatencyMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    resetDone - g_renderPipelineTiming.resetRequestTime);
+                AppLog::instance().info(
+                    QStringLiteral("Render pipeline timing: reset latency %1 ms").arg(resetLatencyMs.count()));
+            }
         }
 
         if (m_impl->acc.width <= 0 || m_impl->acc.height <= 0) {
@@ -1026,13 +1308,19 @@ void PathTracer::renderLoop()
         m_impl->lastSamplingStride.store(stride);
 
         QString cameraError;
+        bool sampleLaunched = false;
         {
             std::lock_guard<std::mutex> streamLock(m_impl->streamMutex);
-            std::lock_guard<std::mutex> meshSceneLock(m_impl->meshSceneMutex);
-            if (!m_impl->meshScene.upload(m_impl->stream)) {
-                AppLog::instance().error(QStringLiteral("PathTracer mesh scene upload failed"));
-                continue;
+
+            {
+                std::lock_guard<std::mutex> meshSceneLock(m_impl->meshSceneMutex);
+                if (!m_impl->meshScene.upload(m_impl->stream)) {
+                    AppLog::instance().error(QStringLiteral("PathTracer mesh scene upload failed"));
+                    continue;
+                }
             }
+
+            const bool cameraChanged = m_impl->cameraDirty.load();
 
             if (!uploadCameraIfDirty(m_impl.get(), m_impl->stream, &cameraError)) {
                 AppLog::instance().error(
@@ -1040,8 +1328,29 @@ void PathTracer::renderLoop()
                 continue;
             }
 
+            QString paramsError;
+            if (!uploadRenderParamsIfDirty(m_impl.get(), m_impl->stream, &paramsError)) {
+                AppLog::instance().error(
+                    QStringLiteral("PathTracer render params upload failed: %1").arg(paramsError));
+                continue;
+            }
+
+            QString envError;
+            if (!uploadEnvironmentIfDirty(m_impl.get(), m_impl->stream, &envError)) {
+                AppLog::instance().error(
+                    QStringLiteral("PathTracer environment upload failed: %1").arg(envError));
+                continue;
+            }
+
             const CameraGpu sampleCamera = sampleCameraForFrame(m_impl.get());
-            storeLastSampleCamera(m_impl.get(), sampleCamera);
+            if (cameraChanged) {
+                storeLastSampleCamera(m_impl.get(), sampleCamera);
+            }
+
+            const unsigned int globalSeed =
+                static_cast<unsigned int>(m_impl->sampleCount.load()) + 1u;
+            const MeshAccelSceneGpu* deviceScene = m_impl->meshScene.deviceScene();
+            const EnvironmentMapGpu* deviceEnv = m_impl->environmentMap.deviceMap();
 
             if (!pathTracerSample(
                     m_impl->acc.d_buffer,
@@ -1050,12 +1359,14 @@ void PathTracer::renderLoop()
                     m_impl->acc.height,
                     stride,
                     m_impl->d_camera,
+                    deviceScene,
+                    deviceEnv,
+                    m_impl->d_renderParams,
+                    globalSeed,
                     m_impl->stream)) {
                 AppLog::instance().error(QStringLiteral("PathTracer sample kernel launch failed"));
                 continue;
             }
-
-            m_impl->sampleCount.fetch_add(1);
 
             const cudaError_t recordError =
                 cudaEventRecord(m_impl->sampleCompleteEvent, m_impl->stream);
@@ -1065,13 +1376,42 @@ void PathTracer::renderLoop()
                 continue;
             }
 
-            const cudaError_t syncError = cudaStreamSynchronize(m_impl->stream);
-            if (syncError != cudaSuccess) {
-                AppLog::instance().error(
-                    QStringLiteral("CUDA stream sync after sample failed: %1").arg(cudaErrorString(syncError)));
-                continue;
-            }
+            sampleLaunched = true;
         }
+
+        if (!sampleLaunched) {
+            continue;
+        }
+
+        const auto gpuWaitStart = std::chrono::steady_clock::now();
+        QString waitError;
+        const SampleWaitResult waitResult = waitForSampleEvent(
+            m_impl->sampleCompleteEvent,
+            m_impl->running,
+            m_impl->resetRequested,
+            &waitError);
+        const auto gpuWaitEnd = std::chrono::steady_clock::now();
+        const auto gpuWaitUs = static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::microseconds>(gpuWaitEnd - gpuWaitStart).count());
+
+        if (waitResult == SampleWaitResult::Error) {
+            AppLog::instance().error(
+                QStringLiteral("CUDA event wait failed: %1").arg(waitError));
+            continue;
+        }
+
+        if (waitResult == SampleWaitResult::Stopped) {
+            break;
+        }
+
+        if (waitResult == SampleWaitResult::ResetDuringWait) {
+            continue;
+        }
+
+        g_renderPipelineTiming.totalGpuWaitUs.fetch_add(gpuWaitUs);
+        m_impl->sampleCount.fetch_add(1);
+        g_renderPipelineTiming.completedSamples.fetch_add(1);
+        logPipelineTimingIfDue();
 
         FrameReadyCallback callback;
         {

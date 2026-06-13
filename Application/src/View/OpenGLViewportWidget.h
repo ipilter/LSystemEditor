@@ -8,6 +8,7 @@
 #include "OriginGizmoOverlay.h"
 
 #include <QColor>
+#include <QElapsedTimer>
 #include <QOpenGLFunctions_4_5_Core>
 #include <QOpenGLWidget>
 #include <QPoint>
@@ -27,6 +28,7 @@ public:
 
     void setClearColor(const QColor& color);
     void setSceneModel(SceneModel* model);
+    void setEnvironmentHdrPath(const QString& path);
 
     void restartRender();
     void pauseRender();
@@ -84,8 +86,9 @@ private:
     bool m_textureAllocated = false;
     int m_displaySlot = 0;
     bool m_renderPaused = false;
-    bool m_showDisplayTexture = false;
 
     std::atomic<bool> m_hasNewFrame{false};
     std::atomic<bool> m_frameCallbackQueued{false};
+    std::atomic<bool> m_iterationCallbackQueued{false};
+    QElapsedTimer m_displayRefreshTimer;
 };

@@ -42,6 +42,9 @@ public:
     float creaseAngleDeg() const;
     void setCreaseAngleDeg(float value);
 
+    QString environmentHdrPath() const;
+    void setEnvironmentHdrPath(const QString& path);
+
     const std::vector<ProceduralInstance>& proceduralInstances() const;
     void addProceduralInstance(ProceduralInstance instance);
 
@@ -55,6 +58,7 @@ signals:
     void previewStepsPerLevelChanged(int value);
     void boundsOverlayModeChanged(MeshAccelBoundsOverlayMode mode);
     void accelBvhColorChanged(const QColor& color);
+    void environmentHdrPathChanged(const QString& path);
     void sceneChanged();
 
 private:
@@ -71,6 +75,7 @@ private:
     MeshAccelBoundsOverlayMode m_boundsOverlayMode = MeshAccelBoundsOverlayMode::Off;
     QColor m_accelBvhColor = QColor(230, 200, 0);
     float m_creaseAngleDeg = 50.0f;
+    QString m_environmentHdrPath;
     std::vector<ProceduralInstance> m_proceduralInstances;
     GLuint m_pboIds[bufferCount] = {0, 0};
 };

@@ -1,4 +1,6 @@
 #include "CameraDevice.cuh"
+#include "MeshAccel/MeshAccelScene.cuh"
+#include "PathIntegratorRandCore.h"
 #include "PathTracerCuda.h"
 
 #include <cuda_runtime.h>
@@ -7,6 +9,11 @@
 #include <cstdint>
 
 namespace {
+
+__device__ Vec3 float3ToVec3(float3 v)
+{
+    return vecMake3(v.x, v.y, v.z);
+}
 
 __device__ void samplePixel(
     int idx,
@@ -17,28 +24,39 @@ __device__ void samplePixel(
     int stride,
     float4* acc,
     uint32_t* counts,
-    const CameraGpu* camera)
+    const CameraGpu* camera,
+    const MeshAccelSceneGpu* scene,
+    const EnvironmentMapGpu* env,
+    const RenderParamsGpu* params,
+    unsigned int globalSeed)
 {
     if (x % stride != 0 || y % stride != 0) {
         return;
     }
 
     const uint32_t n = counts[idx];
+    const int sampleIndex = static_cast<int>(n);
 
-    const float u = (static_cast<float>(x) + 0.5f) / static_cast<float>(width);
-    const float v = (static_cast<float>(y) + 0.5f) / static_cast<float>(height);
+    curandState rng{};
+    randInitState(&rng, idx, sampleIndex, globalSeed);
+
+    const float u = (static_cast<float>(x) + rand01(&rng)) / static_cast<float>(width);
+    const float v = (static_cast<float>(y) + rand01(&rng)) / static_cast<float>(height);
 
     float3 roFloat{};
     float3 rdFloat{};
     cameraPrimaryRay(camera, u, v, roFloat, rdFloat);
 
-    const float3 encoded = make_float3(
-        0.5f * rdFloat.x + 0.5f,
-        0.5f * rdFloat.y + 0.5f,
-        0.5f * rdFloat.z + 0.5f);
-    const float4 prev = acc[idx];
-    const float4 sample = make_float4(encoded.x, encoded.y, encoded.z, 1.0f);
+    const Vec3 radiance = tracePathRand(
+        float3ToVec3(roFloat),
+        float3ToVec3(rdFloat),
+        scene,
+        params,
+        env,
+        &rng);
+    const float4 sample = make_float4(radiance.x, radiance.y, radiance.z, 1.0f);
 
+    const float4 prev = acc[idx];
     const float invN = 1.0f / static_cast<float>(n + 1);
     acc[idx] = make_float4(
         (prev.x * static_cast<float>(n) + sample.x) * invN,
@@ -52,9 +70,13 @@ __global__ void sampleKernel(
     float4* acc,
     uint32_t* counts,
     const CameraGpu* camera,
+    const MeshAccelSceneGpu* scene,
+    const EnvironmentMapGpu* env,
+    const RenderParamsGpu* params,
     int width,
     int height,
-    int stride)
+    int stride,
+    unsigned int globalSeed)
 {
     const int x = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
     const int y = static_cast<int>(blockIdx.y * blockDim.y + threadIdx.y);
@@ -67,7 +89,7 @@ __global__ void sampleKernel(
     }
 
     const int idx = y * width + x;
-    samplePixel(idx, x, y, width, height, stride, acc, counts, camera);
+    samplePixel(idx, x, y, width, height, stride, acc, counts, camera, scene, env, params, globalSeed);
 }
 
 __global__ void clearAccumulatorKernel(float4* acc, uint32_t* counts, int width, int height)
@@ -157,6 +179,10 @@ bool pathTracerSample(
     int height,
     int stride,
     const CameraGpu* d_camera,
+    const MeshAccelSceneGpu* d_scene,
+    const EnvironmentMapGpu* d_env,
+    const RenderParamsGpu* d_params,
+    unsigned int globalSeed,
     cudaStream_t stream)
 {
     if (d_buffer == nullptr || d_samples == nullptr || d_camera == nullptr || width <= 0 || height <= 0) {
@@ -171,9 +197,13 @@ bool pathTracerSample(
         d_buffer,
         d_samples,
         d_camera,
+        d_scene,
+        d_env,
+        d_params,
         width,
         height,
-        clampedStride);
+        clampedStride,
+        globalSeed);
     return checkLaunch(cudaSuccess);
 }
 

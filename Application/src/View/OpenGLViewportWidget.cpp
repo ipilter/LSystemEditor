@@ -8,6 +8,7 @@
 #include <QMetaObject>
 #include <QMouseEvent>
 #include <QSurfaceFormat>
+#include <QTimer>
 #include <QWheelEvent>
 
 #include <glm/gtc/type_ptr.hpp>
@@ -58,6 +59,8 @@ constexpr unsigned int kQuadIndices[] = {
     2, 1, 3,
 };
 
+constexpr int kMaxDisplayRefreshHz = 60;
+constexpr int kMinDisplayRefreshIntervalMs = 1000 / kMaxDisplayRefreshHz;
 constexpr float kMoveSpeed = 0.05f;
 constexpr float kMouseSensitivity = 0.15f;
 constexpr float kWheelZoomBase = 1.001f;
@@ -131,7 +134,9 @@ OpenGLViewportWidget::OpenGLViewportWidget(QWidget* parent)
         if (!m_frameCallbackQueued.exchange(true)) {
             QMetaObject::invokeMethod(this, "dispatchFrameUpdate", Qt::QueuedConnection);
         }
-        QMetaObject::invokeMethod(this, "notifyIterationChanged", Qt::QueuedConnection);
+        if (!m_iterationCallbackQueued.exchange(true)) {
+            QMetaObject::invokeMethod(this, "notifyIterationChanged", Qt::QueuedConnection);
+        }
     });
 }
 
@@ -247,6 +252,11 @@ void OpenGLViewportWidget::setSceneModel(SceneModel* model)
     }
 }
 
+void OpenGLViewportWidget::setEnvironmentHdrPath(const QString& path)
+{
+    m_pathTracer.setEnvironmentHdrPath(path);
+}
+
 void OpenGLViewportWidget::initializeGL()
 {
     initializeOpenGLFunctions();
@@ -317,12 +327,11 @@ void OpenGLViewportWidget::paintGL()
         if (m_pathTracer.publishDisplayFrame(slot)) {
             uploadDisplayTexture(slot, !m_textureAllocated);
             m_textureAllocated = true;
-            m_showDisplayTexture = true;
             m_displaySlot = 1 - slot;
         }
     }
 
-    if (m_showDisplayTexture && m_textureAllocated && m_texture != 0) {
+    if (m_textureAllocated && m_texture != 0) {
         glUseProgram(m_program);
 
         glActiveTexture(GL_TEXTURE0);
@@ -460,7 +469,6 @@ void OpenGLViewportWidget::mouseReleaseEvent(QMouseEvent* event)
 void OpenGLViewportWidget::wheelEvent(QWheelEvent* event)
 {
     if (!(event->modifiers() & Qt::ControlModifier)
-        || !m_showDisplayTexture
         || !m_textureAllocated
         || m_texture == 0
         || m_model == nullptr) {
@@ -528,11 +536,29 @@ void OpenGLViewportWidget::keyPressEvent(QKeyEvent* event)
 void OpenGLViewportWidget::dispatchFrameUpdate()
 {
     m_frameCallbackQueued.store(false);
+
+    const bool prioritizeFirstFrame = m_pathTracer.currentSampleCount() <= 1;
+
+    if (!prioritizeFirstFrame) {
+        if (!m_displayRefreshTimer.isValid()) {
+            m_displayRefreshTimer.start();
+        } else if (m_displayRefreshTimer.elapsed() < kMinDisplayRefreshIntervalMs) {
+            if (m_hasNewFrame.load() && !m_frameCallbackQueued.exchange(true)) {
+                const int delayMs =
+                    kMinDisplayRefreshIntervalMs - static_cast<int>(m_displayRefreshTimer.elapsed());
+                QTimer::singleShot(delayMs > 0 ? delayMs : 0, this, &OpenGLViewportWidget::dispatchFrameUpdate);
+            }
+            return;
+        }
+    }
+
+    m_displayRefreshTimer.restart();
     update();
 }
 
 void OpenGLViewportWidget::notifyIterationChanged()
 {
+    m_iterationCallbackQueued.store(false);
     emit iterationChanged(m_pathTracer.currentSampleCount());
     emitRenderState();
 }
@@ -570,8 +596,6 @@ void OpenGLViewportWidget::emitRenderState()
 void OpenGLViewportWidget::restartRender()
 {
     m_renderPaused = false;
-    m_showDisplayTexture = false;
-    m_hasNewFrame.store(false);
     m_pathTracer.resetAccumulation();
     if (!m_pathTracer.isRunning()) {
         m_pathTracer.start();
@@ -610,8 +634,8 @@ void OpenGLViewportWidget::recreateGpuBuffers()
 
     m_hasNewFrame.store(false);
     m_frameCallbackQueued.store(false);
+    m_iterationCallbackQueued.store(false);
     m_displaySlot = 0;
-    m_showDisplayTexture = false;
 
     if (m_texture != 0) {
         glDeleteTextures(1, &m_texture);
@@ -658,6 +682,7 @@ void OpenGLViewportWidget::recreateGpuBuffers()
 
     m_pathTracer.setMaxSamplesPerPixel(m_model->maxSamplesPerPixel());
     m_pathTracer.setPreviewStepsPerLevel(m_model->previewStepsPerLevel());
+    m_pathTracer.setEnvironmentHdrPath(m_model->environmentHdrPath());
 
     m_model->setPboIds(m_pbos[0], m_pbos[1]);
 

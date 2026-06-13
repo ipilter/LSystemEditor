@@ -33,6 +33,7 @@ constexpr float kDefaultCreaseAngleDeg = 50.0f;
 constexpr float kMinCreaseAngleDeg = 0.0f;
 constexpr float kMaxCreaseAngleDeg = 180.0f;
 constexpr const char* kCreaseAngleDegKey = "creaseAngleDeg";
+constexpr const char* kEnvironmentHdrPathKey = "environmentHdrPath";
 constexpr const char* kAccelBvhColorRedKey = "accelBvhColorRed";
 constexpr const char* kAccelBvhColorGreenKey = "accelBvhColorGreen";
 constexpr const char* kAccelBvhColorBlueKey = "accelBvhColorBlue";
@@ -205,6 +206,22 @@ void AppSettings::setCreaseAngleDeg(float value)
     }
 
     m_creaseAngleDeg = clamped;
+    save();
+}
+
+QString AppSettings::environmentHdrPath() const
+{
+    return m_environmentHdrPath;
+}
+
+void AppSettings::setEnvironmentHdrPath(const QString& path)
+{
+    const QString normalized = path.trimmed();
+    if (m_environmentHdrPath == normalized) {
+        return;
+    }
+
+    m_environmentHdrPath = normalized;
     save();
 }
 
@@ -381,6 +398,11 @@ void AppSettings::load()
         }
     }
 
+    const QVariant environmentHdrPathValue = settings.value(kEnvironmentHdrPathKey);
+    if (environmentHdrPathValue.isValid()) {
+        m_environmentHdrPath = environmentHdrPathValue.toString().trimmed();
+    }
+
 }
 
 void AppSettings::save()
@@ -405,5 +427,6 @@ void AppSettings::save()
     settings.setValue(kAccelBvhColorGreenKey, m_accelBvhColor.green());
     settings.setValue(kAccelBvhColorBlueKey, m_accelBvhColor.blue());
     settings.setValue(kCreaseAngleDegKey, static_cast<double>(m_creaseAngleDeg));
+    settings.setValue(kEnvironmentHdrPathKey, m_environmentHdrPath);
     settings.sync();
 }

@@ -8,6 +8,7 @@
 #include "SettingsDialog.h"
 #include <QColorDialog>
 #include <QDialog>
+#include <QFileDialog>
 #include <QPlainTextEdit>
 #include <QComboBox>
 #include <QPushButton>
@@ -63,6 +64,7 @@ SceneController::SceneController(SceneModel* model, MainView* view, QObject* par
     syncMaxSamplesSpinBox();
     syncPreviewStepsSpinBox();
     syncBoundsOverlayComboBox();
+    syncEnvironmentHdrPath();
 
     connect(m_view->colorButton(), &QPushButton::clicked, this, &SceneController::onColorButtonClicked);
     connect(m_model, &SceneModel::clearColorChanged, this, &SceneController::onClearColorChanged);
@@ -88,6 +90,15 @@ SceneController::SceneController(SceneModel* model, MainView* view, QObject* par
     connect(m_view->stopButton(), &QPushButton::clicked, this, &SceneController::onStopButtonClicked);
     connect(m_view->settingsButton(), &QPushButton::clicked, this, &SceneController::onSettingsButtonClicked);
     connect(m_view->addPrimitiveButton(), &QPushButton::clicked, this, &SceneController::onAddPrimitiveButtonClicked);
+    connect(
+        m_view->environmentHdrBrowseButton(),
+        &QPushButton::clicked,
+        this,
+        &SceneController::onEnvironmentHdrBrowseClicked);
+    connect(m_model, &SceneModel::environmentHdrPathChanged, this, [this](const QString& path) {
+        syncEnvironmentHdrPath();
+        m_view->viewport()->setEnvironmentHdrPath(path);
+    });
     connect(m_view->viewport(), &OpenGLViewportWidget::iterationChanged, m_view, &MainView::setIteration);
     connect(
         m_view->viewport(),
@@ -242,4 +253,24 @@ void SceneController::syncBoundsOverlayComboBox()
     m_view->boundsOverlayComboBox()->setCurrentIndex(
         comboIndexFromBoundsOverlayMode(m_model->boundsOverlayMode()));
     m_view->boundsOverlayComboBox()->blockSignals(false);
+}
+
+void SceneController::syncEnvironmentHdrPath()
+{
+    m_view->setEnvironmentHdrPath(m_model->environmentHdrPath());
+}
+
+void SceneController::onEnvironmentHdrBrowseClicked()
+{
+    const QString path = QFileDialog::getOpenFileName(
+        m_view,
+        QStringLiteral("Select HDR Environment Map"),
+        m_model->environmentHdrPath(),
+        QStringLiteral("HDR Images (*.hdr *.HDR)"));
+
+    if (path.isEmpty()) {
+        return;
+    }
+
+    m_model->setEnvironmentHdrPath(path);
 }

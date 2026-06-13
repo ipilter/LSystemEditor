@@ -1,6 +1,8 @@
 #pragma once
 
 #include "CameraGpu.h"
+#include "MeshAccel/MeshAccelTypes.h"
+#include "RenderTypes.h"
 
 #include <cuda_runtime.h>
 #include <vector_types.h>
@@ -21,6 +23,10 @@ bool pathTracerSample(
     int height,
     int stride,
     const CameraGpu* d_camera,
+    const MeshAccelSceneGpu* d_scene,
+    const EnvironmentMapGpu* d_env,
+    const RenderParamsGpu* d_params,
+    unsigned int globalSeed,
     cudaStream_t stream);
 
 bool pathTracerCopyToPbo(

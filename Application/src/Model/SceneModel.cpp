@@ -22,6 +22,7 @@ SceneModel::SceneModel(QObject* parent)
     , m_previewStepsPerLevel(AppSettings::instance().previewStepsPerLevel())
     , m_accelBvhColor(AppSettings::instance().accelBvhColor())
     , m_creaseAngleDeg(AppSettings::instance().creaseAngleDeg())
+    , m_environmentHdrPath(AppSettings::instance().environmentHdrPath())
 {
 }
 
@@ -145,6 +146,23 @@ void SceneModel::setCreaseAngleDeg(float value)
     m_creaseAngleDeg = clamped;
     AppSettings::instance().setCreaseAngleDeg(clamped);
     emit sceneChanged();
+}
+
+QString SceneModel::environmentHdrPath() const
+{
+    return m_environmentHdrPath;
+}
+
+void SceneModel::setEnvironmentHdrPath(const QString& path)
+{
+    const QString normalized = path.trimmed();
+    if (m_environmentHdrPath == normalized) {
+        return;
+    }
+
+    m_environmentHdrPath = normalized;
+    AppSettings::instance().setEnvironmentHdrPath(normalized);
+    emit environmentHdrPathChanged(m_environmentHdrPath);
 }
 
 const std::vector<ProceduralInstance>& SceneModel::proceduralInstances() const

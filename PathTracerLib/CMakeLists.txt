@@ -2,6 +2,7 @@ set(PATHTRACER_LIB_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 set(PATHTRACER_LIB_INCLUDE_DIR "${PATHTRACER_LIB_DIR}/src")
 
 set(PATHTRACER_LIB_SOURCES
+    "${PATHTRACER_LIB_DIR}/src/EnvironmentMap.cpp"
     "${PATHTRACER_LIB_DIR}/src/MeshAccel/MeshBvhBuilder.cpp"
     "${PATHTRACER_LIB_DIR}/src/MeshAccel/MeshAccelScene.cpp"
     "${PATHTRACER_LIB_DIR}/src/MeshAccel/MeshSceneContent.cpp"
@@ -16,7 +17,9 @@ add_library(PathTracerLib STATIC
 target_include_directories(PathTracerLib PUBLIC
     "${PATHTRACER_LIB_INCLUDE_DIR}"
     "${PATHTRACER_LIB_INCLUDE_DIR}/Geometry"
-    "${PATHTRACER_LIB_INCLUDE_DIR}/MeshAccel")
+    "${PATHTRACER_LIB_INCLUDE_DIR}/MeshAccel"
+    "${PATHTRACER_LIB_INCLUDE_DIR}/Brdf"
+    "${PATHTRACER_LIB_INCLUDE_DIR}/Sampling")
 target_include_directories(PathTracerLib PRIVATE
     "${CMAKE_SOURCE_DIR}/Application/src"
     "${CMAKE_SOURCE_DIR}/Application/src/MeshBuilder"
@@ -24,6 +27,8 @@ target_include_directories(PathTracerLib PRIVATE
 target_link_libraries(PathTracerLib PUBLIC
     pathtracer_mesh_builder
     CUDA::cudart
+    CUDA::curand
+    stb_image
     Qt6::Core
     Qt6::Gui
     glm::glm)

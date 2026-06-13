@@ -7,9 +7,11 @@
 
 #include <QComboBox>
 #include <QEvent>
+#include <QFileDialog>
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QResizeEvent>
@@ -141,6 +143,18 @@ MainView::MainView(QWidget* parent)
     backgroundRow->addStretch();
     renderLayout->addLayout(backgroundRow);
 
+    auto* environmentRow = new QHBoxLayout();
+    environmentRow->addWidget(new QLabel(QStringLiteral("Environment:"), renderGroup));
+    m_environmentHdrPathEdit = new QLineEdit(renderGroup);
+    m_environmentHdrPathEdit->setReadOnly(true);
+    m_environmentHdrPathEdit->setPlaceholderText(QStringLiteral("No HDR selected"));
+    m_environmentHdrPathEdit->setToolTip(QStringLiteral("HDR image used for image-based lighting"));
+    environmentRow->addWidget(m_environmentHdrPathEdit, 1);
+    m_environmentHdrBrowseButton = new QPushButton(QStringLiteral("Browse…"), renderGroup);
+    m_environmentHdrBrowseButton->setToolTip(QStringLiteral("Select an HDR environment map"));
+    environmentRow->addWidget(m_environmentHdrBrowseButton);
+    renderLayout->addLayout(environmentRow);
+
     auto* renderControlRow = new QHBoxLayout();
     m_startButton = new QPushButton(QStringLiteral("Start"), renderGroup);
     m_startButton->setToolTip(
@@ -229,6 +243,24 @@ OpenGLViewportWidget* MainView::viewport() const
 QPushButton* MainView::colorButton() const
 {
     return m_colorButton;
+}
+
+QLineEdit* MainView::environmentHdrPathEdit() const
+{
+    return m_environmentHdrPathEdit;
+}
+
+QPushButton* MainView::environmentHdrBrowseButton() const
+{
+    return m_environmentHdrBrowseButton;
+}
+
+void MainView::setEnvironmentHdrPath(const QString& path)
+{
+    if (m_environmentHdrPathEdit != nullptr) {
+        m_environmentHdrPathEdit->setText(path);
+        m_environmentHdrPathEdit->setToolTip(path.isEmpty() ? m_environmentHdrPathEdit->placeholderText() : path);
+    }
 }
 
 QSpinBox* MainView::renderWidthSpinBox() const

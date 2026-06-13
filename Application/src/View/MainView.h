@@ -1,11 +1,13 @@
 #pragma once
 
 #include <QSize>
+#include <QString>
 #include <QWidget>
 
 class QComboBox;
 class OpenGLViewportWidget;
 class QLabel;
+class QLineEdit;
 class QPlainTextEdit;
 class QPushButton;
 class QSpinBox;
@@ -21,6 +23,9 @@ public:
 
     OpenGLViewportWidget* viewport() const;
     QPushButton* colorButton() const;
+    QLineEdit* environmentHdrPathEdit() const;
+    QPushButton* environmentHdrBrowseButton() const;
+    void setEnvironmentHdrPath(const QString& path);
     QSpinBox* renderWidthSpinBox() const;
     QSpinBox* renderHeightSpinBox() const;
     QSpinBox* maxSamplesSpinBox() const;
@@ -45,6 +50,8 @@ private:
     QWidget* m_viewportHost = nullptr;
     OpenGLViewportWidget* m_viewport = nullptr;
     QPushButton* m_colorButton = nullptr;
+    QLineEdit* m_environmentHdrPathEdit = nullptr;
+    QPushButton* m_environmentHdrBrowseButton = nullptr;
     QSpinBox* m_renderWidthSpinBox = nullptr;
     QSpinBox* m_renderHeightSpinBox = nullptr;
     QSpinBox* m_maxSamplesSpinBox = nullptr;

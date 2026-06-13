@@ -13,6 +13,8 @@
 #include <mutex>
 #include <vector>
 
+#include <QString>
+
 namespace PathTracerDetail {
 struct PathTracerImpl;
 }
@@ -74,6 +76,9 @@ public:
     CameraGpu lastSampleCamera() const;
 
     void setClearColor(const QColor& color);
+
+    void setEnvironmentHdrPath(const QString& path);
+    QString environmentHdrPath() const;
 
     void rebuildMeshBoundsMesh(const QColor& boundsColor);
     const MeshAccelBoundsMesh& meshBoundsMesh() const;
