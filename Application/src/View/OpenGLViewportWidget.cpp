@@ -23,13 +23,12 @@ layout(location = 0) in vec2 aPos;
 layout(location = 1) in vec2 aTexCoord;
 
 uniform mat4 uViewProj;
-uniform vec2 uQuadScale;
 
 out vec2 vTexCoord;
 
 void main()
 {
-    gl_Position = uViewProj * vec4(aPos * uQuadScale, 0.0, 1.0);
+    gl_Position = uViewProj * vec4(aPos, 0.0, 1.0);
     vTexCoord = aTexCoord;
 }
 )";
@@ -65,20 +64,6 @@ constexpr float kMoveSpeed = 0.05f;
 constexpr float kMouseSensitivity = 0.15f;
 constexpr float kWheelZoomBase = 1.001f;
 
-std::pair<float, float> aspectFitNdcScale(int widgetW, int widgetH, int renderW, int renderH)
-{
-    if (widgetW <= 0 || widgetH <= 0 || renderW <= 0 || renderH <= 0) {
-        return {1.0f, 1.0f};
-    }
-
-    const float widgetAspect = static_cast<float>(widgetW) / static_cast<float>(widgetH);
-    const float renderAspect = static_cast<float>(renderW) / static_cast<float>(renderH);
-    if (widgetAspect > renderAspect) {
-        return {renderAspect / widgetAspect, 1.0f};
-    }
-    return {1.0f, widgetAspect / renderAspect};
-}
-
 void letterboxViewportRect(int widgetW, int widgetH, int renderW, int renderH, int& outX, int& outY, int& outW, int& outH)
 {
     if (widgetW <= 0 || widgetH <= 0 || renderW <= 0 || renderH <= 0) {
@@ -103,6 +88,25 @@ void letterboxViewportRect(int widgetW, int widgetH, int renderW, int renderH, i
         outX = 0;
         outY = (widgetH - outH) / 2;
     }
+}
+
+std::pair<float, float> widgetToLetterboxNdc(
+    float x, float y, int widgetW, int widgetH, int renderW, int renderH)
+{
+    int viewportX = 0;
+    int viewportY = 0;
+    int viewportW = widgetW;
+    int viewportH = widgetH;
+    letterboxViewportRect(widgetW, widgetH, renderW, renderH, viewportX, viewportY, viewportW, viewportH);
+    if (viewportW <= 0 || viewportH <= 0) {
+        return {0.0f, 0.0f};
+    }
+
+    return QuadViewCamera2D::widgetToNdc(
+        x - static_cast<float>(viewportX),
+        y - static_cast<float>(viewportY),
+        viewportW,
+        viewportH);
 }
 
 MeshSceneBuildParams meshSceneBuildParamsForModel(const SceneModel* model)
@@ -332,22 +336,36 @@ void OpenGLViewportWidget::paintGL()
     }
 
     if (m_textureAllocated && m_texture != 0) {
+        const int renderW = m_model->renderSize().width();
+        const int renderH = m_model->renderSize().height();
+
+        int viewportX = 0;
+        int viewportY = 0;
+        int viewportW = width();
+        int viewportH = height();
+        if (renderW > 0 && renderH > 0) {
+            letterboxViewportRect(width(), height(), renderW, renderH, viewportX, viewportY, viewportW, viewportH);
+        }
+
+        glViewport(viewportX, viewportY, viewportW, viewportH);
+        glEnable(GL_SCISSOR_TEST);
+        glScissor(viewportX, viewportY, viewportW, viewportH);
+
         glUseProgram(m_program);
 
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, m_texture);
         glUniform1i(glGetUniformLocation(m_program, "uTexture"), 0);
 
-        const int renderW = m_model->renderSize().width();
-        const int renderH = m_model->renderSize().height();
-        const auto [sx, sy] = aspectFitNdcScale(width(), height(), renderW, renderH);
-        const glm::mat4 viewProj = m_quadView.viewProjMatrix(sx, sy);
+        const glm::mat4 viewProj = m_quadView.viewProjMatrix(1.0f, 1.0f);
         glUniformMatrix4fv(glGetUniformLocation(m_program, "uViewProj"), 1, GL_FALSE, glm::value_ptr(viewProj));
-        glUniform2f(glGetUniformLocation(m_program, "uQuadScale"), sx, sy);
 
         glBindVertexArray(m_vao);
         glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, nullptr);
         glBindVertexArray(0);
+
+        glDisable(GL_SCISSOR_TEST);
+        glViewport(0, 0, width(), height());
     }
 
     drawSceneOverlays();
@@ -433,11 +451,20 @@ void OpenGLViewportWidget::mouseMoveEvent(QMouseEvent* event)
         const QPoint delta = event->pos() - m_lastMousePos;
         m_lastMousePos = event->pos();
 
-        if (width() > 0 && height() > 0) {
-            const float ndcDeltaX = -2.0f * static_cast<float>(delta.x()) / static_cast<float>(width());
-            const float ndcDeltaY = 2.0f * static_cast<float>(delta.y()) / static_cast<float>(height());
-            m_quadView.pan(ndcDeltaX, ndcDeltaY);
-            update();
+        if (m_model != nullptr && width() > 0 && height() > 0) {
+            const int renderW = m_model->renderSize().width();
+            const int renderH = m_model->renderSize().height();
+            int viewportX = 0;
+            int viewportY = 0;
+            int viewportW = width();
+            int viewportH = height();
+            letterboxViewportRect(width(), height(), renderW, renderH, viewportX, viewportY, viewportW, viewportH);
+            if (viewportW > 0 && viewportH > 0) {
+                const float ndcDeltaX = -2.0f * static_cast<float>(delta.x()) / static_cast<float>(viewportW);
+                const float ndcDeltaY = 2.0f * static_cast<float>(delta.y()) / static_cast<float>(viewportH);
+                m_quadView.pan(ndcDeltaX, ndcDeltaY);
+                update();
+            }
         }
         event->accept();
         return;
@@ -483,11 +510,15 @@ void OpenGLViewportWidget::wheelEvent(QWheelEvent* event)
         return;
     }
 
-    const auto [cursorNdcX, cursorNdcY] =
-        QuadViewCamera2D::widgetToNdc(event->position().x(), event->position().y(), width(), height());
-    const auto [sx, sy] = aspectFitNdcScale(width(), height(), renderW, renderH);
+    const auto [cursorNdcX, cursorNdcY] = widgetToLetterboxNdc(
+        static_cast<float>(event->position().x()),
+        static_cast<float>(event->position().y()),
+        width(),
+        height(),
+        renderW,
+        renderH);
     const float factor = std::pow(kWheelZoomBase, static_cast<float>(event->angleDelta().y()));
-    m_quadView.zoomAt(factor, cursorNdcX, cursorNdcY, sx, sy);
+    m_quadView.zoomAt(factor, cursorNdcX, cursorNdcY, 1.0f, 1.0f);
     update();
     event->accept();
 }
