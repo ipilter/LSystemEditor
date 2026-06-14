@@ -39,4 +39,5 @@ bool pathTracerCopyToPbo(
     float backgroundR,
     float backgroundG,
     float backgroundB,
+    float exposure,
     cudaStream_t stream);

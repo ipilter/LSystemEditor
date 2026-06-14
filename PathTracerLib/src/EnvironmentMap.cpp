@@ -126,6 +126,68 @@ bool EnvironmentMap::buildImportanceTables()
     return true;
 }
 
+float EnvironmentMap::estimateLuminancePercentile(float percentile) const
+{
+    if (m_pixels.empty()) {
+        return 0.0f;
+    }
+
+    const float clampedPercentile = std::max(0.0f, std::min(percentile, 1.0f));
+    std::vector<float> luminances;
+    luminances.reserve(m_pixels.size() / 3);
+    for (std::size_t i = 0; i + 2 < m_pixels.size(); i += 3) {
+        const float r = m_pixels[i];
+        const float g = m_pixels[i + 1];
+        const float b = m_pixels[i + 2];
+        luminances.push_back(0.2126f * r + 0.7152f * g + 0.0722f * b);
+    }
+
+    if (luminances.empty()) {
+        return 0.0f;
+    }
+
+    const std::size_t index = static_cast<std::size_t>(
+        clampedPercentile * static_cast<float>(luminances.size() - 1));
+    std::nth_element(luminances.begin(), luminances.begin() + static_cast<std::ptrdiff_t>(index), luminances.end());
+    return luminances[index];
+}
+
+float EnvironmentMap::estimateLogAverageLuminance() const
+{
+    if (m_pixels.empty()) {
+        return 0.0f;
+    }
+
+    double logSum = 0.0;
+    std::size_t count = 0;
+    for (std::size_t i = 0; i + 2 < m_pixels.size(); i += 3) {
+        const float r = m_pixels[i];
+        const float g = m_pixels[i + 1];
+        const float b = m_pixels[i + 2];
+        const float luminance = 0.2126f * r + 0.7152f * g + 0.0722f * b;
+        if (luminance > 1.0e-6f) {
+            logSum += std::log(static_cast<double>(luminance));
+            ++count;
+        }
+    }
+
+    if (count == 0) {
+        return 0.0f;
+    }
+
+    return static_cast<float>(std::exp(logSum / static_cast<double>(count)));
+}
+
+PhysicalCamera EnvironmentMap::suggestPhysicalCamera() const
+{
+    if (!isValid()) {
+        return PhysicalCamera{};
+    }
+
+    const float logAverage = estimateLogAverageLuminance();
+    return PhysicalCamera::forAverageLuminance(logAverage);
+}
+
 bool EnvironmentMap::loadFromHdr(const QString& path, QString* outError)
 {
     clear();

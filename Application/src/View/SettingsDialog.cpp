@@ -59,6 +59,15 @@ SettingsDialog::SettingsDialog(QWidget* parent)
         AppSettings::instance().debounceMsFor(DebounceElementIds::kMaxSamples));
     formLayout->addRow(QStringLiteral("Samples spin debounce:"), m_maxSamplesSpinDebounceSpinBox);
 
+    m_physicalCameraDebounceSpinBox = new QSpinBox(this);
+    m_physicalCameraDebounceSpinBox->setRange(kMinDebounceMs, kMaxDebounceMs);
+    m_physicalCameraDebounceSpinBox->setSuffix(QStringLiteral(" ms"));
+    m_physicalCameraDebounceSpinBox->setToolTip(
+        QStringLiteral("Delay before applying physical camera control changes to the display"));
+    m_physicalCameraDebounceSpinBox->setValue(
+        AppSettings::instance().debounceMsFor(DebounceElementIds::kPhysicalCamera));
+    formLayout->addRow(QStringLiteral("Physical camera debounce:"), m_physicalCameraDebounceSpinBox);
+
     m_creaseAngleSpinBox = new QDoubleSpinBox(this);
     m_creaseAngleSpinBox->setRange(kMinCreaseAngleDeg, kMaxCreaseAngleDeg);
     m_creaseAngleSpinBox->setDecimals(1);
@@ -95,6 +104,9 @@ SettingsDialog::SettingsDialog(QWidget* parent)
         AppSettings::instance().setDebounceMs(
             DebounceElementIds::kMaxSamples,
             m_maxSamplesSpinDebounceSpinBox->value());
+        AppSettings::instance().setDebounceMs(
+            DebounceElementIds::kPhysicalCamera,
+            m_physicalCameraDebounceSpinBox->value());
         AppSettings::instance().setCreaseAngleDeg(static_cast<float>(m_creaseAngleSpinBox->value()));
         AppSettings::instance().setAccelBvhColor(m_accelBvhColor);
         accept();

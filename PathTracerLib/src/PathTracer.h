@@ -1,6 +1,8 @@
 #pragma once
 
 #include "CameraGpu.h"
+#include "PhysicalCamera.h"
+#include "RenderTypes.h"
 #include "RenderAccumulationState.h"
 #include "MeshAccel/MeshAccelBoundsMesh.h"
 #include "MeshAccel/MeshSceneContent.h"
@@ -71,11 +73,19 @@ public:
     int sampleBudgetTotalIterations() const;
     bool isSampleBudgetExhausted() const;
 
+    void setCamera(const PhysicalCamera& camera);
     void setCamera(const CameraGpu& camera);
 
     CameraGpu lastSampleCamera() const;
 
     void setClearColor(const QColor& color);
+
+    void setPhysicalCamera(const PhysicalCamera& camera);
+    void setPhysicalCamera(float fStop, float shutterSpeedSeconds, float iso);
+    PhysicalCamera physicalCamera() const;
+    PhysicalCamera suggestedPhysicalCamera() const;
+
+    bool computeSuggestedCameraFromAccumulator(PhysicalCamera* out) const;
 
     void setEnvironmentHdrPath(const QString& path);
     QString environmentHdrPath() const;

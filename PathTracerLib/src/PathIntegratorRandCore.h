@@ -168,10 +168,15 @@ PATH_INTEGRATOR_RAND_FN Vec3 tracePathRandFromHit(
             PathIntegratorRandDetail::kRayTMax);
         if (!currentHit.hit) {
             const Vec3 envRadiance = lightEvalEnvironmentOrBackground(env, params, currentDir);
+            float misWeight = 1.0f;
+            if (env != nullptr && env->valid != 0) {
+                const float lightPdf = lightPdfEnvironment(env, currentDir);
+                misWeight = misBalanceWeight(sample.pdf, lightPdf);
+            }
             radiance = vecAdd3(radiance, vecMake3(
-                throughput.x * envRadiance.x,
-                throughput.y * envRadiance.y,
-                throughput.z * envRadiance.z));
+                throughput.x * envRadiance.x * misWeight,
+                throughput.y * envRadiance.y * misWeight,
+                throughput.z * envRadiance.z * misWeight));
             break;
         }
     }

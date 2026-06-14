@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Camera3D.h"
+#include "PhysicalCamera.h"
 #include "QuadViewCamera2D.h"
 #include "PathTracer.h"
 #include "RenderAccumulationState.h"
@@ -29,6 +29,9 @@ public:
     void setClearColor(const QColor& color);
     void setSceneModel(SceneModel* model);
     void setEnvironmentHdrPath(const QString& path);
+    void setPhysicalCamera(float fStop, float shutterSpeedSeconds, float iso);
+    PhysicalCamera suggestedPhysicalCamera() const;
+    bool computeSuggestedPhysicalCameraFromAccumulator(PhysicalCamera* out) const;
 
     void restartRender();
     void pauseRender();
@@ -66,7 +69,7 @@ private:
 
     SceneModel* m_model = nullptr;
     PathTracer m_pathTracer;
-    Camera3D m_camera;
+    PhysicalCamera m_camera;
     QuadViewCamera2D m_quadView;
     MeshAccelBoundsOverlay m_boundsOverlay;
     OriginGizmoOverlay m_originGizmo;

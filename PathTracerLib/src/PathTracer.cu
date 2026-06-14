@@ -15,6 +15,17 @@ __device__ Vec3 float3ToVec3(float3 v)
     return vecMake3(v.x, v.y, v.z);
 }
 
+__device__ Vec3 clampSampleFirefly(Vec3 radiance)
+{
+    constexpr float kMaxLuminance = 100.0f;
+    const float luminance = radiance.x * 0.2126f + radiance.y * 0.7152f + radiance.z * 0.0722f;
+    if (luminance <= kMaxLuminance) {
+        return radiance;
+    }
+    const float scale = kMaxLuminance / luminance;
+    return vecMake3(radiance.x * scale, radiance.y * scale, radiance.z * scale);
+}
+
 __device__ void samplePixel(
     int idx,
     int x,
@@ -47,13 +58,14 @@ __device__ void samplePixel(
     float3 rdFloat{};
     cameraPrimaryRay(camera, u, v, roFloat, rdFloat);
 
-    const Vec3 radiance = tracePathRand(
+    Vec3 radiance = tracePathRand(
         float3ToVec3(roFloat),
         float3ToVec3(rdFloat),
         scene,
         params,
         env,
         &rng);
+    radiance = clampSampleFirefly(radiance);
     const float4 sample = make_float4(radiance.x, radiance.y, radiance.z, 1.0f);
 
     const float4 prev = acc[idx];
@@ -105,6 +117,16 @@ __global__ void clearAccumulatorKernel(float4* acc, uint32_t* counts, int width,
     counts[idx] = 0;
 }
 
+__device__ float3 applyDisplayPipeline(float3 rgb, float exposure)
+{
+    rgb = make_float3(rgb.x * exposure, rgb.y * exposure, rgb.z * exposure);
+    rgb = make_float3(
+        rgb.x / (1.0f + rgb.x),
+        rgb.y / (1.0f + rgb.y),
+        rgb.z / (1.0f + rgb.z));
+    return rgb;
+}
+
 __global__ void copyToPboKernel(
     const float4* acc,
     const uint32_t* counts,
@@ -114,7 +136,8 @@ __global__ void copyToPboKernel(
     int stride,
     float backgroundR,
     float backgroundG,
-    float backgroundB)
+    float backgroundB,
+    float exposure)
 {
     const int x = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
     const int y = static_cast<int>(blockIdx.y * blockDim.y + threadIdx.y);
@@ -131,6 +154,8 @@ __global__ void copyToPboKernel(
         const float4 v = acc[aidx];
         rgb = make_float3(v.x, v.y, v.z);
     }
+
+    rgb = applyDisplayPipeline(rgb, exposure);
 
     const unsigned char r = static_cast<unsigned char>(fminf(fmaxf(rgb.x, 0.0f), 1.0f) * 255.0f);
     const unsigned char g = static_cast<unsigned char>(fminf(fmaxf(rgb.y, 0.0f), 1.0f) * 255.0f);
@@ -217,6 +242,7 @@ bool pathTracerCopyToPbo(
     float backgroundR,
     float backgroundG,
     float backgroundB,
+    float exposure,
     cudaStream_t stream)
 {
     if (acc == nullptr || counts == nullptr || pbo == nullptr || width <= 0 || height <= 0) {
@@ -235,6 +261,7 @@ bool pathTracerCopyToPbo(
         clampedStride,
         backgroundR,
         backgroundG,
-        backgroundB);
+        backgroundB,
+        exposure);
     return checkLaunch(cudaSuccess);
 }

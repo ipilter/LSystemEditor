@@ -3,6 +3,7 @@
 #include "AppLog.h"
 #include "CameraGpu.h"
 #include "EnvironmentMap.h"
+#include "PhysicalCamera.h"
 #include "PathTracerSampleBudget.h"
 #include "MeshAccel/MeshAccelBoundsMesh.h"
 #include "MeshAccel/MeshAccelScene.h"
@@ -21,6 +22,8 @@
 
 #include <atomic>
 #include <chrono>
+#include <cmath>
+#include <algorithm>
 #include <condition_variable>
 #include <mutex>
 #include <thread>
@@ -40,8 +43,8 @@ struct PathTracerDetail::PathTracerImpl
 {
     AccumulatorData acc;
     CameraGpu* d_camera = nullptr;
-    CameraGpu hostCamera{};
-    std::mutex cameraMutex;
+    PhysicalCamera hostCamera{};
+    mutable std::mutex cameraMutex;
     std::atomic<bool> cameraDirty{true};
     cudaGraphicsResource_t pboResources[2] = {nullptr, nullptr};
     cudaStream_t stream = nullptr;
@@ -70,6 +73,7 @@ struct PathTracerDetail::PathTracerImpl
     EnvironmentMap environmentMap;
     RenderParamsGpu hostRenderParams{};
     RenderParamsGpu* d_renderParams = nullptr;
+    PhysicalCamera suggestedPhysicalCamera{};
     QString environmentHdrPath;
     std::atomic<bool> environmentDirty{true};
     std::atomic<bool> renderParamsDirty{true};
@@ -452,6 +456,7 @@ bool reloadEnvironmentMap(PathTracerDetail::PathTracerImpl* impl, cudaStream_t s
         impl->environmentMap.clear();
         impl->environmentMap.upload(stream);
         impl->environmentDirty.store(false);
+        impl->suggestedPhysicalCamera = PhysicalCamera{};
         return true;
     }
 
@@ -463,6 +468,7 @@ bool reloadEnvironmentMap(PathTracerDetail::PathTracerImpl* impl, cudaStream_t s
         impl->environmentMap.clear();
         impl->environmentMap.upload(stream);
         impl->environmentDirty.store(false);
+        impl->suggestedPhysicalCamera = PhysicalCamera{};
         return false;
     }
 
@@ -473,6 +479,7 @@ bool reloadEnvironmentMap(PathTracerDetail::PathTracerImpl* impl, cudaStream_t s
         return false;
     }
 
+    impl->suggestedPhysicalCamera = impl->environmentMap.suggestPhysicalCamera();
     impl->environmentDirty.store(false);
     return true;
 }
@@ -492,14 +499,7 @@ bool uploadEnvironmentIfDirty(PathTracerDetail::PathTracerImpl* impl, cudaStream
 
 CameraGpu defaultCameraGpu()
 {
-    CameraGpu camera{};
-    camera.position = make_float3(0.0f, 0.0f, 0.0f);
-    camera.orientation = make_float4(1.0f, 0.0f, 0.0f, 0.0f);
-    camera.fovY = 1.04719755f;
-    camera.aspect = 1.0f;
-    camera.nearPlane = 0.1f;
-    camera.farPlane = 1000.0f;
-    return camera;
+    return PhysicalCamera::defaultGpu();
 }
 
 bool initCameraGpu(PathTracerDetail::PathTracerImpl* impl, QString* outError)
@@ -521,7 +521,7 @@ bool initCameraGpu(PathTracerDetail::PathTracerImpl* impl, QString* outError)
         return false;
     }
 
-    impl->hostCamera = defaultCameraGpu();
+    impl->hostCamera = PhysicalCamera{};
     impl->cameraDirty.store(true);
     return true;
 }
@@ -538,7 +538,7 @@ bool uploadCameraIfDirty(PathTracerDetail::PathTracerImpl* impl, cudaStream_t st
     CameraGpu cameraCopy{};
     {
         std::lock_guard<std::mutex> lock(impl->cameraMutex);
-        cameraCopy = impl->hostCamera;
+        cameraCopy = impl->hostCamera.toGpu();
     }
 
     if (impl->acc.width > 0 && impl->acc.height > 0) {
@@ -572,7 +572,7 @@ CameraGpu sampleCameraForFrame(PathTracerDetail::PathTracerImpl* impl)
 
     {
         std::lock_guard<std::mutex> lock(impl->cameraMutex);
-        camera = impl->hostCamera;
+        camera = impl->hostCamera.toGpu();
     }
 
     if (impl->acc.width > 0 && impl->acc.height > 0) {
@@ -1043,6 +1043,12 @@ bool PathTracer::publishDisplayFrame(int slot)
 
     const int stride = displayStrideForCopy(m_impl.get());
 
+    float exposure = 1.0f;
+    {
+        std::lock_guard<std::mutex> lock(m_impl->cameraMutex);
+        exposure = m_impl->hostCamera.exposureMultiplier();
+    }
+
     const bool copied = pathTracerCopyToPbo(
         m_impl->acc.d_buffer,
         m_impl->acc.d_samples,
@@ -1053,6 +1059,7 @@ bool PathTracer::publishDisplayFrame(int slot)
         m_impl->backgroundR,
         m_impl->backgroundG,
         m_impl->backgroundB,
+        exposure,
         m_impl->stream);
 
     if (!copied) {
@@ -1118,6 +1125,26 @@ bool PathTracer::isSampleBudgetExhausted() const
         m_impl->maxSamplesPerPixel.load());
 }
 
+void PathTracer::setCamera(const PhysicalCamera& camera)
+{
+    PhysicalCamera stored = camera;
+    if (m_impl->acc.width > 0 && m_impl->acc.height > 0) {
+        stored.setAspect(m_impl->acc.width, m_impl->acc.height);
+    }
+
+    CameraGpu gpuCamera = stored.toGpu();
+    {
+        std::lock_guard<std::mutex> lock(m_impl->cameraMutex);
+        m_impl->hostCamera.copyGeometryFrom(stored);
+    }
+    {
+        std::lock_guard<std::mutex> lock(m_impl->lastSampleCameraMutex);
+        m_impl->lastSampleCamera = gpuCamera;
+    }
+    m_impl->cameraDirty.store(true);
+    notifyWorker();
+}
+
 void PathTracer::setCamera(const CameraGpu& camera)
 {
     CameraGpu stored = camera;
@@ -1128,7 +1155,7 @@ void PathTracer::setCamera(const CameraGpu& camera)
 
     {
         std::lock_guard<std::mutex> lock(m_impl->cameraMutex);
-        m_impl->hostCamera = stored;
+        m_impl->hostCamera.applyGpuGeometry(stored);
     }
     {
         std::lock_guard<std::mutex> lock(m_impl->lastSampleCameraMutex);
@@ -1158,6 +1185,125 @@ void PathTracer::setClearColor(const QColor& color)
     if (m_impl->configured.load()) {
         resetAccumulation();
     }
+}
+
+void PathTracer::setPhysicalCamera(const PhysicalCamera& camera)
+{
+    std::lock_guard<std::mutex> lock(m_impl->cameraMutex);
+    m_impl->hostCamera.fStop = PhysicalCamera::clampFStop(camera.fStop);
+    m_impl->hostCamera.shutterSpeedSeconds = PhysicalCamera::clampShutterSpeedSeconds(camera.shutterSpeedSeconds);
+    m_impl->hostCamera.iso = PhysicalCamera::clampIso(camera.iso);
+}
+
+void PathTracer::setPhysicalCamera(float fStop, float shutterSpeedSeconds, float iso)
+{
+    PhysicalCamera camera{};
+    camera.fStop = fStop;
+    camera.shutterSpeedSeconds = shutterSpeedSeconds;
+    camera.iso = iso;
+    setPhysicalCamera(camera);
+}
+
+PhysicalCamera PathTracer::physicalCamera() const
+{
+    std::lock_guard<std::mutex> lock(m_impl->cameraMutex);
+    return m_impl->hostCamera;
+}
+
+PhysicalCamera PathTracer::suggestedPhysicalCamera() const
+{
+    return m_impl->suggestedPhysicalCamera;
+}
+
+bool PathTracer::computeSuggestedCameraFromAccumulator(PhysicalCamera* out) const
+{
+    if (out == nullptr || m_impl == nullptr || !m_impl->configured.load()) {
+        return false;
+    }
+
+    if (m_impl->acc.d_buffer == nullptr || m_impl->acc.d_samples == nullptr || m_impl->acc.width <= 0 ||
+        m_impl->acc.height <= 0) {
+        return false;
+    }
+
+    const int width = m_impl->acc.width;
+    const int height = m_impl->acc.height;
+    const std::size_t pixelCount = static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
+
+    std::vector<float4> hostBuffer(pixelCount);
+    std::vector<uint32_t> hostCounts(pixelCount);
+
+    {
+        std::lock_guard<std::mutex> streamLock(m_impl->streamMutex);
+        if (m_impl->sampleCompleteEvent != nullptr) {
+            const cudaError_t waitError =
+                cudaStreamWaitEvent(m_impl->stream, m_impl->sampleCompleteEvent, 0);
+            if (waitError != cudaSuccess) {
+                return false;
+            }
+        }
+
+        const cudaError_t bufferError = cudaMemcpy(
+            hostBuffer.data(),
+            m_impl->acc.d_buffer,
+            pixelCount * sizeof(float4),
+            cudaMemcpyDeviceToHost);
+        const cudaError_t countsError = cudaMemcpy(
+            hostCounts.data(),
+            m_impl->acc.d_samples,
+            pixelCount * sizeof(uint32_t),
+            cudaMemcpyDeviceToHost);
+        if (bufferError != cudaSuccess || countsError != cudaSuccess) {
+            return false;
+        }
+    }
+
+    constexpr int kSampleStride = 8;
+    std::vector<float> luminances;
+    luminances.reserve(pixelCount / static_cast<std::size_t>(kSampleStride * kSampleStride) + 1);
+
+    for (int y = 0; y < height; y += kSampleStride) {
+        for (int x = 0; x < width; x += kSampleStride) {
+            const std::size_t index = static_cast<std::size_t>(y) * static_cast<std::size_t>(width) +
+                static_cast<std::size_t>(x);
+            if (hostCounts[index] == 0) {
+                continue;
+            }
+
+            const float4 value = hostBuffer[index];
+            const float luminance = 0.2126f * value.x + 0.7152f * value.y + 0.0722f * value.z;
+            if (luminance > 1.0e-6f) {
+                luminances.push_back(luminance);
+            }
+        }
+    }
+
+    if (luminances.empty()) {
+        return false;
+    }
+
+    std::vector<float> sorted = luminances;
+    const std::size_t p99Index = static_cast<std::size_t>(0.99f * static_cast<float>(sorted.size() - 1));
+    std::nth_element(sorted.begin(), sorted.begin() + static_cast<std::ptrdiff_t>(p99Index), sorted.end());
+    const float luminanceCap = sorted[p99Index];
+
+    double logSum = 0.0;
+    int validCount = 0;
+    for (const float luminance : luminances) {
+        if (luminance > luminanceCap) {
+            continue;
+        }
+        logSum += std::log(static_cast<double>(luminance));
+        ++validCount;
+    }
+
+    if (validCount == 0) {
+        return false;
+    }
+
+    const float geometricMean = static_cast<float>(std::exp(logSum / static_cast<double>(validCount)));
+    *out = PhysicalCamera::forAverageLuminance(geometricMean);
+    return true;
 }
 
 void PathTracer::setEnvironmentHdrPath(const QString& path)

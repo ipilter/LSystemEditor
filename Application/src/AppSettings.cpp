@@ -1,5 +1,7 @@
 #include "AppSettings.h"
 
+#include "PhysicalCamera.h"
+
 #include <QSettings>
 
 namespace {
@@ -34,6 +36,9 @@ constexpr float kMinCreaseAngleDeg = 0.0f;
 constexpr float kMaxCreaseAngleDeg = 180.0f;
 constexpr const char* kCreaseAngleDegKey = "creaseAngleDeg";
 constexpr const char* kEnvironmentHdrPathKey = "environmentHdrPath";
+constexpr const char* kFStopKey = "fStop";
+constexpr const char* kShutterSpeedSecondsKey = "shutterSpeedSeconds";
+constexpr const char* kIsoKey = "iso";
 constexpr const char* kAccelBvhColorRedKey = "accelBvhColorRed";
 constexpr const char* kAccelBvhColorGreenKey = "accelBvhColorGreen";
 constexpr const char* kAccelBvhColorBlueKey = "accelBvhColorBlue";
@@ -43,11 +48,13 @@ constexpr const char* kLegacyAccelAabbColorBlueKey = "accelAabbColorBlue";
 constexpr const char* kLegacyAccelOctreeColorRedKey = "accelOctreeColorRed";
 constexpr const char* kLegacyAccelOctreeColorGreenKey = "accelOctreeColorGreen";
 constexpr const char* kLegacyAccelOctreeColorBlueKey = "accelOctreeColorBlue";
+
 bool isKnownDebounceElementId(const QString& elementId)
 {
     return elementId == DebounceElementIds::kRenderSize
         || elementId == DebounceElementIds::kMaxSamples
-        || elementId == DebounceElementIds::kPreviewSteps;
+        || elementId == DebounceElementIds::kPreviewSteps
+        || elementId == DebounceElementIds::kPhysicalCamera;
 }
 
 } // namespace
@@ -69,6 +76,9 @@ AppSettings::AppSettings(QObject* parent)
     , m_renderSize(kDefaultRenderDimension, kDefaultRenderDimension)
     , m_clearColor(kDefaultClearColorComponent, kDefaultClearColorComponent, kDefaultClearColorComponent)
     , m_maxSamplesPerPixel(kDefaultMaxSamplesPerPixel)
+    , m_fStop(PhysicalCamera::kDefaultFStop)
+    , m_shutterSpeedSeconds(PhysicalCamera::kDefaultShutterSpeedSeconds)
+    , m_iso(PhysicalCamera::kDefaultIso)
 {
     seedDefaultDebounceValues();
     load();
@@ -82,6 +92,9 @@ int AppSettings::defaultDebounceMsFor(const QString& elementId)
     if (elementId == DebounceElementIds::kPreviewSteps) {
         return kDefaultPreviewStepsDebounceMs;
     }
+    if (elementId == DebounceElementIds::kPhysicalCamera) {
+        return kDefaultUiDebounceMs;
+    }
     return kDefaultUiDebounceMs;
 }
 
@@ -90,6 +103,7 @@ void AppSettings::seedDefaultDebounceValues()
     m_debounceMs.insert(DebounceElementIds::kRenderSize, kDefaultUiDebounceMs);
     m_debounceMs.insert(DebounceElementIds::kMaxSamples, kDefaultMaxSamplesDebounceMs);
     m_debounceMs.insert(DebounceElementIds::kPreviewSteps, kDefaultPreviewStepsDebounceMs);
+    m_debounceMs.insert(DebounceElementIds::kPhysicalCamera, kDefaultUiDebounceMs);
 }
 
 int AppSettings::debounceMsFor(const QString& elementId) const
@@ -223,6 +237,69 @@ void AppSettings::setEnvironmentHdrPath(const QString& path)
 
     m_environmentHdrPath = normalized;
     save();
+}
+
+float AppSettings::fStop() const
+{
+    return m_fStop;
+}
+
+void AppSettings::setFStop(float value)
+{
+    const float clamped = clampFStop(value);
+    if (m_fStop == clamped) {
+        return;
+    }
+
+    m_fStop = clamped;
+    save();
+}
+
+float AppSettings::shutterSpeedSeconds() const
+{
+    return m_shutterSpeedSeconds;
+}
+
+void AppSettings::setShutterSpeedSeconds(float value)
+{
+    const float clamped = clampShutterSpeedSeconds(value);
+    if (m_shutterSpeedSeconds == clamped) {
+        return;
+    }
+
+    m_shutterSpeedSeconds = clamped;
+    save();
+}
+
+float AppSettings::iso() const
+{
+    return m_iso;
+}
+
+void AppSettings::setIso(float value)
+{
+    const float clamped = clampIso(value);
+    if (m_iso == clamped) {
+        return;
+    }
+
+    m_iso = clamped;
+    save();
+}
+
+float AppSettings::clampFStop(float value)
+{
+    return PhysicalCamera::clampFStop(value);
+}
+
+float AppSettings::clampShutterSpeedSeconds(float value)
+{
+    return PhysicalCamera::clampShutterSpeedSeconds(value);
+}
+
+float AppSettings::clampIso(float value)
+{
+    return PhysicalCamera::snapIsoToNearestPreset(value);
 }
 
 float AppSettings::clampCreaseAngleDeg(float value)
@@ -403,6 +480,33 @@ void AppSettings::load()
         m_environmentHdrPath = environmentHdrPathValue.toString().trimmed();
     }
 
+    const QVariant fStopValue = settings.value(kFStopKey);
+    if (fStopValue.isValid()) {
+        bool ok = false;
+        const float fStop = static_cast<float>(fStopValue.toDouble(&ok));
+        if (ok) {
+            m_fStop = clampFStop(fStop);
+        }
+    }
+
+    const QVariant shutterSpeedValue = settings.value(kShutterSpeedSecondsKey);
+    if (shutterSpeedValue.isValid()) {
+        bool ok = false;
+        const float shutterSpeed = static_cast<float>(shutterSpeedValue.toDouble(&ok));
+        if (ok) {
+            m_shutterSpeedSeconds = clampShutterSpeedSeconds(shutterSpeed);
+        }
+    }
+
+    const QVariant isoValue = settings.value(kIsoKey);
+    if (isoValue.isValid()) {
+        bool ok = false;
+        const float iso = static_cast<float>(isoValue.toDouble(&ok));
+        if (ok) {
+            m_iso = clampIso(iso);
+        }
+    }
+
 }
 
 void AppSettings::save()
@@ -428,5 +532,8 @@ void AppSettings::save()
     settings.setValue(kAccelBvhColorBlueKey, m_accelBvhColor.blue());
     settings.setValue(kCreaseAngleDegKey, static_cast<double>(m_creaseAngleDeg));
     settings.setValue(kEnvironmentHdrPathKey, m_environmentHdrPath);
+    settings.setValue(kFStopKey, static_cast<double>(m_fStop));
+    settings.setValue(kShutterSpeedSecondsKey, static_cast<double>(m_shutterSpeedSeconds));
+    settings.setValue(kIsoKey, static_cast<double>(m_iso));
     settings.sync();
 }

@@ -4,6 +4,7 @@
 #include "MainView.h"
 #include "OpenGLViewportWidget.h"
 #include "LSystemTransformDialog.h"
+#include "PhysicalCamera.h"
 #include "SceneModel.h"
 #include "SettingsDialog.h"
 #include <QColorDialog>
@@ -11,8 +12,11 @@
 #include <QFileDialog>
 #include <QPlainTextEdit>
 #include <QComboBox>
+#include <QDoubleSpinBox>
 #include <QPushButton>
 #include <QSpinBox>
+
+#include <cmath>
 
 namespace {
 
@@ -46,6 +50,45 @@ int comboIndexFromBoundsOverlayMode(MeshAccelBoundsOverlayMode mode)
     }
 }
 
+int shutterComboIndexForSeconds(QComboBox* comboBox, float shutterSpeedSeconds)
+{
+    if (comboBox == nullptr || comboBox->count() == 0) {
+        return 0;
+    }
+
+    int bestIndex = 0;
+    float bestDelta = std::abs(comboBox->itemData(0).toFloat() - shutterSpeedSeconds);
+    for (int i = 1; i < comboBox->count(); ++i) {
+        const float delta = std::abs(comboBox->itemData(i).toFloat() - shutterSpeedSeconds);
+        if (delta < bestDelta) {
+            bestDelta = delta;
+            bestIndex = i;
+        }
+    }
+    return bestIndex;
+}
+
+int isoComboIndexForValue(QComboBox* comboBox, float iso)
+{
+    if (comboBox == nullptr || comboBox->count() == 0) {
+        return 0;
+    }
+
+    int bestIndex = 0;
+    float bestDelta = std::abs(comboBox->itemData(0).toFloat() - iso);
+    for (int i = 1; i < comboBox->count(); ++i) {
+        const float delta = std::abs(comboBox->itemData(i).toFloat() - iso);
+        if (delta < bestDelta) {
+            bestDelta = delta;
+            bestIndex = i;
+        }
+    }
+    return bestIndex;
+}
+
+constexpr int kFrameAutoExposureWarmupSamples = 64;
+constexpr int kFrameAutoExposureRefineSamples = 512;
+
 } // namespace
 
 SceneController::SceneController(SceneModel* model, MainView* view, QObject* parent)
@@ -55,6 +98,7 @@ SceneController::SceneController(SceneModel* model, MainView* view, QObject* par
     , m_renderSizeDebounce(AppSettings::instance().debounceMsFor(DebounceElementIds::kRenderSize), this)
     , m_maxSamplesDebounce(AppSettings::instance().debounceMsFor(DebounceElementIds::kMaxSamples), this)
     , m_previewStepsDebounce(AppSettings::instance().debounceMsFor(DebounceElementIds::kPreviewSteps), this)
+    , m_physicalCameraDebounce(AppSettings::instance().debounceMsFor(DebounceElementIds::kPhysicalCamera), this)
 {
     syncColorButtonStyle();
     m_view->viewport()->setClearColor(m_model->clearColor());
@@ -65,6 +109,9 @@ SceneController::SceneController(SceneModel* model, MainView* view, QObject* par
     syncPreviewStepsSpinBox();
     syncBoundsOverlayComboBox();
     syncEnvironmentHdrPath();
+    syncPhysicalCameraUi();
+    updateExposureValueLabel();
+    applyPhysicalCameraToViewport();
 
     connect(m_view->colorButton(), &QPushButton::clicked, this, &SceneController::onColorButtonClicked);
     connect(m_model, &SceneModel::clearColorChanged, this, &SceneController::onClearColorChanged);
@@ -98,7 +145,36 @@ SceneController::SceneController(SceneModel* model, MainView* view, QObject* par
     connect(m_model, &SceneModel::environmentHdrPathChanged, this, [this](const QString& path) {
         syncEnvironmentHdrPath();
         m_view->viewport()->setEnvironmentHdrPath(path);
+        m_pendingFrameAutoExposure = !path.isEmpty();
+        m_pendingAccumulatorExposureRefine = false;
     });
+    connect(m_view->fStopSpinBox(), QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [this](double value) {
+        m_model->setFStop(static_cast<float>(value));
+        updateExposureValueLabel();
+        m_physicalCameraDebounce.schedule();
+    });
+    connect(
+        m_view->shutterSpeedComboBox(),
+        QOverload<int>::of(&QComboBox::currentIndexChanged),
+        this,
+        [this](int) {
+            const float shutterSpeedSeconds = m_view->shutterSpeedComboBox()->currentData().toFloat();
+            m_model->setShutterSpeedSeconds(shutterSpeedSeconds);
+            updateExposureValueLabel();
+            m_physicalCameraDebounce.schedule();
+        });
+    connect(
+        m_view->isoComboBox(),
+        QOverload<int>::of(&QComboBox::currentIndexChanged),
+        this,
+        [this](int) {
+            const float iso = m_view->isoComboBox()->currentData().toFloat();
+            m_model->setIso(iso);
+            updateExposureValueLabel();
+            m_physicalCameraDebounce.schedule();
+        });
+    connect(&m_physicalCameraDebounce, &DebounceTimer::triggered, this, &SceneController::applyPhysicalCameraToViewport);
+    connect(m_view->viewport(), &OpenGLViewportWidget::iterationChanged, this, &SceneController::onIterationChangedForAutoExposure);
     connect(m_view->viewport(), &OpenGLViewportWidget::iterationChanged, m_view, &MainView::setIteration);
     connect(
         m_view->viewport(),
@@ -113,6 +189,8 @@ SceneController::SceneController(SceneModel* model, MainView* view, QObject* par
                     m_maxSamplesDebounce.setIntervalMs(ms);
                 } else if (elementId == DebounceElementIds::kPreviewSteps) {
                     m_previewStepsDebounce.setIntervalMs(ms);
+                } else if (elementId == DebounceElementIds::kPhysicalCamera) {
+                    m_physicalCameraDebounce.setIntervalMs(ms);
                 }
             });
 }
@@ -273,4 +351,68 @@ void SceneController::onEnvironmentHdrBrowseClicked()
     }
 
     m_model->setEnvironmentHdrPath(path);
+}
+
+void SceneController::onIterationChangedForAutoExposure(int sampleCount)
+{
+    if (m_pendingFrameAutoExposure && sampleCount >= kFrameAutoExposureWarmupSamples) {
+        applySuggestedPhysicalCameraFromHdr();
+        m_pendingFrameAutoExposure = false;
+        m_pendingAccumulatorExposureRefine = true;
+    }
+
+    if (!m_pendingAccumulatorExposureRefine || sampleCount < kFrameAutoExposureRefineSamples) {
+        return;
+    }
+
+    PhysicalCamera suggested{};
+    if (m_view->viewport()->computeSuggestedPhysicalCameraFromAccumulator(&suggested)) {
+        m_model->setFStop(suggested.fStop);
+        m_model->setShutterSpeedSeconds(suggested.shutterSpeedSeconds);
+        m_model->setIso(suggested.iso);
+        syncPhysicalCameraUi();
+        applyPhysicalCameraToViewport();
+    }
+
+    m_pendingAccumulatorExposureRefine = false;
+}
+
+void SceneController::applyPhysicalCameraToViewport()
+{
+    m_view->viewport()->setPhysicalCamera(m_model->fStop(), m_model->shutterSpeedSeconds(), m_model->iso());
+}
+
+void SceneController::applySuggestedPhysicalCameraFromHdr()
+{
+    const PhysicalCamera suggested = m_view->viewport()->suggestedPhysicalCamera();
+    m_model->setFStop(suggested.fStop);
+    m_model->setShutterSpeedSeconds(suggested.shutterSpeedSeconds);
+    m_model->setIso(suggested.iso);
+    syncPhysicalCameraUi();
+    applyPhysicalCameraToViewport();
+}
+
+void SceneController::syncPhysicalCameraUi()
+{
+    m_view->fStopSpinBox()->blockSignals(true);
+    m_view->shutterSpeedComboBox()->blockSignals(true);
+    m_view->isoComboBox()->blockSignals(true);
+    m_view->fStopSpinBox()->setValue(static_cast<double>(m_model->fStop()));
+    m_view->shutterSpeedComboBox()->setCurrentIndex(
+        shutterComboIndexForSeconds(m_view->shutterSpeedComboBox(), m_model->shutterSpeedSeconds()));
+    m_view->isoComboBox()->setCurrentIndex(
+        isoComboIndexForValue(m_view->isoComboBox(), m_model->iso()));
+    m_view->fStopSpinBox()->blockSignals(false);
+    m_view->shutterSpeedComboBox()->blockSignals(false);
+    m_view->isoComboBox()->blockSignals(false);
+    updateExposureValueLabel();
+}
+
+void SceneController::updateExposureValueLabel()
+{
+    const float fStop = static_cast<float>(m_view->fStopSpinBox()->value());
+    const float shutterSpeedSeconds = m_view->shutterSpeedComboBox()->currentData().toFloat();
+    const float iso = m_view->isoComboBox()->currentData().toFloat();
+    const float ev = PhysicalCamera::exposureValue(fStop, shutterSpeedSeconds, iso);
+    m_view->setExposureValueText(QString::number(static_cast<double>(ev), 'f', 1));
 }

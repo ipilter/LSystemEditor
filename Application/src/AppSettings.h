@@ -11,6 +11,7 @@ namespace DebounceElementIds {
 inline constexpr const char* kRenderSize = "renderSize";
 inline constexpr const char* kMaxSamples = "maxSamples";
 inline constexpr const char* kPreviewSteps = "previewSteps";
+inline constexpr const char* kPhysicalCamera = "physicalCamera";
 
 } // namespace DebounceElementIds
 
@@ -50,6 +51,15 @@ public:
     QString environmentHdrPath() const;
     void setEnvironmentHdrPath(const QString& path);
 
+    float fStop() const;
+    void setFStop(float value);
+
+    float shutterSpeedSeconds() const;
+    void setShutterSpeedSeconds(float value);
+
+    float iso() const;
+    void setIso(float value);
+
     void load();
     void save();
 
@@ -62,6 +72,9 @@ private:
     static int clampMaxSamplesPerPixel(int value);
     static int clampPreviewStepsPerLevel(int value);
     static float clampCreaseAngleDeg(float value);
+    static float clampFStop(float value);
+    static float clampShutterSpeedSeconds(float value);
+    static float clampIso(float value);
     void seedDefaultDebounceValues();
 
     static AppSettings* s_instance;
@@ -74,4 +87,7 @@ private:
     QColor m_accelBvhColor = QColor(230, 200, 0);
     float m_creaseAngleDeg = 50.0f;
     QString m_environmentHdrPath;
+    float m_fStop = 0.0f;
+    float m_shutterSpeedSeconds = 0.0f;
+    float m_iso = 0.0f;
 };

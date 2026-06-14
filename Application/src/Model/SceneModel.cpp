@@ -1,6 +1,7 @@
 #include "SceneModel.h"
 
 #include "AppSettings.h"
+#include "PhysicalCamera.h"
 
 namespace {
 
@@ -9,7 +10,7 @@ constexpr int kMaxRenderDimension = 10000;
 constexpr int kMinMaxSamplesPerPixel = 0;
 constexpr int kMaxMaxSamplesPerPixel = 1'000'000;
 constexpr int kMinPreviewStepsPerLevel = 0;
-constexpr int kMaxPreviewStepsPerLevel = 128;
+constexpr int kMaxPreviewStepsPerLevel = 8;
 constexpr float kMinCreaseAngleDeg = 0.0f;
 constexpr float kMaxCreaseAngleDeg = 180.0f;
 } // namespace
@@ -23,6 +24,9 @@ SceneModel::SceneModel(QObject* parent)
     , m_accelBvhColor(AppSettings::instance().accelBvhColor())
     , m_creaseAngleDeg(AppSettings::instance().creaseAngleDeg())
     , m_environmentHdrPath(AppSettings::instance().environmentHdrPath())
+    , m_fStop(AppSettings::instance().fStop())
+    , m_shutterSpeedSeconds(AppSettings::instance().shutterSpeedSeconds())
+    , m_iso(AppSettings::instance().iso())
 {
 }
 
@@ -165,6 +169,57 @@ void SceneModel::setEnvironmentHdrPath(const QString& path)
     emit environmentHdrPathChanged(m_environmentHdrPath);
 }
 
+float SceneModel::fStop() const
+{
+    return m_fStop;
+}
+
+void SceneModel::setFStop(float value)
+{
+    const float clamped = clampFStop(value);
+    if (m_fStop == clamped) {
+        return;
+    }
+
+    m_fStop = clamped;
+    AppSettings::instance().setFStop(clamped);
+    emit fStopChanged(m_fStop);
+}
+
+float SceneModel::shutterSpeedSeconds() const
+{
+    return m_shutterSpeedSeconds;
+}
+
+void SceneModel::setShutterSpeedSeconds(float value)
+{
+    const float clamped = clampShutterSpeedSeconds(value);
+    if (m_shutterSpeedSeconds == clamped) {
+        return;
+    }
+
+    m_shutterSpeedSeconds = clamped;
+    AppSettings::instance().setShutterSpeedSeconds(clamped);
+    emit shutterSpeedSecondsChanged(m_shutterSpeedSeconds);
+}
+
+float SceneModel::iso() const
+{
+    return m_iso;
+}
+
+void SceneModel::setIso(float value)
+{
+    const float clamped = clampIso(value);
+    if (m_iso == clamped) {
+        return;
+    }
+
+    m_iso = clamped;
+    AppSettings::instance().setIso(clamped);
+    emit isoChanged(m_iso);
+}
+
 const std::vector<ProceduralInstance>& SceneModel::proceduralInstances() const
 {
     return m_proceduralInstances;
@@ -251,4 +306,19 @@ float SceneModel::clampCreaseAngleDeg(float value)
         return kMaxCreaseAngleDeg;
     }
     return value;
+}
+
+float SceneModel::clampFStop(float value)
+{
+    return PhysicalCamera::clampFStop(value);
+}
+
+float SceneModel::clampShutterSpeedSeconds(float value)
+{
+    return PhysicalCamera::clampShutterSpeedSeconds(value);
+}
+
+float SceneModel::clampIso(float value)
+{
+    return PhysicalCamera::snapIsoToNearestPreset(value);
 }

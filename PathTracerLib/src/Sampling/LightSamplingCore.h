@@ -206,7 +206,8 @@ LIGHT_CORE_FN Vec3 lightSampleEnvironment(
     const float rowPdf = env->rowCdf[rowOffset + x + 1] - env->rowCdf[rowOffset + x];
     const float marginalPdf = env->marginalCdf[y + 1] - env->marginalCdf[y];
     const float sinTheta = vecMax2(1.0e-4f, sinf(v * LightCoreDetail::kPi));
-    pdf = (marginalPdf * rowPdf) / (2.0f * LightCoreDetail::kPi * LightCoreDetail::kPi * sinTheta);
+    pdf = (marginalPdf * rowPdf) * static_cast<float>(env->width * env->height) /
+        (2.0f * LightCoreDetail::kPi * LightCoreDetail::kPi * sinTheta);
     if (luminance <= 0.0f) {
         pdf = 0.0f;
     }
@@ -227,7 +228,8 @@ LIGHT_CORE_FN float lightPdfEnvironment(const EnvironmentMapGpu* env, Vec3 wi)
     const float rowPdf = env->rowCdf[rowOffset + x + 1] - env->rowCdf[rowOffset + x];
     const float marginalPdf = env->marginalCdf[y + 1] - env->marginalCdf[y];
     const float sinTheta = vecMax2(1.0e-4f, sinf(uv.y * LightCoreDetail::kPi));
-    return (marginalPdf * rowPdf) / (2.0f * LightCoreDetail::kPi * LightCoreDetail::kPi * sinTheta);
+    return (marginalPdf * rowPdf) * static_cast<float>(env->width * env->height) /
+        (2.0f * LightCoreDetail::kPi * LightCoreDetail::kPi * sinTheta);
 }
 
 LIGHT_CORE_FN float lightTriangleArea(const TriangleGpu& tri)

@@ -3,9 +3,11 @@
 #include "AppLog.h"
 #include "AppSettings.h"
 #include "OpenGLViewportWidget.h"
+#include "PhysicalCamera.h"
 #include "RenderAccumulationState.h"
 
 #include <QComboBox>
+#include <QDoubleSpinBox>
 #include <QEvent>
 #include <QFileDialog>
 #include <QGroupBox>
@@ -167,12 +169,65 @@ MainView::MainView(QWidget* parent)
 
     controlLayout->addWidget(renderGroup);
 
+    auto* physicalCameraGroup = new QGroupBox(QStringLiteral("Physical Camera"), controlPanel);
+    auto* physicalCameraLayout = new QVBoxLayout(physicalCameraGroup);
+
+    auto* fStopRow = new QHBoxLayout();
+    fStopRow->addWidget(new QLabel(QStringLiteral("F-number:"), physicalCameraGroup));
+    m_fStopSpinBox = new QDoubleSpinBox(physicalCameraGroup);
+    m_fStopSpinBox->setRange(PhysicalCamera::kMinFStop, PhysicalCamera::kMaxFStop);
+    m_fStopSpinBox->setDecimals(1);
+    m_fStopSpinBox->setSingleStep(0.1);
+    m_fStopSpinBox->setPrefix(QStringLiteral("f/"));
+    m_fStopSpinBox->setValue(PhysicalCamera::kDefaultFStop);
+    m_fStopSpinBox->setToolTip(QStringLiteral("Aperture f-number (lower = brighter exposure)"));
+    fStopRow->addWidget(m_fStopSpinBox, 1);
+    physicalCameraLayout->addLayout(fStopRow);
+
+    auto* shutterRow = new QHBoxLayout();
+    shutterRow->addWidget(new QLabel(QStringLiteral("Shutter:"), physicalCameraGroup));
+    m_shutterSpeedComboBox = new QComboBox(physicalCameraGroup);
+    for (std::size_t i = 0; i < PhysicalCamera::shutterSpeedPresetCount(); ++i) {
+        const ShutterSpeedPreset& option = PhysicalCamera::shutterSpeedPresets()[i];
+        m_shutterSpeedComboBox->addItem(
+            QString::fromLatin1(option.label),
+            static_cast<double>(option.seconds));
+    }
+    m_shutterSpeedComboBox->setToolTip(
+        QStringLiteral("Shutter speed (longer = brighter exposure). Applied at display time."));
+    shutterRow->addWidget(m_shutterSpeedComboBox, 1);
+    physicalCameraLayout->addLayout(shutterRow);
+
+    auto* isoRow = new QHBoxLayout();
+    isoRow->addWidget(new QLabel(QStringLiteral("ISO:"), physicalCameraGroup));
+    m_isoComboBox = new QComboBox(physicalCameraGroup);
+    for (std::size_t i = 0; i < PhysicalCamera::isoPresetCount(); ++i) {
+        const IsoPreset& option = PhysicalCamera::isoPresets()[i];
+        m_isoComboBox->addItem(
+            QString::fromLatin1(option.label),
+            static_cast<double>(option.iso));
+    }
+    m_isoComboBox->setToolTip(QStringLiteral("Sensor sensitivity (higher = brighter exposure). Applied at display time."));
+    isoRow->addWidget(m_isoComboBox, 1);
+    physicalCameraLayout->addLayout(isoRow);
+
+    auto* exposureRow = new QHBoxLayout();
+    exposureRow->addWidget(new QLabel(QStringLiteral("Exposure EV:"), physicalCameraGroup));
+    m_exposureValueLabel = new QLabel(QStringLiteral("0.0"), physicalCameraGroup);
+    m_exposureValueLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    m_exposureValueLabel->setToolTip(QStringLiteral("Exposure value from f-number, shutter speed, and ISO"));
+    exposureRow->addWidget(m_exposureValueLabel, 1);
+    physicalCameraLayout->addLayout(exposureRow);
+
+    controlLayout->addWidget(physicalCameraGroup);
+
     auto* lsystemGroup = new QGroupBox(QStringLiteral("LSystem"), controlPanel);
     auto* lsystemLayout = new QVBoxLayout(lsystemGroup);
 
     m_lsystemEdit = new QPlainTextEdit(lsystemGroup);
     m_lsystemEdit->setPlaceholderText(QStringLiteral("L-system definition (axiom and rules)"));
-    m_lsystemEdit->setPlainText(QStringLiteral("Mat(0) = {0.9, 0.2, 0.1, 0.9, 0.2}\nMat(0)\nF(0, 0.5)"));
+    m_lsystemEdit->setPlainText(QStringLiteral("Mat(0) = { 0.0, 0.0, 0.0, 1, 0 }\nMat(1) = { 0.5, 0.5, 0.5, 1, 0 }\nMat(2) = { 1.0, 1.0, 1.0, 1, 0 }\n\nPitch(-90)\n\n[Mat(1) f(-10000) F(0, 10000)]\n\nMat(0)\nF\nf(0)\nMat(1)\nF\nf(0)\nMat(2)\nF\n"));
+
     m_lsystemEdit->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     lsystemLayout->addWidget(m_lsystemEdit, 1);
 
@@ -260,6 +315,33 @@ void MainView::setEnvironmentHdrPath(const QString& path)
     if (m_environmentHdrPathEdit != nullptr) {
         m_environmentHdrPathEdit->setText(path);
         m_environmentHdrPathEdit->setToolTip(path.isEmpty() ? m_environmentHdrPathEdit->placeholderText() : path);
+    }
+}
+
+QDoubleSpinBox* MainView::fStopSpinBox() const
+{
+    return m_fStopSpinBox;
+}
+
+QComboBox* MainView::shutterSpeedComboBox() const
+{
+    return m_shutterSpeedComboBox;
+}
+
+QComboBox* MainView::isoComboBox() const
+{
+    return m_isoComboBox;
+}
+
+QLabel* MainView::exposureValueLabel() const
+{
+    return m_exposureValueLabel;
+}
+
+void MainView::setExposureValueText(const QString& text)
+{
+    if (m_exposureValueLabel != nullptr) {
+        m_exposureValueLabel->setText(text);
     }
 }
 

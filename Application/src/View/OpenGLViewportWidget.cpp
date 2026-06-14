@@ -261,6 +261,25 @@ void OpenGLViewportWidget::setEnvironmentHdrPath(const QString& path)
     m_pathTracer.setEnvironmentHdrPath(path);
 }
 
+void OpenGLViewportWidget::setPhysicalCamera(float fStop, float shutterSpeedSeconds, float iso)
+{
+    m_pathTracer.setPhysicalCamera(fStop, shutterSpeedSeconds, iso);
+    if (m_glInitialized && m_textureAllocated) {
+        m_hasNewFrame.store(true);
+        update();
+    }
+}
+
+PhysicalCamera OpenGLViewportWidget::suggestedPhysicalCamera() const
+{
+    return m_pathTracer.suggestedPhysicalCamera();
+}
+
+bool OpenGLViewportWidget::computeSuggestedPhysicalCameraFromAccumulator(PhysicalCamera* out) const
+{
+    return m_pathTracer.computeSuggestedCameraFromAccumulator(out);
+}
+
 void OpenGLViewportWidget::initializeGL()
 {
     initializeOpenGLFunctions();
@@ -408,8 +427,8 @@ void OpenGLViewportWidget::drawSceneOverlays()
 
     const CameraGpu sampleCamera = m_pathTracer.lastSampleCamera();
     const glm::mat4 viewProj =
-        Camera3D::projMatrixFromGpu(sampleCamera, renderW, renderH)
-        * Camera3D::viewMatrixFromGpu(sampleCamera);
+        PhysicalCamera::projMatrixFromGpu(sampleCamera, renderW, renderH)
+        * PhysicalCamera::viewMatrixFromGpu(sampleCamera);
 
     m_originGizmo.draw(this, viewProj);
 
@@ -645,7 +664,7 @@ void OpenGLViewportWidget::pauseRender()
 
 void OpenGLViewportWidget::syncCameraToPathTracer()
 {
-    m_pathTracer.setCamera(m_camera.toGpu());
+    m_pathTracer.setCamera(m_camera);
 }
 
 void OpenGLViewportWidget::onCameraChanged()
@@ -714,6 +733,7 @@ void OpenGLViewportWidget::recreateGpuBuffers()
     m_pathTracer.setMaxSamplesPerPixel(m_model->maxSamplesPerPixel());
     m_pathTracer.setPreviewStepsPerLevel(m_model->previewStepsPerLevel());
     m_pathTracer.setEnvironmentHdrPath(m_model->environmentHdrPath());
+    m_pathTracer.setPhysicalCamera(m_model->fStop(), m_model->shutterSpeedSeconds(), m_model->iso());
 
     m_model->setPboIds(m_pbos[0], m_pbos[1]);
 

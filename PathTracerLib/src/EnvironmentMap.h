@@ -1,5 +1,6 @@
 ﻿#pragma once
 
+#include "PhysicalCamera.h"
 #include "MeshAccel/MeshAccelTypes.h"
 #include "RenderTypes.h"
 
@@ -26,6 +27,10 @@ public:
     const EnvironmentMapGpu* deviceMap() const { return m_dMap; }
     const EnvironmentMapGpu& hostMap() const { return m_hostMap; }
     bool isValid() const { return m_hostMap.valid != 0; }
+
+    float estimateLuminancePercentile(float percentile) const;
+    float estimateLogAverageLuminance() const;
+    PhysicalCamera suggestPhysicalCamera() const;
 
 private:
     bool buildImportanceTables();

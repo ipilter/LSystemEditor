@@ -5,6 +5,7 @@
 #include <QWidget>
 
 class QComboBox;
+class QDoubleSpinBox;
 class OpenGLViewportWidget;
 class QLabel;
 class QLineEdit;
@@ -26,6 +27,11 @@ public:
     QLineEdit* environmentHdrPathEdit() const;
     QPushButton* environmentHdrBrowseButton() const;
     void setEnvironmentHdrPath(const QString& path);
+    QDoubleSpinBox* fStopSpinBox() const;
+    QComboBox* shutterSpeedComboBox() const;
+    QComboBox* isoComboBox() const;
+    QLabel* exposureValueLabel() const;
+    void setExposureValueText(const QString& text);
     QSpinBox* renderWidthSpinBox() const;
     QSpinBox* renderHeightSpinBox() const;
     QSpinBox* maxSamplesSpinBox() const;
@@ -52,6 +58,10 @@ private:
     QPushButton* m_colorButton = nullptr;
     QLineEdit* m_environmentHdrPathEdit = nullptr;
     QPushButton* m_environmentHdrBrowseButton = nullptr;
+    QDoubleSpinBox* m_fStopSpinBox = nullptr;
+    QComboBox* m_shutterSpeedComboBox = nullptr;
+    QComboBox* m_isoComboBox = nullptr;
+    QLabel* m_exposureValueLabel = nullptr;
     QSpinBox* m_renderWidthSpinBox = nullptr;
     QSpinBox* m_renderHeightSpinBox = nullptr;
     QSpinBox* m_maxSamplesSpinBox = nullptr;

@@ -2,6 +2,8 @@
 
 #include "DebounceTimer.h"
 
+#include "RenderTypes.h"
+
 #include <QColor>
 #include <QObject>
 #include <QSize>
@@ -32,7 +34,12 @@ private:
     void onSettingsButtonClicked();
     void onAddPrimitiveButtonClicked();
     void onEnvironmentHdrBrowseClicked();
+    void onIterationChangedForAutoExposure(int sampleCount);
+    void applyPhysicalCameraToViewport();
+    void applySuggestedPhysicalCameraFromHdr();
     void syncEnvironmentHdrPath();
+    void syncPhysicalCameraUi();
+    void updateExposureValueLabel();
     void syncColorButtonStyle();
     void syncRenderSpinBoxes();
     void syncMaxSamplesSpinBox();
@@ -44,4 +51,7 @@ private:
     DebounceTimer m_renderSizeDebounce;
     DebounceTimer m_maxSamplesDebounce;
     DebounceTimer m_previewStepsDebounce;
+    DebounceTimer m_physicalCameraDebounce;
+    bool m_pendingFrameAutoExposure = false;
+    bool m_pendingAccumulatorExposureRefine = false;
 };
