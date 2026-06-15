@@ -35,6 +35,7 @@ public:
     void setClearColor(const QColor& color);
     void setSceneModel(SceneModel* model);
     void setEnvironmentHdrPath(const QString& path);
+    void setEnvironmentIntensity(float intensity);
     void setPhysicalCamera(float fStop, float shutterSpeedSeconds, float iso);
     PhysicalCamera suggestedPhysicalCamera() const;
     bool computeSuggestedPhysicalCameraFromAccumulator(PhysicalCamera* out) const;

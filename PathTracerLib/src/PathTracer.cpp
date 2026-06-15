@@ -9,6 +9,7 @@
 #include "MeshAccel/MeshAccelScene.h"
 #include "MeshAccel/MeshSceneContent.h"
 #include "PathTracerCuda.h"
+#include "PathTracerPreviewLevels.h"
 #include "RenderTypes.h"
 
 #if defined(_WIN32)
@@ -39,9 +40,18 @@ struct AccumulatorData
     int height = 0;
 };
 
+struct PreviewLevelData
+{
+    float4* d_buffer = nullptr;
+    int width = 0;
+    int height = 0;
+    int downscale = 1;
+};
+
 struct PathTracerDetail::PathTracerImpl
 {
     AccumulatorData acc;
+    std::vector<PreviewLevelData> previewLevels;
     CameraGpu* d_camera = nullptr;
     PhysicalCamera hostCamera{};
     mutable std::mutex cameraMutex;
@@ -61,11 +71,8 @@ struct PathTracerDetail::PathTracerImpl
     std::atomic<int> maxSamplesPerPixel{8};
     std::atomic<int> previewStepsPerLevel{0};
     std::atomic<int> sampleCount{0};
-    std::atomic<int> lastSamplingStride{1};
-
-    float backgroundR = 10.0f / 255.0f;
-    float backgroundG = 10.0f / 255.0f;
-    float backgroundB = 10.0f / 255.0f;
+    std::atomic<int> finestCompletedPreview{-1};
+    std::atomic<bool> displayBuffersValid{false};
 
     MeshAccelScene meshScene;
     MeshAccelBoundsMesh boundsMesh;
@@ -73,6 +80,8 @@ struct PathTracerDetail::PathTracerImpl
     EnvironmentMap environmentMap;
     RenderParamsGpu hostRenderParams{};
     RenderParamsGpu* d_renderParams = nullptr;
+    bool deviceParamsArePreview = false;
+    int cudaDeviceId = 0;
     PhysicalCamera suggestedPhysicalCamera{};
     QString environmentHdrPath;
     std::atomic<bool> environmentDirty{true};
@@ -89,6 +98,20 @@ namespace {
 
 constexpr int kMaxSamplesUpperBound = 1'000'000;
 constexpr int kMaxPreviewStepsPerLevel = 128;
+
+bool hasDisplayableContent(const PathTracerDetail::PathTracerImpl& impl)
+{
+    const int count = impl.sampleCount.load();
+    const int previewCount = impl.previewStepsPerLevel.load();
+    const int finest = impl.finestCompletedPreview.load();
+    if (count <= 0) {
+        return false;
+    }
+    if (previewCount > 0 && count <= previewCount) {
+        return finest >= 0;
+    }
+    return true;
+}
 
 int clampMaxSamples(int value)
 {
@@ -112,84 +135,6 @@ int clampPreviewStepsPerLevel(int value)
     return value;
 }
 
-int largestPowerOfTwoAtMost(int value)
-{
-    if (value < 1) {
-        return 1;
-    }
-
-    int power = 1;
-    while (power * 2 <= value) {
-        power *= 2;
-    }
-    return power;
-}
-
-int maxStartingStride(int width, int height)
-{
-    const int maxDim = width > height ? width : height;
-    int stride = largestPowerOfTwoAtMost(maxDim);
-    if (stride > 32) {
-        stride = 32;
-    }
-    return stride >= 1 ? stride : 1;
-}
-
-int countStrideLevels(int maxStride)
-{
-    int numLevels = 0;
-    for (int stride = maxStride; stride >= 1; stride /= 2) {
-        ++numLevels;
-    }
-    return numLevels;
-}
-
-int strideAtLevel(int maxStride, int levelIndex)
-{
-    int stride = maxStride;
-    for (int i = 0; i < levelIndex; ++i) {
-        stride /= 2;
-    }
-    return stride >= 1 ? stride : 1;
-}
-
-int samplingStride(int globalIter, int previewSteps, int width, int height)
-{
-    if (previewSteps <= 0 || width <= 0 || height <= 0 || globalIter >= previewSteps) {
-        return 1;
-    }
-
-    const int maxStride = maxStartingStride(width, height);
-    const int numLevels = countStrideLevels(maxStride);
-    const int levelIndex = globalIter < numLevels - 1 ? globalIter : numLevels - 1;
-    return strideAtLevel(maxStride, levelIndex);
-}
-
-int displayStrideFallback(int previewSteps, int width, int height)
-{
-    if (previewSteps <= 0 || width <= 0 || height <= 0) {
-        return 1;
-    }
-    return maxStartingStride(width, height);
-}
-
-int displayStrideForCopy(const PathTracerDetail::PathTracerImpl* impl)
-{
-    if (impl == nullptr || impl->acc.width <= 0 || impl->acc.height <= 0) {
-        return 1;
-    }
-
-    if (impl->sampleCount.load() > 0) {
-        const int stride = impl->lastSamplingStride.load();
-        return stride >= 1 ? stride : 1;
-    }
-
-    return displayStrideFallback(
-        impl->previewStepsPerLevel.load(),
-        impl->acc.width,
-        impl->acc.height);
-}
-
 QString cudaErrorString(cudaError_t error)
 {
     return QString::fromUtf8(cudaGetErrorString(error));
@@ -203,8 +148,6 @@ bool registerPboResource(cudaGraphicsResource_t* out, uint32_t pbo, QString* out
         }
         return false;
     }
-
-    cudaFree(nullptr);
 
     cudaGraphicsResource_t resource = nullptr;
     const cudaError_t error = cudaGraphicsGLRegisterBuffer(
@@ -343,6 +286,96 @@ bool initAccumulator(AccumulatorData* acc, int width, int height, QString* outEr
     return true;
 }
 
+void freePreviewBuffers(std::vector<PreviewLevelData>* levels)
+{
+    if (levels == nullptr) {
+        return;
+    }
+
+    for (PreviewLevelData& level : *levels) {
+        if (level.d_buffer != nullptr) {
+            cudaFree(level.d_buffer);
+            level.d_buffer = nullptr;
+        }
+        level.width = 0;
+        level.height = 0;
+        level.downscale = 1;
+    }
+    levels->clear();
+}
+
+bool initPreviewBuffers(
+    std::vector<PreviewLevelData>* levels,
+    int fullWidth,
+    int fullHeight,
+    int previewLevelCount,
+    QString* outError)
+{
+    if (levels == nullptr || fullWidth <= 0 || fullHeight <= 0) {
+        if (outError != nullptr) {
+            *outError = QStringLiteral("invalid preview buffer dimensions");
+        }
+        return false;
+    }
+
+    freePreviewBuffers(levels);
+
+    if (previewLevelCount <= 0) {
+        return true;
+    }
+
+    const std::vector<PreviewLevelDimensions> dimensions =
+        buildPreviewLevelDimensions(fullWidth, fullHeight, previewLevelCount);
+    levels->reserve(dimensions.size());
+
+    for (const PreviewLevelDimensions& dim : dimensions) {
+        PreviewLevelData level{};
+        level.width = dim.width;
+        level.height = dim.height;
+        level.downscale = dim.downscale;
+
+        const std::size_t pixelCount =
+            static_cast<std::size_t>(level.width) * static_cast<std::size_t>(level.height);
+        cudaError_t error = cudaMalloc(&level.d_buffer, pixelCount * sizeof(float4));
+        if (error != cudaSuccess) {
+            freePreviewBuffers(levels);
+            if (outError != nullptr) {
+                *outError = cudaErrorString(error);
+            }
+            return false;
+        }
+
+        levels->push_back(level);
+    }
+
+    return true;
+}
+
+bool clearPreviewBuffers(PathTracerDetail::PathTracerImpl* impl, QString* outError)
+{
+    if (impl == nullptr || impl->stream == nullptr) {
+        return true;
+    }
+
+    for (const PreviewLevelData& level : impl->previewLevels) {
+        if (level.d_buffer == nullptr || level.width <= 0 || level.height <= 0) {
+            continue;
+        }
+
+        const std::size_t byteCount =
+            static_cast<std::size_t>(level.width) * static_cast<std::size_t>(level.height) * sizeof(float4);
+        const cudaError_t error = cudaMemsetAsync(level.d_buffer, 0, byteCount, impl->stream);
+        if (error != cudaSuccess) {
+            if (outError != nullptr) {
+                *outError = cudaErrorString(error);
+            }
+            return false;
+        }
+    }
+
+    return true;
+}
+
 bool clearAccumulator(PathTracerDetail::PathTracerImpl* impl, QString* outError)
 {
     if (impl == nullptr || impl->acc.d_buffer == nullptr || impl->acc.d_samples == nullptr ||
@@ -377,12 +410,15 @@ void freeCameraGpu(PathTracerDetail::PathTracerImpl* impl)
 
 void freeRenderParamsGpu(PathTracerDetail::PathTracerImpl* impl)
 {
-    if (impl == nullptr || impl->d_renderParams == nullptr) {
+    if (impl == nullptr) {
         return;
     }
 
-    cudaFree(impl->d_renderParams);
-    impl->d_renderParams = nullptr;
+    if (impl->d_renderParams != nullptr) {
+        cudaFree(impl->d_renderParams);
+        impl->d_renderParams = nullptr;
+    }
+    impl->deviceParamsArePreview = false;
 }
 
 bool initRenderParamsGpu(PathTracerDetail::PathTracerImpl* impl, QString* outError)
@@ -398,6 +434,7 @@ bool initRenderParamsGpu(PathTracerDetail::PathTracerImpl* impl, QString* outErr
 
     cudaError_t error = cudaMalloc(&impl->d_renderParams, sizeof(RenderParamsGpu));
     if (error != cudaSuccess) {
+        freeRenderParamsGpu(impl);
         if (outError != nullptr) {
             *outError = cudaErrorString(error);
         }
@@ -405,14 +442,16 @@ bool initRenderParamsGpu(PathTracerDetail::PathTracerImpl* impl, QString* outErr
     }
 
     impl->hostRenderParams = RenderParamsGpu{};
-    impl->hostRenderParams.backgroundR = impl->backgroundR;
-    impl->hostRenderParams.backgroundG = impl->backgroundG;
-    impl->hostRenderParams.backgroundB = impl->backgroundB;
+    impl->deviceParamsArePreview = false;
     impl->renderParamsDirty.store(true);
     return true;
 }
 
-bool uploadRenderParamsIfDirty(PathTracerDetail::PathTracerImpl* impl, cudaStream_t stream, QString* outError)
+bool syncRenderParamsToDevice(
+    PathTracerDetail::PathTracerImpl* impl,
+    cudaStream_t stream,
+    bool previewPass,
+    QString* outError)
 {
     if (impl == nullptr || impl->d_renderParams == nullptr) {
         if (outError != nullptr) {
@@ -421,17 +460,22 @@ bool uploadRenderParamsIfDirty(PathTracerDetail::PathTracerImpl* impl, cudaStrea
         return false;
     }
 
-    impl->hostRenderParams.backgroundR = impl->backgroundR;
-    impl->hostRenderParams.backgroundG = impl->backgroundG;
-    impl->hostRenderParams.backgroundB = impl->backgroundB;
-
-    if (!impl->renderParamsDirty.load()) {
+    if (previewPass) {
+        if (impl->deviceParamsArePreview) {
+            return true;
+        }
+    } else if (!impl->renderParamsDirty.load() && !impl->deviceParamsArePreview) {
         return true;
+    }
+
+    RenderParamsGpu deviceParams = impl->hostRenderParams;
+    if (previewPass) {
+        deviceParams.maxPathDepth = kPreviewMaxPathDepth;
     }
 
     const cudaError_t error = cudaMemcpyAsync(
         impl->d_renderParams,
-        &impl->hostRenderParams,
+        &deviceParams,
         sizeof(RenderParamsGpu),
         cudaMemcpyHostToDevice,
         stream);
@@ -442,7 +486,10 @@ bool uploadRenderParamsIfDirty(PathTracerDetail::PathTracerImpl* impl, cudaStrea
         return false;
     }
 
-    impl->renderParamsDirty.store(false);
+    impl->deviceParamsArePreview = previewPass;
+    if (!previewPass) {
+        impl->renderParamsDirty.store(false);
+    }
     return true;
 }
 
@@ -497,11 +544,6 @@ bool uploadEnvironmentIfDirty(PathTracerDetail::PathTracerImpl* impl, cudaStream
     return reloadEnvironmentMap(impl, stream, outError);
 }
 
-CameraGpu defaultCameraGpu()
-{
-    return PhysicalCamera::defaultGpu();
-}
-
 bool initCameraGpu(PathTracerDetail::PathTracerImpl* impl, QString* outError)
 {
     if (impl == nullptr) {
@@ -526,44 +568,7 @@ bool initCameraGpu(PathTracerDetail::PathTracerImpl* impl, QString* outError)
     return true;
 }
 
-bool uploadCameraIfDirty(PathTracerDetail::PathTracerImpl* impl, cudaStream_t stream, QString* outError)
-{
-    if (impl == nullptr || impl->d_camera == nullptr) {
-        if (outError != nullptr) {
-            *outError = QStringLiteral("camera not configured");
-        }
-        return false;
-    }
-
-    CameraGpu cameraCopy{};
-    {
-        std::lock_guard<std::mutex> lock(impl->cameraMutex);
-        cameraCopy = impl->hostCamera.toGpu();
-    }
-
-    if (impl->acc.width > 0 && impl->acc.height > 0) {
-        cameraCopy.aspect =
-            static_cast<float>(impl->acc.width) / static_cast<float>(impl->acc.height);
-    }
-
-    if (!impl->cameraDirty.load()) {
-        return true;
-    }
-
-    const cudaError_t error =
-        cudaMemcpyAsync(impl->d_camera, &cameraCopy, sizeof(CameraGpu), cudaMemcpyHostToDevice, stream);
-    if (error != cudaSuccess) {
-        if (outError != nullptr) {
-            *outError = cudaErrorString(error);
-        }
-        return false;
-    }
-
-    impl->cameraDirty.store(false);
-    return true;
-}
-
-CameraGpu sampleCameraForFrame(PathTracerDetail::PathTracerImpl* impl)
+CameraGpu buildCameraGpu(const PathTracerDetail::PathTracerImpl* impl)
 {
     CameraGpu camera{};
     if (impl == nullptr) {
@@ -582,14 +587,31 @@ CameraGpu sampleCameraForFrame(PathTracerDetail::PathTracerImpl* impl)
     return camera;
 }
 
-void storeLastSampleCamera(PathTracerDetail::PathTracerImpl* impl, const CameraGpu& camera)
+bool uploadCameraIfDirty(PathTracerDetail::PathTracerImpl* impl, cudaStream_t stream, QString* outError)
 {
-    if (impl == nullptr) {
-        return;
+    if (impl == nullptr || impl->d_camera == nullptr) {
+        if (outError != nullptr) {
+            *outError = QStringLiteral("camera not configured");
+        }
+        return false;
     }
 
-    std::lock_guard<std::mutex> lock(impl->lastSampleCameraMutex);
-    impl->lastSampleCamera = camera;
+    if (!impl->cameraDirty.load()) {
+        return true;
+    }
+
+    const CameraGpu cameraCopy = buildCameraGpu(impl);
+    const cudaError_t error =
+        cudaMemcpyAsync(impl->d_camera, &cameraCopy, sizeof(CameraGpu), cudaMemcpyHostToDevice, stream);
+    if (error != cudaSuccess) {
+        if (outError != nullptr) {
+            *outError = cudaErrorString(error);
+        }
+        return false;
+    }
+
+    impl->cameraDirty.store(false);
+    return true;
 }
 
 void unregisterPboResources(PathTracerDetail::PathTracerImpl* impl)
@@ -648,8 +670,12 @@ bool canTakeSample(const PathTracerDetail::PathTracerImpl* impl)
         impl->maxSamplesPerPixel.load());
 }
 
-void checkCudaGlDeviceAffinity()
+void checkCudaGlDeviceAffinity(PathTracerDetail::PathTracerImpl* impl)
 {
+    if (impl == nullptr) {
+        return;
+    }
+
     unsigned int cudaDeviceCount = 0;
     int glCudaDevices[1] = {-1};
     const cudaError_t error =
@@ -666,18 +692,25 @@ void checkCudaGlDeviceAffinity()
         return;
     }
 
+    impl->cudaDeviceId = glCudaDevices[0];
+
     int currentCudaDevice = -1;
     if (cudaGetDevice(&currentCudaDevice) != cudaSuccess) {
         AppLog::instance().warning(QStringLiteral("cudaGetDevice failed during CUDA-GL affinity check"));
         return;
     }
 
-    if (currentCudaDevice != glCudaDevices[0]) {
+    if (currentCudaDevice != impl->cudaDeviceId) {
         AppLog::instance().warning(
             QStringLiteral("CUDA device (%1) may not match OpenGL device (%2)")
                 .arg(currentCudaDevice)
-                .arg(glCudaDevices[0]));
+                .arg(impl->cudaDeviceId));
     }
+}
+
+void ensureCudaContext()
+{
+    cudaFree(nullptr);
 }
 
 void releaseMeshScene(PathTracerDetail::PathTracerImpl* impl)
@@ -729,6 +762,8 @@ SampleWaitResult waitForSampleEvent(
     }
 }
 
+#ifdef PATHTRACER_PROFILE
+
 struct RenderPipelineTiming
 {
     std::atomic<int> completedSamples{0};
@@ -763,6 +798,8 @@ void logPipelineTimingIfDue()
             .arg(static_cast<double>(avgPublishMutexWaitUs) / 1000.0, 0, 'f', 2));
 }
 
+#endif // PATHTRACER_PROFILE
+
 bool buildAndUploadMeshScene(
     PathTracerDetail::PathTracerImpl* impl,
     const std::vector<ProceduralInstance>& proceduralInstances,
@@ -785,7 +822,6 @@ bool buildAndUploadMeshScene(
         return false;
     }
 
-    impl->meshScene.release();
     if (!impl->meshScene.allocate()) {
         if (outError != nullptr) {
             *outError = QStringLiteral("Mesh accel scene allocation failed");
@@ -818,6 +854,7 @@ PathTracer::~PathTracer()
     freeRenderParamsGpu(m_impl.get());
     m_impl->environmentMap.release();
     freeAccumulator(&m_impl->acc);
+    freePreviewBuffers(&m_impl->previewLevels);
     releaseMeshScene(m_impl.get());
     destroySampleEvent(m_impl.get());
     destroyStream(m_impl.get());
@@ -851,6 +888,7 @@ bool PathTracer::configure(
     freeRenderParamsGpu(m_impl.get());
     m_impl->environmentMap.release();
     freeAccumulator(&m_impl->acc);
+    freePreviewBuffers(&m_impl->previewLevels);
     releaseMeshScene(m_impl.get());
 
     if (m_impl->stream == nullptr) {
@@ -869,7 +907,9 @@ bool PathTracer::configure(
         return false;
     }
 
-    checkCudaGlDeviceAffinity();
+    ensureCudaContext();
+    checkCudaGlDeviceAffinity(m_impl.get());
+    cudaSetDevice(m_impl->cudaDeviceId);
 
     if (!registerPboResource(&m_impl->pboResources[0], pbo0, &error)) {
         AppLog::instance().error(
@@ -892,11 +932,25 @@ bool PathTracer::configure(
         return false;
     }
 
+    if (!initPreviewBuffers(
+            &m_impl->previewLevels,
+            width,
+            height,
+            m_impl->previewStepsPerLevel.load(),
+            &error)) {
+        AppLog::instance().error(
+            QStringLiteral("PathTracer configure: preview buffer allocation failed: %1").arg(error));
+        unregisterPboResources(m_impl.get());
+        freeAccumulator(&m_impl->acc);
+        return false;
+    }
+
     if (!initCameraGpu(m_impl.get(), &error)) {
         AppLog::instance().error(
             QStringLiteral("PathTracer configure: camera allocation failed: %1").arg(error));
         unregisterPboResources(m_impl.get());
         freeAccumulator(&m_impl->acc);
+        freePreviewBuffers(&m_impl->previewLevels);
         return false;
     }
 
@@ -933,6 +987,18 @@ bool PathTracer::configure(
         unregisterPboResources(m_impl.get());
         freeCameraGpu(m_impl.get());
         freeAccumulator(&m_impl->acc);
+        freePreviewBuffers(&m_impl->previewLevels);
+        releaseMeshScene(m_impl.get());
+        return false;
+    }
+
+    if (!clearPreviewBuffers(m_impl.get(), &error)) {
+        AppLog::instance().error(
+            QStringLiteral("PathTracer configure: preview buffer clear failed: %1").arg(error));
+        unregisterPboResources(m_impl.get());
+        freeCameraGpu(m_impl.get());
+        freeAccumulator(&m_impl->acc);
+        freePreviewBuffers(&m_impl->previewLevels);
         releaseMeshScene(m_impl.get());
         return false;
     }
@@ -944,17 +1010,15 @@ bool PathTracer::configure(
         unregisterPboResources(m_impl.get());
         freeCameraGpu(m_impl.get());
         freeAccumulator(&m_impl->acc);
+        freePreviewBuffers(&m_impl->previewLevels);
         releaseMeshScene(m_impl.get());
         return false;
     }
 
     m_impl->resetRequested.store(false);
     m_impl->sampleCount.store(0);
-    m_impl->lastSamplingStride.store(
-        displayStrideFallback(
-            m_impl->previewStepsPerLevel.load(),
-            width,
-            height));
+    m_impl->finestCompletedPreview.store(-1);
+    m_impl->displayBuffersValid.store(false);
     m_impl->configured.store(true);
     notifyWorker();
     return true;
@@ -985,8 +1049,10 @@ void PathTracer::stop()
 
 void PathTracer::resetAccumulation()
 {
+#ifdef PATHTRACER_PROFILE
     g_renderPipelineTiming.resetRequestTime = std::chrono::steady_clock::now();
     g_renderPipelineTiming.resetTimingActive.store(true);
+#endif
     m_impl->resetRequested.store(true);
     notifyWorker();
 }
@@ -1009,6 +1075,10 @@ bool PathTracer::publishDisplayFrame(int slot)
         return false;
     }
 
+    if (!m_impl->displayBuffersValid.load() || !hasDisplayableContent(*m_impl)) {
+        return false;
+    }
+
     if (m_impl->acc.width <= 0 || m_impl->acc.height <= 0) {
         return false;
     }
@@ -1023,8 +1093,10 @@ bool PathTracer::publishDisplayFrame(int slot)
     const auto mutexWaitEnd = std::chrono::steady_clock::now();
     const auto mutexWaitUs = static_cast<uint64_t>(
         std::chrono::duration_cast<std::chrono::microseconds>(mutexWaitEnd - mutexWaitStart).count());
+#ifdef PATHTRACER_PROFILE
     g_renderPipelineTiming.totalPublishMutexWaitUs.fetch_add(mutexWaitUs);
     g_renderPipelineTiming.publishMutexWaitSamples.fetch_add(1);
+#endif
 
     QString error;
     const cudaError_t waitError =
@@ -1041,7 +1113,15 @@ bool PathTracer::publishDisplayFrame(int slot)
         return false;
     }
 
-    const int stride = displayStrideForCopy(m_impl.get());
+    const int previewCount = m_impl->previewStepsPerLevel.load();
+    const int iter = m_impl->sampleCount.load();
+    const int finest = m_impl->finestCompletedPreview.load();
+
+    const bool showPreview =
+        previewCount > 0 &&
+        finest >= 0 &&
+        finest < static_cast<int>(m_impl->previewLevels.size()) &&
+        iter <= previewCount;
 
     float exposure = 1.0f;
     {
@@ -1049,18 +1129,31 @@ bool PathTracer::publishDisplayFrame(int slot)
         exposure = m_impl->hostCamera.exposureMultiplier();
     }
 
-    const bool copied = pathTracerCopyToPbo(
-        m_impl->acc.d_buffer,
-        m_impl->acc.d_samples,
-        static_cast<uchar4*>(devicePointer),
-        m_impl->acc.width,
-        m_impl->acc.height,
-        stride,
-        m_impl->backgroundR,
-        m_impl->backgroundG,
-        m_impl->backgroundB,
-        exposure,
-        m_impl->stream);
+    bool copied = false;
+    if (showPreview) {
+        const PreviewLevelData& level = m_impl->previewLevels[static_cast<std::size_t>(finest)];
+        copied = pathTracerUpsamplePreviewToPbo(
+            level.d_buffer,
+            level.width,
+            level.height,
+            level.downscale,
+            static_cast<uchar4*>(devicePointer),
+            m_impl->acc.width,
+            m_impl->acc.height,
+            m_impl->d_renderParams,
+            exposure,
+            m_impl->stream);
+    } else {
+        copied = pathTracerCopyToPbo(
+            m_impl->acc.d_buffer,
+            m_impl->acc.d_samples,
+            static_cast<uchar4*>(devicePointer),
+            m_impl->acc.width,
+            m_impl->acc.height,
+            m_impl->d_renderParams,
+            exposure,
+            m_impl->stream);
+    }
 
     if (!copied) {
         unmapPboResource(resource, m_impl->stream, nullptr);
@@ -1096,7 +1189,33 @@ int PathTracer::maxSamplesPerPixel() const
 
 void PathTracer::setPreviewStepsPerLevel(int steps)
 {
-    m_impl->previewStepsPerLevel.store(clampPreviewStepsPerLevel(steps));
+    const int clamped = clampPreviewStepsPerLevel(steps);
+    m_impl->previewStepsPerLevel.store(clamped);
+
+    if (m_impl->configured.load() && m_impl->acc.width > 0 && m_impl->acc.height > 0) {
+        QString error;
+        std::lock_guard<std::mutex> streamLock(m_impl->streamMutex);
+        if (!initPreviewBuffers(
+                &m_impl->previewLevels,
+                m_impl->acc.width,
+                m_impl->acc.height,
+                clamped,
+                &error)) {
+            AppLog::instance().warning(
+                QStringLiteral("PathTracer preview buffer resize failed: %1").arg(error));
+        } else if (!clearPreviewBuffers(m_impl.get(), &error)) {
+            AppLog::instance().warning(
+                QStringLiteral("PathTracer preview buffer clear failed: %1").arg(error));
+        } else {
+            const cudaError_t syncError = cudaStreamSynchronize(m_impl->stream);
+            if (syncError != cudaSuccess) {
+                AppLog::instance().warning(
+                    QStringLiteral("PathTracer preview buffer sync failed: %1")
+                        .arg(cudaErrorString(syncError)));
+            }
+        }
+    }
+
     notifyWorker();
 }
 
@@ -1123,26 +1242,6 @@ bool PathTracer::isSampleBudgetExhausted() const
         m_impl->sampleCount.load(),
         m_impl->previewStepsPerLevel.load(),
         m_impl->maxSamplesPerPixel.load());
-}
-
-void PathTracer::setCamera(const PhysicalCamera& camera)
-{
-    PhysicalCamera stored = camera;
-    if (m_impl->acc.width > 0 && m_impl->acc.height > 0) {
-        stored.setAspect(m_impl->acc.width, m_impl->acc.height);
-    }
-
-    CameraGpu gpuCamera = stored.toGpu();
-    {
-        std::lock_guard<std::mutex> lock(m_impl->cameraMutex);
-        m_impl->hostCamera.copyGeometryFrom(stored);
-    }
-    {
-        std::lock_guard<std::mutex> lock(m_impl->lastSampleCameraMutex);
-        m_impl->lastSampleCamera = gpuCamera;
-    }
-    m_impl->cameraDirty.store(true);
-    notifyWorker();
 }
 
 void PathTracer::setCamera(const CameraGpu& camera)
@@ -1177,9 +1276,9 @@ void PathTracer::setClearColor(const QColor& color)
         return;
     }
 
-    m_impl->backgroundR = static_cast<float>(color.redF());
-    m_impl->backgroundG = static_cast<float>(color.greenF());
-    m_impl->backgroundB = static_cast<float>(color.blueF());
+    m_impl->hostRenderParams.backgroundR = static_cast<float>(color.redF());
+    m_impl->hostRenderParams.backgroundG = static_cast<float>(color.greenF());
+    m_impl->hostRenderParams.backgroundB = static_cast<float>(color.blueF());
     m_impl->renderParamsDirty.store(true);
 
     if (m_impl->configured.load()) {
@@ -1187,27 +1286,38 @@ void PathTracer::setClearColor(const QColor& color)
     }
 }
 
-void PathTracer::setPhysicalCamera(const PhysicalCamera& camera)
+void PathTracer::setEnvironmentIntensity(float intensity)
 {
-    std::lock_guard<std::mutex> lock(m_impl->cameraMutex);
-    m_impl->hostCamera.fStop = PhysicalCamera::clampFStop(camera.fStop);
-    m_impl->hostCamera.shutterSpeedSeconds = PhysicalCamera::clampShutterSpeedSeconds(camera.shutterSpeedSeconds);
-    m_impl->hostCamera.iso = PhysicalCamera::clampIso(camera.iso);
+    if (intensity < 0.0f) {
+        intensity = 0.0f;
+    }
+    if (intensity > 100.0f) {
+        intensity = 100.0f;
+    }
+
+    if (m_impl->hostRenderParams.environmentIntensity == intensity) {
+        return;
+    }
+
+    m_impl->hostRenderParams.environmentIntensity = intensity;
+    m_impl->renderParamsDirty.store(true);
+
+    if (m_impl->configured.load()) {
+        resetAccumulation();
+    }
+}
+
+float PathTracer::environmentIntensity() const
+{
+    return m_impl->hostRenderParams.environmentIntensity;
 }
 
 void PathTracer::setPhysicalCamera(float fStop, float shutterSpeedSeconds, float iso)
 {
-    PhysicalCamera camera{};
-    camera.fStop = fStop;
-    camera.shutterSpeedSeconds = shutterSpeedSeconds;
-    camera.iso = iso;
-    setPhysicalCamera(camera);
-}
-
-PhysicalCamera PathTracer::physicalCamera() const
-{
     std::lock_guard<std::mutex> lock(m_impl->cameraMutex);
-    return m_impl->hostCamera;
+    m_impl->hostCamera.fStop = PhysicalCamera::clampFStop(fStop);
+    m_impl->hostCamera.shutterSpeedSeconds = PhysicalCamera::clampShutterSpeedSeconds(shutterSpeedSeconds);
+    m_impl->hostCamera.iso = PhysicalCamera::clampIso(iso);
 }
 
 PhysicalCamera PathTracer::suggestedPhysicalCamera() const
@@ -1384,11 +1494,12 @@ void PathTracer::notifyWorker()
 
 void PathTracer::renderLoop()
 {
-    cudaSetDevice(0);
-    cudaFree(nullptr);
+    cudaSetDevice(m_impl->cudaDeviceId);
 
     while (m_impl->running.load()) {
         if (m_impl->resetRequested.exchange(false)) {
+            m_impl->displayBuffersValid.store(false);
+
             bool clearLaunched = false;
             {
                 std::lock_guard<std::mutex> streamLock(m_impl->streamMutex);
@@ -1397,6 +1508,9 @@ void PathTracer::renderLoop()
                     if (!clearAccumulator(m_impl.get(), &clearError)) {
                         AppLog::instance().error(
                             QStringLiteral("PathTracer accumulator reset failed: %1").arg(clearError));
+                    } else if (!clearPreviewBuffers(m_impl.get(), &clearError)) {
+                        AppLog::instance().error(
+                            QStringLiteral("PathTracer preview buffer reset failed: %1").arg(clearError));
                     } else {
                         clearLaunched = true;
                     }
@@ -1413,12 +1527,9 @@ void PathTracer::renderLoop()
             }
 
             m_impl->sampleCount.store(0);
-            m_impl->lastSamplingStride.store(
-                displayStrideFallback(
-                    m_impl->previewStepsPerLevel.load(),
-                    m_impl->acc.width,
-                    m_impl->acc.height));
+            m_impl->finestCompletedPreview.store(-1);
 
+#ifdef PATHTRACER_PROFILE
             if (g_renderPipelineTiming.resetTimingActive.exchange(false)) {
                 const auto resetDone = std::chrono::steady_clock::now();
                 const auto resetLatencyMs = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -1426,6 +1537,7 @@ void PathTracer::renderLoop()
                 AppLog::instance().info(
                     QStringLiteral("Render pipeline timing: reset latency %1 ms").arg(resetLatencyMs.count()));
             }
+#endif
         }
 
         if (m_impl->acc.width <= 0 || m_impl->acc.height <= 0) {
@@ -1452,27 +1564,23 @@ void PathTracer::renderLoop()
             continue;
         }
 
-        const int stride = samplingStride(
-            m_impl->sampleCount.load(),
-            m_impl->previewStepsPerLevel.load(),
-            m_impl->acc.width,
-            m_impl->acc.height);
-        m_impl->lastSamplingStride.store(stride);
+        const int previewCount = m_impl->previewStepsPerLevel.load();
+        const int iter = m_impl->sampleCount.load();
+        const bool previewPass = previewCount > 0 && iter < previewCount &&
+            iter < static_cast<int>(m_impl->previewLevels.size());
 
         QString cameraError;
         bool sampleLaunched = false;
         {
             std::lock_guard<std::mutex> streamLock(m_impl->streamMutex);
 
-            {
+            if (m_impl->meshScene.isDeviceDirty()) {
                 std::lock_guard<std::mutex> meshSceneLock(m_impl->meshSceneMutex);
                 if (!m_impl->meshScene.upload(m_impl->stream)) {
                     AppLog::instance().error(QStringLiteral("PathTracer mesh scene upload failed"));
                     continue;
                 }
             }
-
-            const bool cameraChanged = m_impl->cameraDirty.load();
 
             if (!uploadCameraIfDirty(m_impl.get(), m_impl->stream, &cameraError)) {
                 AppLog::instance().error(
@@ -1481,7 +1589,7 @@ void PathTracer::renderLoop()
             }
 
             QString paramsError;
-            if (!uploadRenderParamsIfDirty(m_impl.get(), m_impl->stream, &paramsError)) {
+            if (!syncRenderParamsToDevice(m_impl.get(), m_impl->stream, previewPass, &paramsError)) {
                 AppLog::instance().error(
                     QStringLiteral("PathTracer render params upload failed: %1").arg(paramsError));
                 continue;
@@ -1494,41 +1602,51 @@ void PathTracer::renderLoop()
                 continue;
             }
 
-            const CameraGpu sampleCamera = sampleCameraForFrame(m_impl.get());
-            if (cameraChanged) {
-                storeLastSampleCamera(m_impl.get(), sampleCamera);
-            }
-
-            const unsigned int globalSeed =
-                static_cast<unsigned int>(m_impl->sampleCount.load()) + 1u;
+            const unsigned int globalSeed = static_cast<unsigned int>(iter) + 1u;
             const MeshAccelSceneGpu* deviceScene = m_impl->meshScene.deviceScene();
             const EnvironmentMapGpu* deviceEnv = m_impl->environmentMap.deviceMap();
 
-            if (!pathTracerSample(
-                    m_impl->acc.d_buffer,
-                    m_impl->acc.d_samples,
-                    m_impl->acc.width,
-                    m_impl->acc.height,
-                    stride,
+            if (previewPass) {
+                const PreviewLevelData& level = m_impl->previewLevels[static_cast<std::size_t>(iter)];
+                sampleLaunched = pathTracerPreviewSample(
+                    level.d_buffer,
+                    level.width,
+                    level.height,
                     m_impl->d_camera,
                     deviceScene,
                     deviceEnv,
                     m_impl->d_renderParams,
                     globalSeed,
-                    m_impl->stream)) {
-                AppLog::instance().error(QStringLiteral("PathTracer sample kernel launch failed"));
-                continue;
+                    m_impl->stream);
+                if (!sampleLaunched) {
+                    AppLog::instance().error(QStringLiteral("PathTracer preview sample kernel launch failed"));
+                }
+            } else {
+                sampleLaunched = pathTracerSample(
+                    m_impl->acc.d_buffer,
+                    m_impl->acc.d_samples,
+                    m_impl->acc.width,
+                    m_impl->acc.height,
+                    m_impl->d_camera,
+                    deviceScene,
+                    deviceEnv,
+                    m_impl->d_renderParams,
+                    globalSeed,
+                    m_impl->stream);
+                if (!sampleLaunched) {
+                    AppLog::instance().error(QStringLiteral("PathTracer sample kernel launch failed"));
+                }
             }
 
-            const cudaError_t recordError =
-                cudaEventRecord(m_impl->sampleCompleteEvent, m_impl->stream);
-            if (recordError != cudaSuccess) {
-                AppLog::instance().error(
-                    QStringLiteral("CUDA event record failed: %1").arg(cudaErrorString(recordError)));
-                continue;
+            if (sampleLaunched) {
+                const cudaError_t recordError =
+                    cudaEventRecord(m_impl->sampleCompleteEvent, m_impl->stream);
+                if (recordError != cudaSuccess) {
+                    AppLog::instance().error(
+                        QStringLiteral("CUDA event record failed: %1").arg(cudaErrorString(recordError)));
+                    sampleLaunched = false;
+                }
             }
-
-            sampleLaunched = true;
         }
 
         if (!sampleLaunched) {
@@ -1560,10 +1678,18 @@ void PathTracer::renderLoop()
             continue;
         }
 
+#ifdef PATHTRACER_PROFILE
         g_renderPipelineTiming.totalGpuWaitUs.fetch_add(gpuWaitUs);
+#endif
+        if (previewCount > 0 && iter < previewCount) {
+            m_impl->finestCompletedPreview.store(iter);
+        }
         m_impl->sampleCount.fetch_add(1);
+        m_impl->displayBuffersValid.store(true);
+#ifdef PATHTRACER_PROFILE
         g_renderPipelineTiming.completedSamples.fetch_add(1);
         logPipelineTimingIfDue();
+#endif
 
         FrameReadyCallback callback;
         {

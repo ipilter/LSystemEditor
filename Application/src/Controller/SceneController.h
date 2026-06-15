@@ -36,6 +36,10 @@ private:
     void onResetSceneButtonClicked();
     void onExportSceneButtonClicked();
     void onEnvironmentHdrBrowseClicked();
+    void onEnvironmentHdrClearClicked();
+    void onEnvironmentIntensitySpinBoxChanged(double value);
+    void syncEnvironmentIntensitySpinBox();
+    void syncEnvironmentIntensityEnabled();
     void onIterationChangedForAutoExposure(int sampleCount);
     void applyPhysicalCameraToViewport();
     void applySuggestedPhysicalCameraFromHdr();

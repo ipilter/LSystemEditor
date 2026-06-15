@@ -1,4 +1,6 @@
 #include "PhysicalCamera.h"
+#include "RenderTypes.h"
+#include "Sampling/LightSamplingCore.h"
 
 #include <cmath>
 #include <iostream>
@@ -115,6 +117,30 @@ void testEnvironmentPdfSolidAngleIncludesResolution()
     expectNear(correctPdf / buggyPdf, static_cast<float>(kWidth * kHeight), 1.0f, "PDF scale equals pixel count");
 }
 
+void testSolidEnvironmentPdfIsUniformSphere()
+{
+    constexpr float kPi = 3.14159265f;
+    const Vec3 direction = vecMake3(0.0f, 1.0f, 0.0f);
+    expectNear(lightPdfSolidEnvironment(direction), 1.0f / (4.0f * kPi), 1.0e-6f, "solid env PDF is 1/(4pi)");
+}
+
+void testSolidEnvironmentRadianceScalesWithIntensity()
+{
+    RenderParamsGpu params{};
+    params.backgroundR = 1.0f;
+    params.backgroundG = 1.0f;
+    params.backgroundB = 1.0f;
+    params.environmentIntensity = 2.0f;
+
+    EnvironmentMapGpu invalidEnv{};
+    const Vec3 direction = vecMake3(0.0f, 1.0f, 0.0f);
+    const Vec3 radiance = lightEvalEnvironmentOrBackground(&invalidEnv, &params, direction);
+
+    expectNear(radiance.x, 2.0f, 1.0e-6f, "solid env radiance R scales with intensity");
+    expectNear(radiance.y, 2.0f, 1.0e-6f, "solid env radiance G scales with intensity");
+    expectNear(radiance.z, 2.0f, 1.0e-6f, "solid env radiance B scales with intensity");
+}
+
 } // namespace
 
 int main()
@@ -125,6 +151,8 @@ int main()
     testShutterClampAllowsLongExposures();
     testAutoExposureUsesIsoWhenShutterMaxed();
     testEnvironmentPdfSolidAngleIncludesResolution();
+    testSolidEnvironmentPdfIsUniformSphere();
+    testSolidEnvironmentRadianceScalesWithIntensity();
 
     if (gFailures == 0) {
         std::cout << "All PathTracer exposure tests passed.\n";

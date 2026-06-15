@@ -43,12 +43,9 @@ PATH_INTEGRATOR_RAND_FN Vec3 pathIntegratorRandEvaluateEnvironmentNee(
     const MaterialGpu& material,
     const MeshAccelSceneGpu* scene,
     const EnvironmentMapGpu* env,
+    const RenderParamsGpu* params,
     curandState* rng)
 {
-    if (env == nullptr || env->valid == 0) {
-        return vecMake3(0.0f, 0.0f, 0.0f);
-    }
-
     const BrdfType brdfType = brdfForMaterial(material);
 
     float u1 = 0.0f;
@@ -56,7 +53,7 @@ PATH_INTEGRATOR_RAND_FN Vec3 pathIntegratorRandEvaluateEnvironmentNee(
     rand02(rng, u1, u2);
 
     float lightPdf = 0.0f;
-    const Vec3 wi = lightSampleEnvironment(env, u1, u2, lightPdf);
+    const Vec3 wi = lightSampleEnvironmentOrBackground(env, params, u1, u2, lightPdf);
     if (lightPdf <= PathIntegratorRandDetail::kMinPdf) {
         return vecMake3(0.0f, 0.0f, 0.0f);
     }
@@ -71,7 +68,7 @@ PATH_INTEGRATOR_RAND_FN Vec3 pathIntegratorRandEvaluateEnvironmentNee(
     }
 
     const BrdfContext ctx{normal, wo, material};
-    const Vec3 lightRadiance = lightEvalEnvironment(env, wi);
+    const Vec3 lightRadiance = lightEvalEnvironmentOrBackground(env, params, wi);
 
     if (brdfType == BrdfType::Glass) {
         const float cosWo = vecMax2(0.0f, vecDot3(normal, wo));
@@ -137,7 +134,7 @@ PATH_INTEGRATOR_RAND_FN Vec3 tracePathRandFromHit(
             throughput.z * emission.z));
 
         const Vec3 direct = pathIntegratorRandEvaluateEnvironmentNee(
-            position, normal, wo, material, scene, env, rng);
+            position, normal, wo, material, scene, env, params, rng);
         radiance = vecAdd3(radiance, vecMake3(
             throughput.x * direct.x,
             throughput.y * direct.y,
@@ -193,11 +190,8 @@ PATH_INTEGRATOR_RAND_FN Vec3 tracePathRandFromHit(
             PathIntegratorRandDetail::kRayTMax);
         if (!currentHit.hit) {
             const Vec3 envRadiance = lightEvalEnvironmentOrBackground(env, params, currentDir);
-            float misWeight = 1.0f;
-            if (env != nullptr && env->valid != 0) {
-                const float lightPdf = lightPdfEnvironment(env, currentDir);
-                misWeight = misBalanceWeight(sample.pdf, lightPdf);
-            }
+            const float lightPdf = lightPdfEnvironmentOrBackground(env, params, currentDir);
+            const float misWeight = misBalanceWeight(sample.pdf, lightPdf);
             radiance = vecAdd3(radiance, vecMake3(
                 throughput.x * envRadiance.x * misWeight,
                 throughput.y * envRadiance.y * misWeight,

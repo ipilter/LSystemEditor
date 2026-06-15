@@ -26,33 +26,27 @@ __device__ Vec3 clampSampleFirefly(Vec3 radiance)
     return vecMake3(radiance.x * scale, radiance.y * scale, radiance.z * scale);
 }
 
-__device__ void samplePixel(
+__device__ void tracePixelRadiance(
     int idx,
     int x,
     int y,
     int width,
     int height,
-    int stride,
-    float4* acc,
-    uint32_t* counts,
+    bool jitterSubpixel,
+    int sampleIndex,
     const CameraGpu* camera,
     const MeshAccelSceneGpu* scene,
     const EnvironmentMapGpu* env,
     const RenderParamsGpu* params,
-    unsigned int globalSeed)
+    unsigned int globalSeed,
+    Vec3& outRadiance)
 {
-    if (x % stride != 0 || y % stride != 0) {
-        return;
-    }
-
-    const uint32_t n = counts[idx];
-    const int sampleIndex = static_cast<int>(n);
-
     curandState rng{};
     randInitState(&rng, idx, sampleIndex, globalSeed);
 
-    const float u = (static_cast<float>(x) + rand01(&rng)) / static_cast<float>(width);
-    const float v = (static_cast<float>(y) + rand01(&rng)) / static_cast<float>(height);
+    const float pixelOffset = jitterSubpixel ? rand01(&rng) : 0.5f;
+    const float u = (static_cast<float>(x) + pixelOffset) / static_cast<float>(width);
+    const float v = (static_cast<float>(y) + pixelOffset) / static_cast<float>(height);
 
     float3 roFloat{};
     float3 rdFloat{};
@@ -65,17 +59,7 @@ __device__ void samplePixel(
         params,
         env,
         &rng);
-    radiance = clampSampleFirefly(radiance);
-    const float4 sample = make_float4(radiance.x, radiance.y, radiance.z, 1.0f);
-
-    const float4 prev = acc[idx];
-    const float invN = 1.0f / static_cast<float>(n + 1);
-    acc[idx] = make_float4(
-        (prev.x * static_cast<float>(n) + sample.x) * invN,
-        (prev.y * static_cast<float>(n) + sample.y) * invN,
-        (prev.z * static_cast<float>(n) + sample.z) * invN,
-        1.0f);
-    counts[idx] = n + 1;
+    outRadiance = clampSampleFirefly(radiance);
 }
 
 __global__ void sampleKernel(
@@ -87,21 +71,49 @@ __global__ void sampleKernel(
     const RenderParamsGpu* params,
     int width,
     int height,
-    int stride,
-    unsigned int globalSeed)
+    unsigned int globalSeed,
+    bool previewPass)
 {
     const int x = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
     const int y = static_cast<int>(blockIdx.y * blockDim.y + threadIdx.y);
-    if (x >= width || y >= height) {
-        return;
-    }
-
-    if (camera == nullptr) {
+    if (x >= width || y >= height || camera == nullptr) {
         return;
     }
 
     const int idx = y * width + x;
-    samplePixel(idx, x, y, width, height, stride, acc, counts, camera, scene, env, params, globalSeed);
+    const int sampleIndex = previewPass ? 0 : static_cast<int>(counts[idx]);
+
+    Vec3 radiance{};
+    tracePixelRadiance(
+        idx,
+        x,
+        y,
+        width,
+        height,
+        !previewPass,
+        sampleIndex,
+        camera,
+        scene,
+        env,
+        params,
+        globalSeed,
+        radiance);
+
+    const float4 sample = make_float4(radiance.x, radiance.y, radiance.z, 1.0f);
+    if (previewPass) {
+        acc[idx] = sample;
+        return;
+    }
+
+    const uint32_t n = counts[idx];
+    const float4 prev = acc[idx];
+    const float invN = 1.0f / static_cast<float>(n + 1);
+    acc[idx] = make_float4(
+        (prev.x * static_cast<float>(n) + sample.x) * invN,
+        (prev.y * static_cast<float>(n) + sample.y) * invN,
+        (prev.z * static_cast<float>(n) + sample.z) * invN,
+        1.0f);
+    counts[idx] = n + 1;
 }
 
 __global__ void clearAccumulatorKernel(float4* acc, uint32_t* counts, int width, int height)
@@ -117,6 +129,14 @@ __global__ void clearAccumulatorKernel(float4* acc, uint32_t* counts, int width,
     counts[idx] = 0;
 }
 
+__device__ float3 backgroundRgb(const RenderParamsGpu* params)
+{
+    if (params == nullptr) {
+        return make_float3(10.0f / 255.0f, 10.0f / 255.0f, 10.0f / 255.0f);
+    }
+    return make_float3(params->backgroundR, params->backgroundG, params->backgroundB);
+}
+
 __device__ float3 applyDisplayPipeline(float3 rgb, float exposure)
 {
     rgb = make_float3(rgb.x * exposure, rgb.y * exposure, rgb.z * exposure);
@@ -127,40 +147,71 @@ __device__ float3 applyDisplayPipeline(float3 rgb, float exposure)
     return rgb;
 }
 
-__global__ void copyToPboKernel(
-    const float4* acc,
+__device__ uchar4 toneMapToUchar4(float3 rgb)
+{
+    const unsigned char r = static_cast<unsigned char>(fminf(fmaxf(rgb.x, 0.0f), 1.0f) * 255.0f);
+    const unsigned char g = static_cast<unsigned char>(fminf(fmaxf(rgb.y, 0.0f), 1.0f) * 255.0f);
+    const unsigned char b = static_cast<unsigned char>(fminf(fmaxf(rgb.z, 0.0f), 1.0f) * 255.0f);
+    return make_uchar4(r, g, b, 255);
+}
+
+__device__ float3 readDisplayRgb(
+    const float4* source,
+    const uint32_t* counts,
+    int sourceIndex,
+    bool useAccumulator,
+    const RenderParamsGpu* params)
+{
+    float3 rgb = backgroundRgb(params);
+    if (source == nullptr) {
+        return rgb;
+    }
+
+    if (useAccumulator) {
+        if (counts != nullptr && counts[sourceIndex] > 0) {
+            const float4 value = source[sourceIndex];
+            rgb = make_float3(value.x, value.y, value.z);
+        }
+        return rgb;
+    }
+
+    const float4 value = source[sourceIndex];
+    rgb = make_float3(value.x, value.y, value.z);
+    return rgb;
+}
+
+__global__ void writeDisplayToPboKernel(
+    const float4* source,
     const uint32_t* counts,
     uchar4* pbo,
-    int width,
-    int height,
-    int stride,
-    float backgroundR,
-    float backgroundG,
-    float backgroundB,
+    int outputWidth,
+    int outputHeight,
+    int sourceWidth,
+    int sourceHeight,
+    int downscale,
+    bool useAccumulator,
+    const RenderParamsGpu* params,
     float exposure)
 {
     const int x = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
     const int y = static_cast<int>(blockIdx.y * blockDim.y + threadIdx.y);
-    if (x >= width || y >= height) {
+    if (x >= outputWidth || y >= outputHeight) {
         return;
     }
 
-    const int ax = x - (x % stride);
-    const int ay = y - (y % stride);
-    const int aidx = ay * width + ax;
-
-    float3 rgb = make_float3(backgroundR, backgroundG, backgroundB);
-    if (counts != nullptr && counts[aidx] > 0) {
-        const float4 v = acc[aidx];
-        rgb = make_float3(v.x, v.y, v.z);
+    int sourceIndex = y * outputWidth + x;
+    if (downscale > 1 && sourceWidth > 0 && sourceHeight > 0) {
+        const int clampedDownscale = downscale < 1 ? 1 : downscale;
+        const int px = x / clampedDownscale;
+        const int py = y / clampedDownscale;
+        const int clampedPx = px < sourceWidth ? px : sourceWidth - 1;
+        const int clampedPy = py < sourceHeight ? py : sourceHeight - 1;
+        sourceIndex = clampedPy * sourceWidth + clampedPx;
     }
 
+    float3 rgb = readDisplayRgb(source, counts, sourceIndex, useAccumulator, params);
     rgb = applyDisplayPipeline(rgb, exposure);
-
-    const unsigned char r = static_cast<unsigned char>(fminf(fmaxf(rgb.x, 0.0f), 1.0f) * 255.0f);
-    const unsigned char g = static_cast<unsigned char>(fminf(fmaxf(rgb.y, 0.0f), 1.0f) * 255.0f);
-    const unsigned char b = static_cast<unsigned char>(fminf(fmaxf(rgb.z, 0.0f), 1.0f) * 255.0f);
-    pbo[y * width + x] = make_uchar4(r, g, b, 255);
+    pbo[y * outputWidth + x] = toneMapToUchar4(rgb);
 }
 
 dim3 grid2d(int width, int height, dim3 block)
@@ -176,6 +227,42 @@ bool checkLaunch(cudaError_t error)
         return false;
     }
     return cudaGetLastError() == cudaSuccess;
+}
+
+bool launchSampleKernel(
+    float4* d_buffer,
+    uint32_t* d_samples,
+    int width,
+    int height,
+    const CameraGpu* d_camera,
+    const MeshAccelSceneGpu* d_scene,
+    const EnvironmentMapGpu* d_env,
+    const RenderParamsGpu* d_params,
+    unsigned int globalSeed,
+    bool previewPass,
+    cudaStream_t stream)
+{
+    if (d_buffer == nullptr || d_camera == nullptr || width <= 0 || height <= 0) {
+        return false;
+    }
+    if (!previewPass && d_samples == nullptr) {
+        return false;
+    }
+
+    const dim3 block(16, 16);
+    const dim3 grid = grid2d(width, height, block);
+    sampleKernel<<<grid, block, 0, stream>>>(
+        d_buffer,
+        d_samples,
+        d_camera,
+        d_scene,
+        d_env,
+        d_params,
+        width,
+        height,
+        globalSeed,
+        previewPass);
+    return checkLaunch(cudaSuccess);
 }
 
 } // namespace
@@ -202,7 +289,6 @@ bool pathTracerSample(
     uint32_t* d_samples,
     int width,
     int height,
-    int stride,
     const CameraGpu* d_camera,
     const MeshAccelSceneGpu* d_scene,
     const EnvironmentMapGpu* d_env,
@@ -210,26 +296,43 @@ bool pathTracerSample(
     unsigned int globalSeed,
     cudaStream_t stream)
 {
-    if (d_buffer == nullptr || d_samples == nullptr || d_camera == nullptr || width <= 0 || height <= 0) {
-        return false;
-    }
-
-    const int clampedStride = stride < 1 ? 1 : stride;
-    const dim3 block(16, 16);
-    const dim3 grid = grid2d(width, height, block);
-
-    sampleKernel<<<grid, block, 0, stream>>>(
+    return launchSampleKernel(
         d_buffer,
         d_samples,
+        width,
+        height,
         d_camera,
         d_scene,
         d_env,
         d_params,
+        globalSeed,
+        false,
+        stream);
+}
+
+bool pathTracerPreviewSample(
+    float4* d_buffer,
+    int width,
+    int height,
+    const CameraGpu* d_camera,
+    const MeshAccelSceneGpu* d_scene,
+    const EnvironmentMapGpu* d_env,
+    const RenderParamsGpu* d_params,
+    unsigned int globalSeed,
+    cudaStream_t stream)
+{
+    return launchSampleKernel(
+        d_buffer,
+        nullptr,
         width,
         height,
-        clampedStride,
-        globalSeed);
-    return checkLaunch(cudaSuccess);
+        d_camera,
+        d_scene,
+        d_env,
+        d_params,
+        globalSeed,
+        true,
+        stream);
 }
 
 bool pathTracerCopyToPbo(
@@ -238,30 +341,61 @@ bool pathTracerCopyToPbo(
     uchar4* pbo,
     int width,
     int height,
-    int stride,
-    float backgroundR,
-    float backgroundG,
-    float backgroundB,
+    const RenderParamsGpu* d_params,
     float exposure,
     cudaStream_t stream)
 {
-    if (acc == nullptr || counts == nullptr || pbo == nullptr || width <= 0 || height <= 0) {
+    if (acc == nullptr || counts == nullptr || pbo == nullptr || d_params == nullptr || width <= 0 || height <= 0) {
         return false;
     }
 
-    const int clampedStride = stride < 1 ? 1 : stride;
     const dim3 block(16, 16);
     const dim3 grid = grid2d(width, height, block);
-    copyToPboKernel<<<grid, block, 0, stream>>>(
+    writeDisplayToPboKernel<<<grid, block, 0, stream>>>(
         acc,
         counts,
         pbo,
         width,
         height,
-        clampedStride,
-        backgroundR,
-        backgroundG,
-        backgroundB,
+        width,
+        height,
+        1,
+        true,
+        d_params,
+        exposure);
+    return checkLaunch(cudaSuccess);
+}
+
+bool pathTracerUpsamplePreviewToPbo(
+    const float4* preview,
+    int previewWidth,
+    int previewHeight,
+    int downscale,
+    uchar4* pbo,
+    int fullWidth,
+    int fullHeight,
+    const RenderParamsGpu* d_params,
+    float exposure,
+    cudaStream_t stream)
+{
+    if (preview == nullptr || pbo == nullptr || d_params == nullptr || previewWidth <= 0 || previewHeight <= 0 ||
+        fullWidth <= 0 || fullHeight <= 0) {
+        return false;
+    }
+
+    const dim3 block(16, 16);
+    const dim3 grid = grid2d(fullWidth, fullHeight, block);
+    writeDisplayToPboKernel<<<grid, block, 0, stream>>>(
+        preview,
+        nullptr,
+        pbo,
+        fullWidth,
+        fullHeight,
+        previewWidth,
+        previewHeight,
+        downscale,
+        false,
+        d_params,
         exposure);
     return checkLaunch(cudaSuccess);
 }

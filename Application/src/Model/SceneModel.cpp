@@ -13,6 +13,8 @@ constexpr int kMinPreviewStepsPerLevel = 0;
 constexpr int kMaxPreviewStepsPerLevel = 8;
 constexpr float kMinCreaseAngleDeg = 0.0f;
 constexpr float kMaxCreaseAngleDeg = 180.0f;
+constexpr float kMinEnvironmentIntensity = 0.0f;
+constexpr float kMaxEnvironmentIntensity = 100.0f;
 } // namespace
 
 SceneModel::SceneModel(QObject* parent)
@@ -24,6 +26,7 @@ SceneModel::SceneModel(QObject* parent)
     , m_accelBvhColor(AppSettings::instance().accelBvhColor())
     , m_creaseAngleDeg(AppSettings::instance().creaseAngleDeg())
     , m_environmentHdrPath(AppSettings::instance().environmentHdrPath())
+    , m_environmentIntensity(AppSettings::instance().environmentIntensity())
     , m_fStop(AppSettings::instance().fStop())
     , m_shutterSpeedSeconds(AppSettings::instance().shutterSpeedSeconds())
     , m_iso(AppSettings::instance().iso())
@@ -167,6 +170,23 @@ void SceneModel::setEnvironmentHdrPath(const QString& path)
     m_environmentHdrPath = normalized;
     AppSettings::instance().setEnvironmentHdrPath(normalized);
     emit environmentHdrPathChanged(m_environmentHdrPath);
+}
+
+float SceneModel::environmentIntensity() const
+{
+    return m_environmentIntensity;
+}
+
+void SceneModel::setEnvironmentIntensity(float value)
+{
+    const float clamped = clampEnvironmentIntensity(value);
+    if (m_environmentIntensity == clamped) {
+        return;
+    }
+
+    m_environmentIntensity = clamped;
+    AppSettings::instance().setEnvironmentIntensity(clamped);
+    emit environmentIntensityChanged(m_environmentIntensity);
 }
 
 float SceneModel::fStop() const
@@ -331,4 +351,15 @@ float SceneModel::clampShutterSpeedSeconds(float value)
 float SceneModel::clampIso(float value)
 {
     return PhysicalCamera::snapIsoToNearestPreset(value);
+}
+
+float SceneModel::clampEnvironmentIntensity(float value)
+{
+    if (value < kMinEnvironmentIntensity) {
+        return kMinEnvironmentIntensity;
+    }
+    if (value > kMaxEnvironmentIntensity) {
+        return kMaxEnvironmentIntensity;
+    }
+    return value;
 }

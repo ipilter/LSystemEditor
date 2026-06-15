@@ -45,6 +45,9 @@ public:
     QString environmentHdrPath() const;
     void setEnvironmentHdrPath(const QString& path);
 
+    float environmentIntensity() const;
+    void setEnvironmentIntensity(float value);
+
     float fStop() const;
     void setFStop(float value);
 
@@ -69,6 +72,7 @@ signals:
     void boundsOverlayModeChanged(MeshAccelBoundsOverlayMode mode);
     void accelBvhColorChanged(const QColor& color);
     void environmentHdrPathChanged(const QString& path);
+    void environmentIntensityChanged(float value);
     void fStopChanged(float value);
     void shutterSpeedSecondsChanged(float value);
     void isoChanged(float value);
@@ -83,6 +87,7 @@ private:
     static float clampFStop(float value);
     static float clampShutterSpeedSeconds(float value);
     static float clampIso(float value);
+    static float clampEnvironmentIntensity(float value);
 
     QColor m_clearColor;
     QSize m_renderSize;
@@ -92,6 +97,7 @@ private:
     QColor m_accelBvhColor = QColor(230, 200, 0);
     float m_creaseAngleDeg = 50.0f;
     QString m_environmentHdrPath;
+    float m_environmentIntensity = 1.0f;
     float m_fStop = 0.0f;
     float m_shutterSpeedSeconds = 0.0f;
     float m_iso = 0.0f;

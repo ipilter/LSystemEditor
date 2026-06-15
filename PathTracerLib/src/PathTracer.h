@@ -3,7 +3,6 @@
 #include "CameraGpu.h"
 #include "PhysicalCamera.h"
 #include "RenderTypes.h"
-#include "RenderAccumulationState.h"
 #include "MeshAccel/MeshAccelBoundsMesh.h"
 #include "MeshAccel/MeshSceneContent.h"
 #include "Procedural/ProceduralTypes.h"
@@ -21,7 +20,7 @@ namespace PathTracerDetail {
 struct PathTracerImpl;
 }
 
-/// CUDA path tracer skeleton. Writes RGBA8 frames into caller-owned OpenGL PBOs.
+/// CUDA path tracer. Writes RGBA8 frames into caller-owned OpenGL PBOs.
 ///
 /// Threading: an internal std::thread runs sample accumulation. PBO publish (CUDA–GL interop)
 /// must run on the thread with the active OpenGL context via publishDisplayFrame().
@@ -64,7 +63,8 @@ public:
     void setMaxSamplesPerPixel(int max);
     int maxSamplesPerPixel() const;
 
-    /// 0 = disabled (stride 1 always). N > 0 runs N coarse pyramid iterations before full-res samples.
+    /// 0 = disabled (no preview passes). N > 0 runs N dense low-res preview passes (1/2^N .. 1/2)
+    /// with shallow path tracing before full-resolution accumulation.
     void setPreviewStepsPerLevel(int steps);
     int previewStepsPerLevel() const;
 
@@ -73,22 +73,22 @@ public:
     int sampleBudgetTotalIterations() const;
     bool isSampleBudgetExhausted() const;
 
-    void setCamera(const PhysicalCamera& camera);
     void setCamera(const CameraGpu& camera);
 
     CameraGpu lastSampleCamera() const;
 
     void setClearColor(const QColor& color);
 
-    void setPhysicalCamera(const PhysicalCamera& camera);
     void setPhysicalCamera(float fStop, float shutterSpeedSeconds, float iso);
-    PhysicalCamera physicalCamera() const;
     PhysicalCamera suggestedPhysicalCamera() const;
 
     bool computeSuggestedCameraFromAccumulator(PhysicalCamera* out) const;
 
     void setEnvironmentHdrPath(const QString& path);
     QString environmentHdrPath() const;
+
+    void setEnvironmentIntensity(float intensity);
+    float environmentIntensity() const;
 
     void rebuildMeshBoundsMesh(const QColor& boundsColor);
     const MeshAccelBoundsMesh& meshBoundsMesh() const;

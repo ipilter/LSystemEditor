@@ -46,6 +46,12 @@ target_include_directories(path_tracer_budget_tests PRIVATE "${PATHTRACER_LIB_IN
 set_target_properties(path_tracer_budget_tests PROPERTIES FOLDER "PathTracerLib/tests")
 add_test(NAME PathTracerBudget COMMAND path_tracer_budget_tests)
 
+add_executable(path_tracer_preview_levels_tests tests/PathTracerPreviewLevelsTests.cpp)
+target_link_libraries(path_tracer_preview_levels_tests PRIVATE PathTracerLib)
+target_include_directories(path_tracer_preview_levels_tests PRIVATE "${PATHTRACER_LIB_INCLUDE_DIR}")
+set_target_properties(path_tracer_preview_levels_tests PROPERTIES FOLDER "PathTracerLib/tests")
+add_test(NAME PathTracerPreviewLevels COMMAND path_tracer_preview_levels_tests)
+
 add_executable(path_tracer_exposure_tests tests/PathTracerExposureTests.cpp)
 target_link_libraries(path_tracer_exposure_tests PRIVATE PathTracerLib)
 target_include_directories(path_tracer_exposure_tests PRIVATE "${PATHTRACER_LIB_INCLUDE_DIR}")
@@ -55,8 +61,7 @@ add_test(NAME PathTracerExposure COMMAND path_tracer_exposure_tests)
 add_executable(path_tracer_camera_direction_tests
     tests/PathTracerCameraDirectionTests.cpp
     "${CMAKE_SOURCE_DIR}/Application/src/AppLog.cpp")
-target_link_libraries(path_tracer_camera_direction_tests PRIVATE
-    PathTracerLib Qt6::Gui Qt6::OpenGL glm::glm)
+target_link_libraries(path_tracer_camera_direction_tests PRIVATE PathTracerLib Qt6::Core Qt6::Gui glm::glm)
 target_include_directories(path_tracer_camera_direction_tests PRIVATE
     "${PATHTRACER_LIB_INCLUDE_DIR}"
     "${CMAKE_SOURCE_DIR}/Application/src")

@@ -103,6 +103,7 @@ SceneController::SceneController(SceneModel* model, MainView* view, QObject* par
 {
     syncColorButtonStyle();
     m_view->viewport()->setClearColor(m_model->clearColor());
+    m_view->viewport()->setEnvironmentIntensity(m_model->environmentIntensity());
     m_view->viewport()->setSceneModel(m_model);
 
     syncRenderSpinBoxes();
@@ -110,6 +111,8 @@ SceneController::SceneController(SceneModel* model, MainView* view, QObject* par
     syncPreviewStepsSpinBox();
     syncBoundsOverlayComboBox();
     syncEnvironmentHdrPath();
+    syncEnvironmentIntensitySpinBox();
+    syncEnvironmentIntensityEnabled();
     syncPhysicalCameraUi();
     updateExposureValueLabel();
     applyPhysicalCameraToViewport();
@@ -145,11 +148,26 @@ SceneController::SceneController(SceneModel* model, MainView* view, QObject* par
         &QPushButton::clicked,
         this,
         &SceneController::onEnvironmentHdrBrowseClicked);
+    connect(
+        m_view->environmentHdrClearButton(),
+        &QPushButton::clicked,
+        this,
+        &SceneController::onEnvironmentHdrClearClicked);
+    connect(
+        m_view->environmentIntensitySpinBox(),
+        QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+        this,
+        &SceneController::onEnvironmentIntensitySpinBoxChanged);
     connect(m_model, &SceneModel::environmentHdrPathChanged, this, [this](const QString& path) {
         syncEnvironmentHdrPath();
+        syncEnvironmentIntensityEnabled();
         m_view->viewport()->setEnvironmentHdrPath(path);
         m_pendingFrameAutoExposure = !path.isEmpty();
         m_pendingAccumulatorExposureRefine = false;
+    });
+    connect(m_model, &SceneModel::environmentIntensityChanged, this, [this](float value) {
+        syncEnvironmentIntensitySpinBox();
+        m_view->viewport()->setEnvironmentIntensity(value);
     });
     connect(m_view->fStopSpinBox(), QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [this](double value) {
         m_model->setFStop(static_cast<float>(value));
@@ -383,6 +401,29 @@ void SceneController::onEnvironmentHdrBrowseClicked()
     }
 
     m_model->setEnvironmentHdrPath(path);
+}
+
+void SceneController::onEnvironmentHdrClearClicked()
+{
+    m_model->setEnvironmentHdrPath({});
+}
+
+void SceneController::onEnvironmentIntensitySpinBoxChanged(double value)
+{
+    m_model->setEnvironmentIntensity(static_cast<float>(value));
+}
+
+void SceneController::syncEnvironmentIntensitySpinBox()
+{
+    m_view->environmentIntensitySpinBox()->blockSignals(true);
+    m_view->environmentIntensitySpinBox()->setValue(static_cast<double>(m_model->environmentIntensity()));
+    m_view->environmentIntensitySpinBox()->blockSignals(false);
+}
+
+void SceneController::syncEnvironmentIntensityEnabled()
+{
+    const bool hasHdr = !m_model->environmentHdrPath().isEmpty();
+    m_view->environmentIntensitySpinBox()->setEnabled(!hasHdr);
 }
 
 void SceneController::onIterationChangedForAutoExposure(int sampleCount)

@@ -28,6 +28,8 @@ public:
     QPushButton* colorButton() const;
     QLineEdit* environmentHdrPathEdit() const;
     QPushButton* environmentHdrBrowseButton() const;
+    QPushButton* environmentHdrClearButton() const;
+    QDoubleSpinBox* environmentIntensitySpinBox() const;
     void setEnvironmentHdrPath(const QString& path);
     QDoubleSpinBox* fStopSpinBox() const;
     QComboBox* shutterSpeedComboBox() const;
@@ -67,6 +69,8 @@ private:
     QPushButton* m_colorButton = nullptr;
     QLineEdit* m_environmentHdrPathEdit = nullptr;
     QPushButton* m_environmentHdrBrowseButton = nullptr;
+    QPushButton* m_environmentHdrClearButton = nullptr;
+    QDoubleSpinBox* m_environmentIntensitySpinBox = nullptr;
     QDoubleSpinBox* m_fStopSpinBox = nullptr;
     QComboBox* m_shutterSpeedComboBox = nullptr;
     QComboBox* m_isoComboBox = nullptr;

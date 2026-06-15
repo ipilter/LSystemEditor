@@ -29,6 +29,7 @@ public:
     const MeshAccelSceneGpu* hostScene() const { return m_built ? &m_hostScene : nullptr; }
 
     bool isBuilt() const { return m_built; }
+    bool isDeviceDirty() const { return m_deviceDirty; }
     const std::vector<TriangleGpu>& trianglesHost() const { return m_triangles; }
     const std::vector<MeshBvhNode>& bvhNodesHost() const { return m_bvhNodes; }
     const std::vector<MaterialGpu>& materialsHost() const { return m_materials; }

@@ -107,8 +107,9 @@ MainView::MainView(QWidget* parent)
     m_previewStepsSpinBox->setValue(kDefaultPreviewStepsPerLevel);
     m_previewStepsSpinBox->setToolTip(
         QStringLiteral(
-            "Sparse preview kernel launches before full-res sampling (0 = disabled, all pixels every iteration). "
-            "Each preview step uses a coarse pixel lattice (e.g. every 32nd pixel), not extra samples per pixel."));
+            "Number of dense low-res preview passes before full-resolution sampling (0 = disabled). "
+            "Each level halves resolution (e.g. 2 levels = 1/4 then 1/2), upscaled with nearest-neighbor. "
+            "Preview uses primary-ray-only shading for fast feedback."));
     previewRow->addWidget(m_previewStepsSpinBox);
     renderLayout->addLayout(previewRow);
 
@@ -138,27 +139,6 @@ MainView::MainView(QWidget* parent)
     stateRow->addWidget(m_renderStateLabel, 1);
     renderLayout->addLayout(stateRow);
 
-    auto* backgroundRow = new QHBoxLayout();
-    backgroundRow->addWidget(new QLabel(QStringLiteral("Background:"), renderGroup));
-    m_colorButton = new QPushButton(renderGroup);
-    m_colorButton->setFixedSize(24, 24);
-    m_colorButton->setToolTip(QStringLiteral("Viewport background color for unaccumulated pixels"));
-    backgroundRow->addWidget(m_colorButton);
-    backgroundRow->addStretch();
-    renderLayout->addLayout(backgroundRow);
-
-    auto* environmentRow = new QHBoxLayout();
-    environmentRow->addWidget(new QLabel(QStringLiteral("Environment:"), renderGroup));
-    m_environmentHdrPathEdit = new QLineEdit(renderGroup);
-    m_environmentHdrPathEdit->setReadOnly(true);
-    m_environmentHdrPathEdit->setPlaceholderText(QStringLiteral("No HDR selected"));
-    m_environmentHdrPathEdit->setToolTip(QStringLiteral("HDR image used for image-based lighting"));
-    environmentRow->addWidget(m_environmentHdrPathEdit, 1);
-    m_environmentHdrBrowseButton = new QPushButton(QStringLiteral("Browse…"), renderGroup);
-    m_environmentHdrBrowseButton->setToolTip(QStringLiteral("Select an HDR environment map"));
-    environmentRow->addWidget(m_environmentHdrBrowseButton);
-    renderLayout->addLayout(environmentRow);
-
     auto* renderControlRow = new QHBoxLayout();
     m_startButton = new QPushButton(QStringLiteral("Start"), renderGroup);
     m_startButton->setToolTip(
@@ -170,6 +150,48 @@ MainView::MainView(QWidget* parent)
     renderLayout->addLayout(renderControlRow);
 
     controlLayout->addWidget(renderGroup);
+
+    auto* environmentGroup = new QGroupBox(QStringLiteral("Environment"), controlPanel);
+    auto* environmentLayout = new QVBoxLayout(environmentGroup);
+
+    auto* backgroundRow = new QHBoxLayout();
+    backgroundRow->addWidget(new QLabel(QStringLiteral("Background:"), environmentGroup));
+    m_colorButton = new QPushButton(environmentGroup);
+    m_colorButton->setFixedSize(24, 24);
+    m_colorButton->setToolTip(
+        QStringLiteral("Viewport background color and solid-color environment lighting when no HDRI is loaded"));
+    backgroundRow->addWidget(m_colorButton);
+    backgroundRow->addStretch();
+    environmentLayout->addLayout(backgroundRow);
+
+    auto* intensityRow = new QHBoxLayout();
+    intensityRow->addWidget(new QLabel(QStringLiteral("Intensity:"), environmentGroup));
+    m_environmentIntensitySpinBox = new QDoubleSpinBox(environmentGroup);
+    m_environmentIntensitySpinBox->setRange(0.0, 100.0);
+    m_environmentIntensitySpinBox->setDecimals(2);
+    m_environmentIntensitySpinBox->setSingleStep(0.1);
+    m_environmentIntensitySpinBox->setValue(1.0);
+    m_environmentIntensitySpinBox->setToolTip(
+        QStringLiteral("Scales radiance of the solid-color environment when no HDRI is loaded"));
+    intensityRow->addWidget(m_environmentIntensitySpinBox, 1);
+    environmentLayout->addLayout(intensityRow);
+
+    auto* hdriRow = new QHBoxLayout();
+    hdriRow->addWidget(new QLabel(QStringLiteral("HDRI:"), environmentGroup));
+    m_environmentHdrPathEdit = new QLineEdit(environmentGroup);
+    m_environmentHdrPathEdit->setReadOnly(true);
+    m_environmentHdrPathEdit->setPlaceholderText(QStringLiteral("No HDR selected"));
+    m_environmentHdrPathEdit->setToolTip(QStringLiteral("HDR image used for image-based lighting"));
+    hdriRow->addWidget(m_environmentHdrPathEdit, 1);
+    m_environmentHdrBrowseButton = new QPushButton(QStringLiteral("Browse…"), environmentGroup);
+    m_environmentHdrBrowseButton->setToolTip(QStringLiteral("Select an HDR environment map"));
+    hdriRow->addWidget(m_environmentHdrBrowseButton);
+    m_environmentHdrClearButton = new QPushButton(QStringLiteral("Clear"), environmentGroup);
+    m_environmentHdrClearButton->setToolTip(QStringLiteral("Remove the loaded HDRI and use solid-color environment lighting"));
+    hdriRow->addWidget(m_environmentHdrClearButton);
+    environmentLayout->addLayout(hdriRow);
+
+    controlLayout->addWidget(environmentGroup);
 
     auto* physicalCameraGroup = new QGroupBox(QStringLiteral("Physical Camera"), controlPanel);
     auto* physicalCameraLayout = new QVBoxLayout(physicalCameraGroup);
@@ -228,7 +250,7 @@ MainView::MainView(QWidget* parent)
 
     m_lsystemEdit = new QPlainTextEdit(lsystemGroup);
     m_lsystemEdit->setPlaceholderText(QStringLiteral("L-system definition (axiom and rules)"));
-    m_lsystemEdit->setPlainText(QStringLiteral("Mat(0) = Metal { 0.0, 0.0, 0.0, 1, 0 }\nMat(1) = Diffuse { 0.5, 0.5, 0.5, 1.0 }\nMat(2) = Diffuse { 1.0, 1.0, 1.0, 1.0 }\nMat(3) = Glass { 0.95, 0.98, 1.00, 1.452 }\nPitch(-90)\n\n[Mat(1) f(-10000) F(0, 10000)]\n\nMat(0)\nF\nf(0)\nMat(1)\nF\nf(0)\nMat(2)\nF\nf(0.1)\nMat(3)\nF(0)"));
+    m_lsystemEdit->setPlainText(QStringLiteral("Mat(0) = Diffuse { 0.01, 0.01, 0.01, 1 }\nMat(1) = Diffuse { 0.5, 0.5, 0.5, 1 }\nMat(2) = Diffuse { 1.0, 1.0, 1.0, 1 }\nMat(3) = Glass { 0.95, 0.98, 0.90, 1.452 }\nMat(4) = Metal { 0.60, 0.58, 0.10, 0.0 }\n\n[Pitch(-90) Mat(1) f(-10000.5) F(0, 10000)]\n\nMat(0)\nF(0)\nf(0.15)\nMat(1)\nF(0)\nf(0.15)\nMat(2)\nF(0)\nf(0.15)\nMat(3)\nF(0)\nf(0.15)\nMat(4)\nF(0)"));
 
     m_lsystemEdit->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     lsystemLayout->addWidget(m_lsystemEdit, 1);
@@ -326,6 +348,16 @@ QLineEdit* MainView::environmentHdrPathEdit() const
 QPushButton* MainView::environmentHdrBrowseButton() const
 {
     return m_environmentHdrBrowseButton;
+}
+
+QPushButton* MainView::environmentHdrClearButton() const
+{
+    return m_environmentHdrClearButton;
+}
+
+QDoubleSpinBox* MainView::environmentIntensitySpinBox() const
+{
+    return m_environmentIntensitySpinBox;
 }
 
 void MainView::setEnvironmentHdrPath(const QString& path)

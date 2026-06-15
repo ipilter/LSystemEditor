@@ -287,6 +287,14 @@ void OpenGLViewportWidget::setEnvironmentHdrPath(const QString& path)
     m_pathTracer.setEnvironmentHdrPath(path);
 }
 
+void OpenGLViewportWidget::setEnvironmentIntensity(float intensity)
+{
+    m_pathTracer.setEnvironmentIntensity(intensity);
+    if (m_glInitialized) {
+        update();
+    }
+}
+
 void OpenGLViewportWidget::setPhysicalCamera(float fStop, float shutterSpeedSeconds, float iso)
 {
     m_pathTracer.setPhysicalCamera(fStop, shutterSpeedSeconds, iso);
@@ -704,6 +712,8 @@ void OpenGLViewportWidget::emitRenderState()
 void OpenGLViewportWidget::restartRender()
 {
     m_renderPaused = false;
+    m_hasNewFrame.store(false);
+    m_frameCallbackQueued.store(false);
     m_pathTracer.resetAccumulation();
     if (!m_pathTracer.isRunning()) {
         m_pathTracer.start();
@@ -727,7 +737,7 @@ bool OpenGLViewportWidget::exportSceneWavefrontObj(const QString& objFilePath, Q
 
 void OpenGLViewportWidget::syncCameraToPathTracer()
 {
-    m_pathTracer.setCamera(m_camera);
+    m_pathTracer.setCamera(m_camera.toGpu());
 }
 
 void OpenGLViewportWidget::syncCameraLive()
@@ -739,6 +749,8 @@ void OpenGLViewportWidget::syncCameraLive()
 void OpenGLViewportWidget::resetAccumulationForCamera()
 {
     m_renderPaused = false;
+    m_hasNewFrame.store(false);
+    m_frameCallbackQueued.store(false);
     m_pathTracer.resetAccumulation();
     ensureRenderWorkerRunning();
     emit iterationChanged(0);
@@ -806,6 +818,7 @@ void OpenGLViewportWidget::recreateGpuBuffers()
     }
 
     m_pathTracer.setClearColor(m_clearColor);
+    m_pathTracer.setEnvironmentIntensity(m_model->environmentIntensity());
 
     rebuildBoundsOverlay();
 

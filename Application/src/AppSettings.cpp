@@ -36,8 +36,11 @@ constexpr const char* kPreviewStepsPerLevelKey = "previewStepsPerLevel";
 constexpr float kDefaultCreaseAngleDeg = 50.0f;
 constexpr float kMinCreaseAngleDeg = 0.0f;
 constexpr float kMaxCreaseAngleDeg = 180.0f;
+constexpr float kMinEnvironmentIntensity = 0.0f;
+constexpr float kMaxEnvironmentIntensity = 100.0f;
 constexpr const char* kCreaseAngleDegKey = "creaseAngleDeg";
 constexpr const char* kEnvironmentHdrPathKey = "environmentHdrPath";
+constexpr const char* kEnvironmentIntensityKey = "environmentIntensity";
 constexpr const char* kFStopKey = "fStop";
 constexpr const char* kShutterSpeedSecondsKey = "shutterSpeedSeconds";
 constexpr const char* kIsoKey = "iso";
@@ -275,6 +278,22 @@ void AppSettings::setEnvironmentHdrPath(const QString& path)
     save();
 }
 
+float AppSettings::environmentIntensity() const
+{
+    return m_environmentIntensity;
+}
+
+void AppSettings::setEnvironmentIntensity(float value)
+{
+    const float clamped = clampEnvironmentIntensity(value);
+    if (m_environmentIntensity == clamped) {
+        return;
+    }
+
+    m_environmentIntensity = clamped;
+    save();
+}
+
 float AppSettings::fStop() const
 {
     return m_fStop;
@@ -398,6 +417,17 @@ float AppSettings::clampShutterSpeedSeconds(float value)
 float AppSettings::clampIso(float value)
 {
     return PhysicalCamera::snapIsoToNearestPreset(value);
+}
+
+float AppSettings::clampEnvironmentIntensity(float value)
+{
+    if (value < kMinEnvironmentIntensity) {
+        return kMinEnvironmentIntensity;
+    }
+    if (value > kMaxEnvironmentIntensity) {
+        return kMaxEnvironmentIntensity;
+    }
+    return value;
 }
 
 float AppSettings::clampCreaseAngleDeg(float value)
@@ -598,6 +628,15 @@ void AppSettings::load()
         m_environmentHdrPath = environmentHdrPathValue.toString().trimmed();
     }
 
+    const QVariant environmentIntensityValue = settings.value(kEnvironmentIntensityKey);
+    if (environmentIntensityValue.isValid()) {
+        bool ok = false;
+        const float intensity = static_cast<float>(environmentIntensityValue.toDouble(&ok));
+        if (ok) {
+            m_environmentIntensity = clampEnvironmentIntensity(intensity);
+        }
+    }
+
     const QVariant fStopValue = settings.value(kFStopKey);
     if (fStopValue.isValid()) {
         bool ok = false;
@@ -687,6 +726,7 @@ void AppSettings::save()
     settings.setValue(kAccelBvhColorBlueKey, m_accelBvhColor.blue());
     settings.setValue(kCreaseAngleDegKey, static_cast<double>(m_creaseAngleDeg));
     settings.setValue(kEnvironmentHdrPathKey, m_environmentHdrPath);
+    settings.setValue(kEnvironmentIntensityKey, static_cast<double>(m_environmentIntensity));
     settings.setValue(kFStopKey, static_cast<double>(m_fStop));
     settings.setValue(kShutterSpeedSecondsKey, static_cast<double>(m_shutterSpeedSeconds));
     settings.setValue(kIsoKey, static_cast<double>(m_iso));
