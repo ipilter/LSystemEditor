@@ -138,6 +138,7 @@ SceneController::SceneController(SceneModel* model, MainView* view, QObject* par
     connect(m_view->stopButton(), &QPushButton::clicked, this, &SceneController::onStopButtonClicked);
     connect(m_view->settingsButton(), &QPushButton::clicked, this, &SceneController::onSettingsButtonClicked);
     connect(m_view->addPrimitiveButton(), &QPushButton::clicked, this, &SceneController::onAddPrimitiveButtonClicked);
+    connect(m_view->resetSceneButton(), &QPushButton::clicked, this, &SceneController::onResetSceneButtonClicked);
     connect(m_view->exportSceneButton(), &QPushButton::clicked, this, &SceneController::onExportSceneButtonClicked);
     connect(
         m_view->environmentHdrBrowseButton(),
@@ -295,6 +296,11 @@ void SceneController::onAddPrimitiveButtonClicked()
     instance.translation = dialog.translation();
     instance.rotationDeg = dialog.rotationDeg();
     m_model->addProceduralInstance(std::move(instance));
+}
+
+void SceneController::onResetSceneButtonClicked()
+{
+    m_model->resetScene();
 }
 
 void SceneController::onExportSceneButtonClicked()

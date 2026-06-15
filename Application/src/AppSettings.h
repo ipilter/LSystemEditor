@@ -16,6 +16,23 @@ inline constexpr const char* kPhysicalCamera = "physicalCamera";
 
 } // namespace DebounceElementIds
 
+struct CameraDynamicsSettings
+{
+    float thrustLinear = 2.0f;
+    float dragLinear = 4.0f;
+    float thrustAngular = 2.0f;
+    float dragAngular = 5.0f;
+    float mouseSensitivity = 0.15f;
+    int tickIntervalMs = 16;
+    int motionResetThrottleMs = 250;
+    int motionStopDebounceMs = 200;
+
+    bool operator==(const CameraDynamicsSettings& other) const;
+    bool operator!=(const CameraDynamicsSettings& other) const { return !(*this == other); }
+};
+
+Q_DECLARE_METATYPE(CameraDynamicsSettings)
+
 class AppSettings : public QObject
 {
     Q_OBJECT
@@ -70,14 +87,19 @@ public:
     QByteArray verticalSplitterState() const;
     void setVerticalSplitterState(const QByteArray& state);
 
+    CameraDynamicsSettings cameraDynamicsSettings() const;
+    void setCameraDynamicsSettings(const CameraDynamicsSettings& settings);
+
     void load();
     void save();
 
 signals:
     void debounceMsChanged(const QString& elementId, int ms);
+    void cameraDynamicsSettingsChanged(const CameraDynamicsSettings& settings);
 
 private:
     static int clampDebounceMs(int value);
+    static CameraDynamicsSettings clampCameraDynamicsSettings(const CameraDynamicsSettings& settings);
     static int clampRenderDimension(int value);
     static int clampMaxSamplesPerPixel(int value);
     static int clampPreviewStepsPerLevel(int value);
@@ -103,4 +125,5 @@ private:
     QByteArray m_windowGeometry;
     QByteArray m_horizontalSplitterState;
     QByteArray m_verticalSplitterState;
+    CameraDynamicsSettings m_cameraDynamicsSettings;
 };

@@ -234,6 +234,16 @@ void SceneModel::addProceduralInstance(ProceduralInstance instance)
     emit sceneChanged();
 }
 
+void SceneModel::resetScene()
+{
+    if (m_proceduralInstances.empty()) {
+        return;
+    }
+
+    m_proceduralInstances.clear();
+    emit sceneChanged();
+}
+
 GLuint SceneModel::pboId(int index) const
 {
     if (index < 0 || index >= bufferCount) {

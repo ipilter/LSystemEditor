@@ -33,6 +33,7 @@ private:
     void onStopButtonClicked();
     void onSettingsButtonClicked();
     void onAddPrimitiveButtonClicked();
+    void onResetSceneButtonClicked();
     void onExportSceneButtonClicked();
     void onEnvironmentHdrBrowseClicked();
     void onIterationChangedForAutoExposure(int sampleCount);

@@ -43,6 +43,7 @@ public:
     QPushButton* stopButton() const;
     QPushButton* settingsButton() const;
     QPushButton* addPrimitiveButton() const;
+    QPushButton* resetSceneButton() const;
     QPushButton* exportSceneButton() const;
     QPlainTextEdit* lsystemEdit() const;
     QSpinBox* lsystemIterationsSpinBox() const;
@@ -81,6 +82,7 @@ private:
     QPushButton* m_stopButton = nullptr;
     QPushButton* m_settingsButton = nullptr;
     QPushButton* m_addPrimitiveButton = nullptr;
+    QPushButton* m_resetSceneButton = nullptr;
     QPushButton* m_exportSceneButton = nullptr;
     QPlainTextEdit* m_lsystemEdit = nullptr;
     QSpinBox* m_lsystemIterationsSpinBox = nullptr;

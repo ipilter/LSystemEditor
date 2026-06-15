@@ -56,6 +56,7 @@ public:
 
     const std::vector<ProceduralInstance>& proceduralInstances() const;
     void addProceduralInstance(ProceduralInstance instance);
+    void resetScene();
 
     GLuint pboId(int index) const;
     void setPboIds(GLuint pbo0, GLuint pbo1);

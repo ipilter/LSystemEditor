@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CameraDynamicsController.h"
+#include "DebounceTimer.h"
 #include "PhysicalCamera.h"
 #include "QuadViewCamera2D.h"
 #include "PathTracer.h"
@@ -62,12 +63,17 @@ private slots:
     void dispatchFrameUpdate();
     void notifyIterationChanged();
     void updateCameraDynamics();
+    void onCameraMotionThrottledReset();
+    void onCameraMotionStopped();
+    void applyCameraDynamicsSettings();
 
 private:
     void recreateGpuBuffers();
     void uploadDisplayTexture(int slot, bool initialUpload);
     void releaseGlResources();
     void syncCameraToPathTracer();
+    void syncCameraLive();
+    void resetAccumulationForCamera();
     void onCameraChanged();
     void rebuildBoundsOverlay();
     void drawSceneOverlays();
@@ -90,9 +96,12 @@ private:
     bool m_quadPanning = false;
     QPoint m_lastMousePos;
     glm::vec2 m_pendingMouseAngularInput{0.0f};
+    float m_mouseSensitivity = 0.15f;
 
     QTimer m_cameraTick;
     QElapsedTimer m_cameraTickTimer;
+    DebounceTimer m_cameraResetThrottle;
+    DebounceTimer m_cameraMotionStopDebounce;
     GLuint m_texture = 0;
     GLuint m_vao = 0;
     GLuint m_vbo = 0;

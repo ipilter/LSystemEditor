@@ -1,5 +1,6 @@
 #pragma once
 
+#include "AppSettings.h"
 #include "PhysicalCamera.h"
 
 #include <glm/glm.hpp>
@@ -9,15 +10,19 @@
 class CameraDynamicsController
 {
 public:
-    static constexpr float kThrustLinear = 2.0f;
-    static constexpr float kDragLinear = 4.0f;
-    static constexpr float kThrustAngular = 2.0f;
-    static constexpr float kDragAngular = 5.0f;
     static constexpr float kMass = 1.0f;
     static constexpr float kInertia = 1.0f;
     static constexpr float kVelocityEpsilon = 1.0e-5f;
     static constexpr float kPositionEpsilon = 1.0e-6f;
     static constexpr float kAngleEpsilon = 1.0e-7f;
+
+    void applySettings(const CameraDynamicsSettings& settings)
+    {
+        m_thrustLinear = settings.thrustLinear;
+        m_dragLinear = settings.dragLinear;
+        m_thrustAngular = settings.thrustAngular;
+        m_dragAngular = settings.dragAngular;
+    }
 
     void setLinearInput(const glm::vec3& unitInput) { m_linearInput = unitInput; }
     void setAngularInput(const glm::vec3& unitInput) { m_angularInput = unitInput; }
@@ -40,13 +45,13 @@ public:
 
         const glm::vec3 prevPosition = camera.position();
 
-        const float thrustLinear = kThrustLinear * m_thrustScale;
-        const float thrustAngular = kThrustAngular * m_thrustScale;
+        const float thrustLinear = m_thrustLinear * m_thrustScale;
+        const float thrustAngular = m_thrustAngular * m_thrustScale;
 
         const glm::vec3 linearAccel =
-            (m_linearInput * thrustLinear - m_linearVelocity * kDragLinear) / kMass;
+            (m_linearInput * thrustLinear - m_linearVelocity * m_dragLinear) / kMass;
         const glm::vec3 angularAccel =
-            (m_angularInput * thrustAngular - m_angularVelocity * kDragAngular) / kInertia;
+            (m_angularInput * thrustAngular - m_angularVelocity * m_dragAngular) / kInertia;
 
         m_linearVelocity += linearAccel * dt;
         m_angularVelocity += angularAccel * dt;
@@ -75,6 +80,10 @@ public:
     }
 
 private:
+    float m_thrustLinear = 2.0f;
+    float m_dragLinear = 4.0f;
+    float m_thrustAngular = 2.0f;
+    float m_dragAngular = 5.0f;
     glm::vec3 m_linearVelocity{0.0f};
     glm::vec3 m_angularVelocity{0.0f};
     glm::vec3 m_linearInput{0.0f};

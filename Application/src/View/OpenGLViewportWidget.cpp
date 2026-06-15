@@ -1,6 +1,7 @@
 #include "OpenGLViewportWidget.h"
 
 #include "AppLog.h"
+#include "AppSettings.h"
 #include "MeshAccel/MeshSceneContent.h"
 #include "SceneModel.h"
 
@@ -62,8 +63,6 @@ constexpr unsigned int kQuadIndices[] = {
 
 constexpr int kMaxDisplayRefreshHz = 60;
 constexpr int kMinDisplayRefreshIntervalMs = 1000 / kMaxDisplayRefreshHz;
-constexpr int kCameraTickMs = 1000 / kMaxDisplayRefreshHz;
-constexpr float kMouseSensitivity = 0.15f;
 constexpr float kWheelZoomBase = 1.001f;
 
 void letterboxViewportRect(int widgetW, int widgetH, int renderW, int renderH, int& outX, int& outY, int& outW, int& outH)
@@ -125,6 +124,8 @@ MeshSceneBuildParams meshSceneBuildParamsForModel(const SceneModel* model)
 OpenGLViewportWidget::OpenGLViewportWidget(QWidget* parent)
     : QOpenGLWidget(parent)
     , m_clearColor(QColor(10, 10, 10))
+    , m_cameraResetThrottle(250, this)
+    , m_cameraMotionStopDebounce(200, this)
 {
     QSurfaceFormat format;
     format.setVersion(4, 6);
@@ -135,8 +136,26 @@ OpenGLViewportWidget::OpenGLViewportWidget(QWidget* parent)
     setMouseTracking(true);
     setFocusPolicy(Qt::StrongFocus);
 
+    m_cameraResetThrottle.setMode(DebounceTimer::Mode::Throttle);
+    m_cameraMotionStopDebounce.setMode(DebounceTimer::Mode::Debounce);
+    connect(
+        &m_cameraResetThrottle,
+        &DebounceTimer::triggered,
+        this,
+        &OpenGLViewportWidget::onCameraMotionThrottledReset);
+    connect(
+        &m_cameraMotionStopDebounce,
+        &DebounceTimer::triggered,
+        this,
+        &OpenGLViewportWidget::onCameraMotionStopped);
+    connect(
+        &AppSettings::instance(),
+        &AppSettings::cameraDynamicsSettingsChanged,
+        this,
+        [this](const CameraDynamicsSettings&) { applyCameraDynamicsSettings(); });
+
     connect(&m_cameraTick, &QTimer::timeout, this, &OpenGLViewportWidget::updateCameraDynamics);
-    m_cameraTick.setInterval(kCameraTickMs);
+    applyCameraDynamicsSettings();
     m_cameraTick.start();
     m_cameraTickTimer.start();
 
@@ -503,8 +522,8 @@ void OpenGLViewportWidget::mouseMoveEvent(QMouseEvent* event)
     const QPoint delta = event->pos() - m_lastMousePos;
     m_lastMousePos = event->pos();
 
-    m_pendingMouseAngularInput.x += static_cast<float>(-delta.y()) * kMouseSensitivity;
-    m_pendingMouseAngularInput.y += static_cast<float>(-delta.x()) * kMouseSensitivity;
+    m_pendingMouseAngularInput.x += static_cast<float>(-delta.y()) * m_mouseSensitivity;
+    m_pendingMouseAngularInput.y += static_cast<float>(-delta.x()) * m_mouseSensitivity;
     event->accept();
 }
 
@@ -572,8 +591,20 @@ void OpenGLViewportWidget::focusOutEvent(QFocusEvent* event)
     m_inputState.clear();
     m_pendingMouseAngularInput = glm::vec2(0.0f);
     m_cameraDynamics.reset();
+    m_cameraResetThrottle.cancel();
+    m_cameraMotionStopDebounce.cancel();
     m_looking = false;
     QOpenGLWidget::focusOutEvent(event);
+}
+
+void OpenGLViewportWidget::applyCameraDynamicsSettings()
+{
+    const CameraDynamicsSettings settings = AppSettings::instance().cameraDynamicsSettings();
+    m_cameraDynamics.applySettings(settings);
+    m_mouseSensitivity = settings.mouseSensitivity;
+    m_cameraTick.setInterval(settings.tickIntervalMs);
+    m_cameraResetThrottle.setIntervalMs(settings.motionResetThrottleMs);
+    m_cameraMotionStopDebounce.setIntervalMs(settings.motionStopDebounceMs);
 }
 
 void OpenGLViewportWidget::updateCameraDynamics()
@@ -594,8 +625,20 @@ void OpenGLViewportWidget::updateCameraDynamics()
     m_cameraDynamics.setAngularInput(angularInput);
 
     if (m_cameraDynamics.step(m_camera, dt)) {
-        onCameraChanged();
+        syncCameraLive();
+        m_cameraResetThrottle.schedule();
+        m_cameraMotionStopDebounce.schedule();
     }
+}
+
+void OpenGLViewportWidget::onCameraMotionThrottledReset()
+{
+    resetAccumulationForCamera();
+}
+
+void OpenGLViewportWidget::onCameraMotionStopped()
+{
+    resetAccumulationForCamera();
 }
 
 void OpenGLViewportWidget::dispatchFrameUpdate()
@@ -685,6 +728,22 @@ bool OpenGLViewportWidget::exportSceneWavefrontObj(const QString& objFilePath, Q
 void OpenGLViewportWidget::syncCameraToPathTracer()
 {
     m_pathTracer.setCamera(m_camera);
+}
+
+void OpenGLViewportWidget::syncCameraLive()
+{
+    syncCameraToPathTracer();
+    update();
+}
+
+void OpenGLViewportWidget::resetAccumulationForCamera()
+{
+    m_renderPaused = false;
+    m_pathTracer.resetAccumulation();
+    ensureRenderWorkerRunning();
+    emit iterationChanged(0);
+    emitRenderState();
+    update();
 }
 
 void OpenGLViewportWidget::onCameraChanged()

@@ -253,6 +253,11 @@ MainView::MainView(QWidget* parent)
     auto* applicationGroup = new QGroupBox(QStringLiteral("Application"), controlPanel);
     auto* applicationLayout = new QVBoxLayout(applicationGroup);
 
+    m_resetSceneButton = new QPushButton(QStringLiteral("Reset Scene"), applicationGroup);
+    m_resetSceneButton->setToolTip(
+        QStringLiteral("Remove all procedural meshes from the scene. The camera position is unchanged."));
+    applicationLayout->addWidget(m_resetSceneButton);
+
     m_exportSceneButton = new QPushButton(QStringLiteral("Export Scene"), applicationGroup);
     m_exportSceneButton->setToolTip(
         QStringLiteral("Export cached scene geometry and materials as Wavefront OBJ + MTL for Blender."));
@@ -401,6 +406,11 @@ QPushButton* MainView::settingsButton() const
 QPushButton* MainView::addPrimitiveButton() const
 {
     return m_addPrimitiveButton;
+}
+
+QPushButton* MainView::resetSceneButton() const
+{
+    return m_resetSceneButton;
 }
 
 QPushButton* MainView::exportSceneButton() const

@@ -4,6 +4,8 @@
 
 #include <QSettings>
 
+#include <algorithm>
+
 namespace {
 
 constexpr int kDefaultUiDebounceMs = 300;
@@ -51,6 +53,25 @@ constexpr const char* kLegacyAccelAabbColorBlueKey = "accelAabbColorBlue";
 constexpr const char* kLegacyAccelOctreeColorRedKey = "accelOctreeColorRed";
 constexpr const char* kLegacyAccelOctreeColorGreenKey = "accelOctreeColorGreen";
 constexpr const char* kLegacyAccelOctreeColorBlueKey = "accelOctreeColorBlue";
+constexpr const char* kCameraSettingsGroup = "camera";
+constexpr const char* kCameraThrustLinearKey = "thrustLinear";
+constexpr const char* kCameraDragLinearKey = "dragLinear";
+constexpr const char* kCameraThrustAngularKey = "thrustAngular";
+constexpr const char* kCameraDragAngularKey = "dragAngular";
+constexpr const char* kCameraMouseSensitivityKey = "mouseSensitivity";
+constexpr const char* kCameraTickIntervalMsKey = "tickIntervalMs";
+constexpr const char* kCameraMotionResetThrottleMsKey = "motionResetThrottleMs";
+constexpr const char* kCameraMotionStopDebounceMsKey = "motionStopDebounceMs";
+constexpr float kMinCameraThrust = 0.1f;
+constexpr float kMaxCameraThrust = 20.0f;
+constexpr float kMinCameraDrag = 0.1f;
+constexpr float kMaxCameraDrag = 30.0f;
+constexpr float kMinCameraMouseSensitivity = 0.01f;
+constexpr float kMaxCameraMouseSensitivity = 2.0f;
+constexpr int kMinCameraTickIntervalMs = 8;
+constexpr int kMaxCameraTickIntervalMs = 100;
+constexpr int kMinCameraMotionTimingMs = 0;
+constexpr int kMaxCameraMotionTimingMs = 2000;
 
 bool isKnownDebounceElementId(const QString& elementId)
 {
@@ -61,6 +82,18 @@ bool isKnownDebounceElementId(const QString& elementId)
 }
 
 } // namespace
+
+bool CameraDynamicsSettings::operator==(const CameraDynamicsSettings& other) const
+{
+    return thrustLinear == other.thrustLinear
+        && dragLinear == other.dragLinear
+        && thrustAngular == other.thrustAngular
+        && dragAngular == other.dragAngular
+        && mouseSensitivity == other.mouseSensitivity
+        && tickIntervalMs == other.tickIntervalMs
+        && motionResetThrottleMs == other.motionResetThrottleMs
+        && motionStopDebounceMs == other.motionStopDebounceMs;
+}
 
 AppSettings* AppSettings::s_instance = nullptr;
 
@@ -335,6 +368,23 @@ void AppSettings::setVerticalSplitterState(const QByteArray& state)
     save();
 }
 
+CameraDynamicsSettings AppSettings::cameraDynamicsSettings() const
+{
+    return m_cameraDynamicsSettings;
+}
+
+void AppSettings::setCameraDynamicsSettings(const CameraDynamicsSettings& settings)
+{
+    const CameraDynamicsSettings clamped = clampCameraDynamicsSettings(settings);
+    if (m_cameraDynamicsSettings == clamped) {
+        return;
+    }
+
+    m_cameraDynamicsSettings = clamped;
+    emit cameraDynamicsSettingsChanged(m_cameraDynamicsSettings);
+    save();
+}
+
 float AppSettings::clampFStop(float value)
 {
     return PhysicalCamera::clampFStop(value);
@@ -403,6 +453,26 @@ int AppSettings::clampPreviewStepsPerLevel(int value)
         return kMaxPreviewStepsPerLevel;
     }
     return value;
+}
+
+CameraDynamicsSettings AppSettings::clampCameraDynamicsSettings(const CameraDynamicsSettings& settings)
+{
+    CameraDynamicsSettings clamped = settings;
+    clamped.thrustLinear = std::max(kMinCameraThrust, std::min(settings.thrustLinear, kMaxCameraThrust));
+    clamped.dragLinear = std::max(kMinCameraDrag, std::min(settings.dragLinear, kMaxCameraDrag));
+    clamped.thrustAngular = std::max(kMinCameraThrust, std::min(settings.thrustAngular, kMaxCameraThrust));
+    clamped.dragAngular = std::max(kMinCameraDrag, std::min(settings.dragAngular, kMaxCameraDrag));
+    clamped.mouseSensitivity =
+        std::max(kMinCameraMouseSensitivity, std::min(settings.mouseSensitivity, kMaxCameraMouseSensitivity));
+    clamped.tickIntervalMs =
+        std::max(kMinCameraTickIntervalMs, std::min(settings.tickIntervalMs, kMaxCameraTickIntervalMs));
+    clamped.motionResetThrottleMs = std::max(
+        kMinCameraMotionTimingMs,
+        std::min(settings.motionResetThrottleMs, kMaxCameraMotionTimingMs));
+    clamped.motionStopDebounceMs = std::max(
+        kMinCameraMotionTimingMs,
+        std::min(settings.motionStopDebounceMs, kMaxCameraMotionTimingMs));
+    return clamped;
 }
 
 void AppSettings::load()
@@ -558,6 +628,40 @@ void AppSettings::load()
     m_windowGeometry = settings.value(kWindowGeometryKey).toByteArray();
     m_horizontalSplitterState = settings.value(kHorizontalSplitterStateKey).toByteArray();
     m_verticalSplitterState = settings.value(kVerticalSplitterStateKey).toByteArray();
+
+    settings.beginGroup(kCameraSettingsGroup);
+    CameraDynamicsSettings loadedCameraSettings = m_cameraDynamicsSettings;
+    const auto loadFloat = [&settings](const char* key, float fallback) {
+        const QVariant value = settings.value(key);
+        if (!value.isValid()) {
+            return fallback;
+        }
+        bool ok = false;
+        const float loaded = static_cast<float>(value.toDouble(&ok));
+        return ok ? loaded : fallback;
+    };
+    const auto loadInt = [&settings](const char* key, int fallback) {
+        const QVariant value = settings.value(key);
+        if (!value.isValid()) {
+            return fallback;
+        }
+        bool ok = false;
+        const int loaded = value.toInt(&ok);
+        return ok ? loaded : fallback;
+    };
+    loadedCameraSettings.thrustLinear = loadFloat(kCameraThrustLinearKey, loadedCameraSettings.thrustLinear);
+    loadedCameraSettings.dragLinear = loadFloat(kCameraDragLinearKey, loadedCameraSettings.dragLinear);
+    loadedCameraSettings.thrustAngular = loadFloat(kCameraThrustAngularKey, loadedCameraSettings.thrustAngular);
+    loadedCameraSettings.dragAngular = loadFloat(kCameraDragAngularKey, loadedCameraSettings.dragAngular);
+    loadedCameraSettings.mouseSensitivity =
+        loadFloat(kCameraMouseSensitivityKey, loadedCameraSettings.mouseSensitivity);
+    loadedCameraSettings.tickIntervalMs = loadInt(kCameraTickIntervalMsKey, loadedCameraSettings.tickIntervalMs);
+    loadedCameraSettings.motionResetThrottleMs =
+        loadInt(kCameraMotionResetThrottleMsKey, loadedCameraSettings.motionResetThrottleMs);
+    loadedCameraSettings.motionStopDebounceMs =
+        loadInt(kCameraMotionStopDebounceMsKey, loadedCameraSettings.motionStopDebounceMs);
+    settings.endGroup();
+    m_cameraDynamicsSettings = clampCameraDynamicsSettings(loadedCameraSettings);
 }
 
 void AppSettings::save()
@@ -589,5 +693,17 @@ void AppSettings::save()
     settings.setValue(kWindowGeometryKey, m_windowGeometry);
     settings.setValue(kHorizontalSplitterStateKey, m_horizontalSplitterState);
     settings.setValue(kVerticalSplitterStateKey, m_verticalSplitterState);
+
+    settings.beginGroup(kCameraSettingsGroup);
+    settings.setValue(kCameraThrustLinearKey, static_cast<double>(m_cameraDynamicsSettings.thrustLinear));
+    settings.setValue(kCameraDragLinearKey, static_cast<double>(m_cameraDynamicsSettings.dragLinear));
+    settings.setValue(kCameraThrustAngularKey, static_cast<double>(m_cameraDynamicsSettings.thrustAngular));
+    settings.setValue(kCameraDragAngularKey, static_cast<double>(m_cameraDynamicsSettings.dragAngular));
+    settings.setValue(kCameraMouseSensitivityKey, static_cast<double>(m_cameraDynamicsSettings.mouseSensitivity));
+    settings.setValue(kCameraTickIntervalMsKey, m_cameraDynamicsSettings.tickIntervalMs);
+    settings.setValue(kCameraMotionResetThrottleMsKey, m_cameraDynamicsSettings.motionResetThrottleMs);
+    settings.setValue(kCameraMotionStopDebounceMsKey, m_cameraDynamicsSettings.motionStopDebounceMs);
+    settings.endGroup();
+
     settings.sync();
 }
