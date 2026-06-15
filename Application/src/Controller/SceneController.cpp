@@ -1,6 +1,7 @@
 #include "SceneController.h"
 
 #include "AppSettings.h"
+#include "AppLog.h"
 #include "MainView.h"
 #include "OpenGLViewportWidget.h"
 #include "LSystemTransformDialog.h"
@@ -137,6 +138,7 @@ SceneController::SceneController(SceneModel* model, MainView* view, QObject* par
     connect(m_view->stopButton(), &QPushButton::clicked, this, &SceneController::onStopButtonClicked);
     connect(m_view->settingsButton(), &QPushButton::clicked, this, &SceneController::onSettingsButtonClicked);
     connect(m_view->addPrimitiveButton(), &QPushButton::clicked, this, &SceneController::onAddPrimitiveButtonClicked);
+    connect(m_view->exportSceneButton(), &QPushButton::clicked, this, &SceneController::onExportSceneButtonClicked);
     connect(
         m_view->environmentHdrBrowseButton(),
         &QPushButton::clicked,
@@ -293,6 +295,30 @@ void SceneController::onAddPrimitiveButtonClicked()
     instance.translation = dialog.translation();
     instance.rotationDeg = dialog.rotationDeg();
     m_model->addProceduralInstance(std::move(instance));
+}
+
+void SceneController::onExportSceneButtonClicked()
+{
+    const QString path = QFileDialog::getSaveFileName(
+        m_view,
+        QStringLiteral("Export Scene"),
+        QString(),
+        QStringLiteral("Wavefront OBJ (*.obj)"));
+
+    if (path.isEmpty()) {
+        return;
+    }
+
+    QString error;
+    if (!m_view->viewport()->exportSceneWavefrontObj(path, &error)) {
+        AppLog::instance().error(
+            error.isEmpty()
+                ? QStringLiteral("Scene export failed.")
+                : QStringLiteral("Scene export failed: %1").arg(error));
+        return;
+    }
+
+    AppLog::instance().info(QStringLiteral("Scene exported to %1").arg(path));
 }
 
 void SceneController::syncColorButtonStyle()

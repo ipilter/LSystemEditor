@@ -4,9 +4,11 @@
 #include <QString>
 #include <QWidget>
 
+class QCloseEvent;
 class QComboBox;
 class QDoubleSpinBox;
 class OpenGLViewportWidget;
+class QSplitter;
 class QLabel;
 class QLineEdit;
 class QPlainTextEdit;
@@ -41,6 +43,7 @@ public:
     QPushButton* stopButton() const;
     QPushButton* settingsButton() const;
     QPushButton* addPrimitiveButton() const;
+    QPushButton* exportSceneButton() const;
     QPlainTextEdit* lsystemEdit() const;
     QSpinBox* lsystemIterationsSpinBox() const;
 
@@ -48,11 +51,16 @@ public:
     void setRenderState(RenderAccumulationState state, int sampleCount, int budgetTotal);
 
 protected:
+    void closeEvent(QCloseEvent* event) override;
     bool eventFilter(QObject* watched, QEvent* event) override;
 
 private:
     void applyPendingViewportGeometry();
+    void restoreLayoutFromSettings();
+    void saveLayoutToSettings();
 
+    QSplitter* m_horizontalSplitter = nullptr;
+    QSplitter* m_verticalSplitter = nullptr;
     QWidget* m_viewportHost = nullptr;
     OpenGLViewportWidget* m_viewport = nullptr;
     QPushButton* m_colorButton = nullptr;
@@ -73,6 +81,7 @@ private:
     QPushButton* m_stopButton = nullptr;
     QPushButton* m_settingsButton = nullptr;
     QPushButton* m_addPrimitiveButton = nullptr;
+    QPushButton* m_exportSceneButton = nullptr;
     QPlainTextEdit* m_lsystemEdit = nullptr;
     QSpinBox* m_lsystemIterationsSpinBox = nullptr;
     QPlainTextEdit* m_logView = nullptr;

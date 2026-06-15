@@ -95,6 +95,7 @@ PhysicalCamera::PhysicalCamera()
     , m_aspect(1.0f)
     , m_yawRad(0.0f)
     , m_pitchRad(0.0f)
+    , m_rollRad(0.0f)
 {
     rebuildOrientation();
 }
@@ -176,9 +177,20 @@ void PhysicalCamera::moveDown(float distance)
 
 void PhysicalCamera::yawPitch(float deltaYaw, float deltaPitch)
 {
+    addEulerDelta(deltaYaw, deltaPitch, 0.0f);
+}
+
+void PhysicalCamera::addEulerDelta(float deltaYaw, float deltaPitch, float deltaRoll)
+{
     m_yawRad += deltaYaw;
     m_pitchRad = glm::clamp(m_pitchRad + deltaPitch, -kMaxPitchRad, kMaxPitchRad);
+    m_rollRad += deltaRoll;
     rebuildOrientation();
+}
+
+void PhysicalCamera::translateLocal(float rightAmount, float upAmount, float forwardAmount)
+{
+    m_position += right() * rightAmount + up() * upAmount + forward() * forwardAmount;
 }
 
 void PhysicalCamera::setAspect(int imageW, int imageH)
@@ -210,6 +222,7 @@ void PhysicalCamera::copyGeometryFrom(const PhysicalCamera& other)
     m_aspect = other.m_aspect;
     m_yawRad = other.m_yawRad;
     m_pitchRad = other.m_pitchRad;
+    m_rollRad = other.m_rollRad;
 }
 
 void PhysicalCamera::applyGpuGeometry(const CameraGpu& camera)
@@ -380,5 +393,6 @@ void PhysicalCamera::rebuildOrientation()
 {
     const glm::quat yawQuat = glm::angleAxis(m_yawRad, glm::vec3(0.0f, 1.0f, 0.0f));
     const glm::quat pitchQuat = glm::angleAxis(m_pitchRad, glm::vec3(1.0f, 0.0f, 0.0f));
-    m_orientation = glm::normalize(yawQuat * pitchQuat);
+    const glm::quat rollQuat = glm::angleAxis(m_rollRad, glm::vec3(0.0f, 0.0f, 1.0f));
+    m_orientation = glm::normalize(yawQuat * pitchQuat * rollQuat);
 }

@@ -1,10 +1,14 @@
 #pragma once
 
 #include "DiffuseBrdf.h"
+#include "GlassBrdf.h"
+#include "MetalBrdf.h"
 
 enum class BrdfType : int
 {
     Diffuse = 0,
+    Metal = 1,
+    Glass = 2,
 };
 
 #if defined(__CUDACC__)
@@ -15,13 +19,27 @@ enum class BrdfType : int
 
 BRDF_DISPATCH_FN BrdfType brdfForMaterial(const MaterialGpu& material)
 {
-    (void)material;
-    return BrdfType::Diffuse;
+    switch (material.kind) {
+    case 1:
+        return BrdfType::Metal;
+    case 2:
+        return BrdfType::Glass;
+    default:
+        return BrdfType::Diffuse;
+    }
 }
 
 BRDF_DISPATCH_FN Vec3 brdfEval(BrdfType type, const BrdfContext& ctx, Vec3 wi)
 {
     switch (type) {
+    case BrdfType::Metal: {
+        const MetalBrdf brdf{};
+        return brdf.eval(ctx, wi);
+    }
+    case BrdfType::Glass: {
+        const GlassBrdf brdf{};
+        return brdf.eval(ctx, wi);
+    }
     case BrdfType::Diffuse:
     default: {
         const DiffuseBrdf brdf{};
@@ -33,6 +51,14 @@ BRDF_DISPATCH_FN Vec3 brdfEval(BrdfType type, const BrdfContext& ctx, Vec3 wi)
 BRDF_DISPATCH_FN BrdfSampleResult brdfSample(BrdfType type, const BrdfContext& ctx, float u1, float u2)
 {
     switch (type) {
+    case BrdfType::Metal: {
+        const MetalBrdf brdf{};
+        return brdf.sample(ctx, u1, u2);
+    }
+    case BrdfType::Glass: {
+        const GlassBrdf brdf{};
+        return brdf.sample(ctx, u1, u2);
+    }
     case BrdfType::Diffuse:
     default: {
         const DiffuseBrdf brdf{};
@@ -44,6 +70,14 @@ BRDF_DISPATCH_FN BrdfSampleResult brdfSample(BrdfType type, const BrdfContext& c
 BRDF_DISPATCH_FN float brdfPdf(BrdfType type, const BrdfContext& ctx, Vec3 wi)
 {
     switch (type) {
+    case BrdfType::Metal: {
+        const MetalBrdf brdf{};
+        return brdf.pdf(ctx, wi);
+    }
+    case BrdfType::Glass: {
+        const GlassBrdf brdf{};
+        return brdf.pdf(ctx, wi);
+    }
     case BrdfType::Diffuse:
     default: {
         const DiffuseBrdf brdf{};

@@ -345,7 +345,7 @@ F(h,r) -> [Yaw(22.5)F(h*0.7,r*0.55)][Yaw(0-22.5)F(h*0.7,r*0.55)])"));
 TEST(LSystemEvaluatorTest, EvaluateFromDefinition_ReturnsGenerationAndMaterials)
 {
     const LSystemEvaluationResult result = LSystemEvaluator::evaluate(
-        "Mat(0) = {0.5, 0.6, 0.7, 0.8}\n"
+        "Mat(0) = Diffuse {0.5, 0.6, 0.7, 0.8}\n"
         "F\n"
         "F -> F F\n",
         1);

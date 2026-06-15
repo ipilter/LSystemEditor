@@ -49,6 +49,8 @@ PATH_INTEGRATOR_RAND_FN Vec3 pathIntegratorRandEvaluateEnvironmentNee(
         return vecMake3(0.0f, 0.0f, 0.0f);
     }
 
+    const BrdfType brdfType = brdfForMaterial(material);
+
     float u1 = 0.0f;
     float u2 = 0.0f;
     rand02(rng, u1, u2);
@@ -68,11 +70,22 @@ PATH_INTEGRATOR_RAND_FN Vec3 pathIntegratorRandEvaluateEnvironmentNee(
         return vecMake3(0.0f, 0.0f, 0.0f);
     }
 
-    const BrdfType brdfType = brdfForMaterial(material);
     const BrdfContext ctx{normal, wo, material};
+    const Vec3 lightRadiance = lightEvalEnvironment(env, wi);
+
+    if (brdfType == BrdfType::Glass) {
+        const float cosWo = vecMax2(0.0f, vecDot3(normal, wo));
+        const float fresnel = brdfDielectricFresnel(cosWo, 1.0f, material.ior);
+        const Vec3 baseColor = brdfBaseColor(material);
+        const float scale = fresnel * cosTheta / lightPdf;
+        return vecMake3(
+            baseColor.x * lightRadiance.x * scale,
+            baseColor.y * lightRadiance.y * scale,
+            baseColor.z * lightRadiance.z * scale);
+    }
+
     const Vec3 bsdf = brdfEval(brdfType, ctx, wi);
     const float bsdfPdfValue = brdfPdf(brdfType, ctx, wi);
-    const Vec3 lightRadiance = lightEvalEnvironment(env, wi);
     const float misWeight = misBalanceWeight(lightPdf, bsdfPdfValue);
     const float scale = misWeight * cosTheta / lightPdf;
     return vecMake3(
@@ -142,11 +155,19 @@ PATH_INTEGRATOR_RAND_FN Vec3 tracePathRandFromHit(
         }
 
         const Vec3 bsdfValue = brdfEval(brdfType, ctx, sample.direction);
-        const float cosTheta = vecMax2(0.0f, vecDot3(normal, sample.direction));
-        throughput = vecMake3(
-            throughput.x * bsdfValue.x * cosTheta / sample.pdf,
-            throughput.y * bsdfValue.y * cosTheta / sample.pdf,
-            throughput.z * bsdfValue.z * cosTheta / sample.pdf);
+        if (sample.transmitted) {
+            const float cosTheta = vecAbs(vecDot3(normal, sample.direction));
+            throughput = vecMake3(
+                throughput.x * bsdfValue.x * cosTheta / sample.pdf,
+                throughput.y * bsdfValue.y * cosTheta / sample.pdf,
+                throughput.z * bsdfValue.z * cosTheta / sample.pdf);
+        } else {
+            const float cosTheta = vecMax2(0.0f, vecDot3(normal, sample.direction));
+            throughput = vecMake3(
+                throughput.x * bsdfValue.x * cosTheta / sample.pdf,
+                throughput.y * bsdfValue.y * cosTheta / sample.pdf,
+                throughput.z * bsdfValue.z * cosTheta / sample.pdf);
+        }
 
         if (depth >= rrMinDepth) {
             const float survivalProb = vecMin2(
@@ -158,7 +179,11 @@ PATH_INTEGRATOR_RAND_FN Vec3 tracePathRandFromHit(
             throughput = vecScale3(throughput, 1.0f / survivalProb);
         }
 
-        currentOrigin = vecAdd3(position, vecScale3(normal, PathIntegratorRandDetail::kShadowBias));
+        if (sample.transmitted) {
+            currentOrigin = vecSub3(position, vecScale3(normal, PathIntegratorRandDetail::kShadowBias));
+        } else {
+            currentOrigin = vecAdd3(position, vecScale3(normal, PathIntegratorRandDetail::kShadowBias));
+        }
         currentDir = sample.direction;
         currentHit = meshAccelTraceRay(
             currentOrigin,

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QByteArray>
 #include <QColor>
 #include <QHash>
 #include <QObject>
@@ -60,6 +61,15 @@ public:
     float iso() const;
     void setIso(float value);
 
+    QByteArray windowGeometry() const;
+    void setWindowGeometry(const QByteArray& geometry);
+
+    QByteArray horizontalSplitterState() const;
+    void setHorizontalSplitterState(const QByteArray& state);
+
+    QByteArray verticalSplitterState() const;
+    void setVerticalSplitterState(const QByteArray& state);
+
     void load();
     void save();
 
@@ -90,4 +100,7 @@ private:
     float m_fStop = 0.0f;
     float m_shutterSpeedSeconds = 0.0f;
     float m_iso = 0.0f;
+    QByteArray m_windowGeometry;
+    QByteArray m_horizontalSplitterState;
+    QByteArray m_verticalSplitterState;
 };

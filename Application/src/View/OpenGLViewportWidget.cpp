@@ -4,6 +4,7 @@
 #include "MeshAccel/MeshSceneContent.h"
 #include "SceneModel.h"
 
+#include <QFocusEvent>
 #include <QKeyEvent>
 #include <QMetaObject>
 #include <QMouseEvent>
@@ -14,6 +15,7 @@
 #include <glm/gtc/type_ptr.hpp>
 
 #include <cmath>
+#include <algorithm>
 #include <utility>
 
 namespace {
@@ -60,7 +62,7 @@ constexpr unsigned int kQuadIndices[] = {
 
 constexpr int kMaxDisplayRefreshHz = 60;
 constexpr int kMinDisplayRefreshIntervalMs = 1000 / kMaxDisplayRefreshHz;
-constexpr float kMoveSpeed = 0.05f;
+constexpr int kCameraTickMs = 1000 / kMaxDisplayRefreshHz;
 constexpr float kMouseSensitivity = 0.15f;
 constexpr float kWheelZoomBase = 1.001f;
 
@@ -132,6 +134,11 @@ OpenGLViewportWidget::OpenGLViewportWidget(QWidget* parent)
 
     setMouseTracking(true);
     setFocusPolicy(Qt::StrongFocus);
+
+    connect(&m_cameraTick, &QTimer::timeout, this, &OpenGLViewportWidget::updateCameraDynamics);
+    m_cameraTick.setInterval(kCameraTickMs);
+    m_cameraTick.start();
+    m_cameraTickTimer.start();
 
     m_pathTracer.setFrameReadyCallback([this]() {
         m_hasNewFrame.store(true);
@@ -496,10 +503,8 @@ void OpenGLViewportWidget::mouseMoveEvent(QMouseEvent* event)
     const QPoint delta = event->pos() - m_lastMousePos;
     m_lastMousePos = event->pos();
 
-    const float deltaYaw = static_cast<float>(-delta.x()) * kMouseSensitivity;
-    const float deltaPitch = static_cast<float>(-delta.y()) * kMouseSensitivity;
-    m_camera.yawPitch(glm::radians(deltaYaw), glm::radians(deltaPitch));
-    onCameraChanged();
+    m_pendingMouseAngularInput.x += static_cast<float>(-delta.y()) * kMouseSensitivity;
+    m_pendingMouseAngularInput.y += static_cast<float>(-delta.x()) * kMouseSensitivity;
     event->accept();
 }
 
@@ -544,43 +549,53 @@ void OpenGLViewportWidget::wheelEvent(QWheelEvent* event)
 
 void OpenGLViewportWidget::keyPressEvent(QKeyEvent* event)
 {
-    bool moved = false;
-    switch (event->key()) {
-    case Qt::Key_W:
-        m_camera.moveForward(kMoveSpeed);
-        moved = true;
-        break;
-    case Qt::Key_S:
-        m_camera.moveBackward(kMoveSpeed);
-        moved = true;
-        break;
-    case Qt::Key_A:
-        m_camera.moveLeft(kMoveSpeed);
-        moved = true;
-        break;
-    case Qt::Key_D:
-        m_camera.moveRight(kMoveSpeed);
-        moved = true;
-        break;
-    case Qt::Key_E:
-        m_camera.moveUp(kMoveSpeed);
-        moved = true;
-        break;
-    case Qt::Key_Q:
-        m_camera.moveDown(kMoveSpeed);
-        moved = true;
-        break;
-    default:
-        break;
-    }
-
-    if (moved) {
-        onCameraChanged();
+    if (m_inputState.handleKeyPress(event)) {
         event->accept();
         return;
     }
 
     QOpenGLWidget::keyPressEvent(event);
+}
+
+void OpenGLViewportWidget::keyReleaseEvent(QKeyEvent* event)
+{
+    if (m_inputState.handleKeyRelease(event)) {
+        event->accept();
+        return;
+    }
+
+    QOpenGLWidget::keyReleaseEvent(event);
+}
+
+void OpenGLViewportWidget::focusOutEvent(QFocusEvent* event)
+{
+    m_inputState.clear();
+    m_pendingMouseAngularInput = glm::vec2(0.0f);
+    m_cameraDynamics.reset();
+    m_looking = false;
+    QOpenGLWidget::focusOutEvent(event);
+}
+
+void OpenGLViewportWidget::updateCameraDynamics()
+{
+    const float dt = std::min(static_cast<float>(m_cameraTickTimer.elapsed()) / 1000.0f, 0.1f);
+    m_cameraTickTimer.restart();
+    if (dt <= 0.0f) {
+        return;
+    }
+
+    glm::vec3 angularInput = m_inputState.angularInput();
+    angularInput.x += m_pendingMouseAngularInput.x;
+    angularInput.y += m_pendingMouseAngularInput.y;
+    m_pendingMouseAngularInput = glm::vec2(0.0f);
+
+    m_cameraDynamics.setThrustScale(m_inputState.boostHeld() ? 2.0f : 1.0f);
+    m_cameraDynamics.setLinearInput(m_inputState.linearInput());
+    m_cameraDynamics.setAngularInput(angularInput);
+
+    if (m_cameraDynamics.step(m_camera, dt)) {
+        onCameraChanged();
+    }
 }
 
 void OpenGLViewportWidget::dispatchFrameUpdate()
@@ -660,6 +675,11 @@ void OpenGLViewportWidget::pauseRender()
     m_pathTracer.stop();
     m_renderPaused = true;
     emitRenderState();
+}
+
+bool OpenGLViewportWidget::exportSceneWavefrontObj(const QString& objFilePath, QString* errorMessage) const
+{
+    return m_pathTracer.exportMeshSceneWavefrontObj(objFilePath, errorMessage);
 }
 
 void OpenGLViewportWidget::syncCameraToPathTracer()

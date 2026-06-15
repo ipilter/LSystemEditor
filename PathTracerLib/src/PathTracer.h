@@ -97,6 +97,8 @@ public:
         const std::vector<ProceduralInstance>& proceduralInstances = {},
         const MeshSceneBuildParams& meshParams = {});
 
+    bool exportMeshSceneWavefrontObj(const QString& objFilePath, QString* errorMessage = nullptr) const;
+
 private:
     void renderLoop();
     void notifyWorker();

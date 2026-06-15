@@ -1,20 +1,25 @@
 #pragma once
 
+#include "CameraDynamicsController.h"
 #include "PhysicalCamera.h"
 #include "QuadViewCamera2D.h"
 #include "PathTracer.h"
 #include "RenderAccumulationState.h"
 #include "MeshAccelBoundsOverlay.h"
 #include "OriginGizmoOverlay.h"
+#include "ViewportInputState.h"
 
 #include <QColor>
 #include <QElapsedTimer>
 #include <QOpenGLFunctions_4_5_Core>
 #include <QOpenGLWidget>
 #include <QPoint>
+#include <QTimer>
 #include <QtGui/qopengl.h>
 
 #include <atomic>
+
+#include <glm/glm.hpp>
 
 class SceneModel;
 
@@ -35,6 +40,7 @@ public:
 
     void restartRender();
     void pauseRender();
+    bool exportSceneWavefrontObj(const QString& objFilePath, QString* errorMessage = nullptr) const;
 
 signals:
     void iterationChanged(int sampleCount);
@@ -49,10 +55,13 @@ protected:
     void mouseReleaseEvent(QMouseEvent* event) override;
     void wheelEvent(QWheelEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;
+    void keyReleaseEvent(QKeyEvent* event) override;
+    void focusOutEvent(QFocusEvent* event) override;
 
 private slots:
     void dispatchFrameUpdate();
     void notifyIterationChanged();
+    void updateCameraDynamics();
 
 private:
     void recreateGpuBuffers();
@@ -71,6 +80,8 @@ private:
     PathTracer m_pathTracer;
     PhysicalCamera m_camera;
     QuadViewCamera2D m_quadView;
+    CameraDynamicsController m_cameraDynamics;
+    ViewportInputState m_inputState;
     MeshAccelBoundsOverlay m_boundsOverlay;
     OriginGizmoOverlay m_originGizmo;
 
@@ -78,8 +89,10 @@ private:
     bool m_looking = false;
     bool m_quadPanning = false;
     QPoint m_lastMousePos;
+    glm::vec2 m_pendingMouseAngularInput{0.0f};
 
-    GLuint m_pbos[2] = {0, 0};
+    QTimer m_cameraTick;
+    QElapsedTimer m_cameraTickTimer;
     GLuint m_texture = 0;
     GLuint m_vao = 0;
     GLuint m_vbo = 0;
@@ -94,4 +107,6 @@ private:
     std::atomic<bool> m_frameCallbackQueued{false};
     std::atomic<bool> m_iterationCallbackQueued{false};
     QElapsedTimer m_displayRefreshTimer;
+
+    GLuint m_pbos[2] = {0, 0};
 };

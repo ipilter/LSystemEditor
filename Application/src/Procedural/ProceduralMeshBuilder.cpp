@@ -37,8 +37,9 @@ MaterialGpu toMaterialGpu(const MaterialEntry& entry)
     material.roughness = entry.roughness;
     material.metallic = entry.metallic;
     material.emission = entry.emission;
-    material.ior = 1.5f;
-    material.transmission = 0.0f;
+    material.ior = entry.ior;
+    material.transmission = entry.transmission;
+    material.kind = static_cast<MaterialKindGpu>(static_cast<std::uint8_t>(entry.kind));
     return material;
 }
 
@@ -53,6 +54,7 @@ MaterialGpu defaultMaterialGpu()
     material.emission = 0.0f;
     material.ior = 1.5f;
     material.transmission = 0.0f;
+    material.kind = 0;
     return material;
 }
 

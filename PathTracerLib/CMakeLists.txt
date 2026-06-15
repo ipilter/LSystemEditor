@@ -6,6 +6,7 @@ set(PATHTRACER_LIB_SOURCES
     "${PATHTRACER_LIB_DIR}/src/EnvironmentMap.cpp"
     "${PATHTRACER_LIB_DIR}/src/MeshAccel/MeshBvhBuilder.cpp"
     "${PATHTRACER_LIB_DIR}/src/MeshAccel/MeshAccelScene.cpp"
+    "${PATHTRACER_LIB_DIR}/src/MeshAccel/MeshAccelWavefrontExport.cpp"
     "${PATHTRACER_LIB_DIR}/src/MeshAccel/MeshSceneContent.cpp"
     "${PATHTRACER_LIB_DIR}/src/PathTracer.cpp")
 
@@ -63,3 +64,13 @@ set_target_properties(path_tracer_camera_direction_tests PROPERTIES
     AUTOMOC ON
     FOLDER "PathTracerLib/tests")
 add_test(NAME PathTracerCameraDirection COMMAND path_tracer_camera_direction_tests)
+
+add_executable(path_tracer_glass_brdf_tests tests/PathTracerGlassBrdfTests.cpp)
+target_link_libraries(path_tracer_glass_brdf_tests PRIVATE PathTracerLib)
+target_include_directories(path_tracer_glass_brdf_tests PRIVATE
+    "${PATHTRACER_LIB_INCLUDE_DIR}"
+    "${PATHTRACER_LIB_INCLUDE_DIR}/Brdf"
+    "${PATHTRACER_LIB_INCLUDE_DIR}/Geometry"
+    "${PATHTRACER_LIB_INCLUDE_DIR}/MeshAccel")
+set_target_properties(path_tracer_glass_brdf_tests PROPERTIES FOLDER "PathTracerLib/tests")
+add_test(NAME PathTracerGlassBrdf COMMAND path_tracer_glass_brdf_tests)

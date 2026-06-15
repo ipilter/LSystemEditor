@@ -26,7 +26,7 @@ TEST(LSystemConstantsParse, duplicate_constant_throws)
 
 TEST(LSystemConstantsParse, not_material_or_module_line)
 {
-    EXPECT_FALSE(is_global_constant_line("Mat(0) = {1,2,3}"));
+    EXPECT_FALSE(is_global_constant_line("Mat(0) = Diffuse {1,2,3}"));
     EXPECT_FALSE(is_global_constant_line("Mat(0)"));
     EXPECT_TRUE(is_global_constant_line("threshold = 0.5"));
 }

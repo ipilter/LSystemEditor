@@ -64,6 +64,10 @@ public:
     void moveUp(float distance);
     void moveDown(float distance);
     void yawPitch(float deltaYaw, float deltaPitch);
+    void addEulerDelta(float deltaYaw, float deltaPitch, float deltaRoll);
+    void translateLocal(float rightAmount, float upAmount, float forwardAmount);
+
+    glm::vec3 position() const { return m_position; }
 
     void setAspect(int imageW, int imageH);
     CameraGpu toGpu() const;
@@ -103,4 +107,5 @@ private:
     float m_aspect;
     float m_yawRad;
     float m_pitchRad;
+    float m_rollRad;
 };

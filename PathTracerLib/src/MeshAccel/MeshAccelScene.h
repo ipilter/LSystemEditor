@@ -3,6 +3,8 @@
 #include "MeshAccelTypes.h"
 #include "MeshBuilder/HostMesh.h"
 
+#include <QString>
+
 #include <cuda_runtime.h>
 #include <vector>
 
@@ -31,6 +33,9 @@ public:
     const std::vector<MeshBvhNode>& bvhNodesHost() const { return m_bvhNodes; }
     const std::vector<MaterialGpu>& materialsHost() const { return m_materials; }
     const std::vector<uint32_t>& emissiveTriangleIndicesHost() const { return m_emissiveTriangleIndices; }
+
+    /** @brief Writes Wavefront OBJ + sibling MTL from cached host geometry and materials. */
+    bool exportWavefrontObj(const QString& objFilePath, QString* errorMessage = nullptr) const;
 
 private:
     std::vector<MeshBvhNode> m_bvhNodes;

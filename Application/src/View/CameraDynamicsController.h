@@ -1,0 +1,83 @@
+#pragma once
+
+#include "PhysicalCamera.h"
+
+#include <glm/glm.hpp>
+
+#include <cmath>
+
+class CameraDynamicsController
+{
+public:
+    static constexpr float kThrustLinear = 2.0f;
+    static constexpr float kDragLinear = 4.0f;
+    static constexpr float kThrustAngular = 2.0f;
+    static constexpr float kDragAngular = 5.0f;
+    static constexpr float kMass = 1.0f;
+    static constexpr float kInertia = 1.0f;
+    static constexpr float kVelocityEpsilon = 1.0e-5f;
+    static constexpr float kPositionEpsilon = 1.0e-6f;
+    static constexpr float kAngleEpsilon = 1.0e-7f;
+
+    void setLinearInput(const glm::vec3& unitInput) { m_linearInput = unitInput; }
+    void setAngularInput(const glm::vec3& unitInput) { m_angularInput = unitInput; }
+    void setThrustScale(float scale) { m_thrustScale = scale; }
+
+    void reset()
+    {
+        m_linearVelocity = glm::vec3(0.0f);
+        m_angularVelocity = glm::vec3(0.0f);
+        m_linearInput = glm::vec3(0.0f);
+        m_angularInput = glm::vec3(0.0f);
+        m_thrustScale = 1.0f;
+    }
+
+    bool step(PhysicalCamera& camera, float dt)
+    {
+        if (dt <= 0.0f) {
+            return false;
+        }
+
+        const glm::vec3 prevPosition = camera.position();
+
+        const float thrustLinear = kThrustLinear * m_thrustScale;
+        const float thrustAngular = kThrustAngular * m_thrustScale;
+
+        const glm::vec3 linearAccel =
+            (m_linearInput * thrustLinear - m_linearVelocity * kDragLinear) / kMass;
+        const glm::vec3 angularAccel =
+            (m_angularInput * thrustAngular - m_angularVelocity * kDragAngular) / kInertia;
+
+        m_linearVelocity += linearAccel * dt;
+        m_angularVelocity += angularAccel * dt;
+
+        camera.translateLocal(
+            m_linearVelocity.x * dt,
+            m_linearVelocity.y * dt,
+            m_linearVelocity.z * dt);
+        camera.addEulerDelta(
+            m_angularVelocity.y * dt,
+            m_angularVelocity.x * dt,
+            m_angularVelocity.z * dt);
+
+        const bool moving =
+            glm::length(m_linearVelocity) > kVelocityEpsilon
+            || glm::length(m_angularVelocity) > kVelocityEpsilon;
+        const bool inputActive =
+            glm::length(m_linearInput) > 0.0f || glm::length(m_angularInput) > 0.0f;
+        const bool displaced = glm::length(camera.position() - prevPosition) > kPositionEpsilon;
+        const bool rotated =
+            std::abs(m_angularVelocity.x) * dt > kAngleEpsilon
+            || std::abs(m_angularVelocity.y) * dt > kAngleEpsilon
+            || std::abs(m_angularVelocity.z) * dt > kAngleEpsilon;
+
+        return moving || inputActive || displaced || rotated;
+    }
+
+private:
+    glm::vec3 m_linearVelocity{0.0f};
+    glm::vec3 m_angularVelocity{0.0f};
+    glm::vec3 m_linearInput{0.0f};
+    glm::vec3 m_angularInput{0.0f};
+    float m_thrustScale = 1.0f;
+};

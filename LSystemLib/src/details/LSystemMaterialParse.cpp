@@ -8,6 +8,8 @@
 #include <cstdint>
 #include <stdexcept>
 #include <string>
+#include <string_view>
+#include <vector>
 
 namespace
 {
@@ -20,6 +22,11 @@ namespace
 float clamp01(float v)
 {
     return std::clamp(v, 0.f, 1.f);
+}
+
+float clamp_ior(float v)
+{
+    return std::clamp(v, 1.0f, 3.0f);
 }
 
 void skip_ws(std::string_view line, std::size_t& pos)
@@ -90,6 +97,178 @@ bool parse_float(std::string_view line, std::size_t& pos, float& out)
     return true;
 }
 
+bool iequals(std::string_view a, std::string_view b)
+{
+    if (a.size() != b.size())
+    {
+        return false;
+    }
+    for (std::size_t i = 0; i < a.size(); ++i)
+    {
+        if (std::tolower(static_cast<unsigned char>(a[i])) !=
+            std::tolower(static_cast<unsigned char>(b[i])))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool parse_identifier(std::string_view line, std::size_t& pos, std::string& out)
+{
+    skip_ws(line, pos);
+    if (pos >= line.size() || !std::isalpha(static_cast<unsigned char>(line[pos])))
+    {
+        return false;
+    }
+    const std::size_t begin = pos;
+    while (pos < line.size() &&
+           (std::isalnum(static_cast<unsigned char>(line[pos])) || line[pos] == '_'))
+    {
+        ++pos;
+    }
+    out.assign(line.substr(begin, pos - begin));
+    return true;
+}
+
+bool resolve_material_kind(std::string_view name, MaterialKind& out_kind)
+{
+    if (iequals(name, "Diffuse"))
+    {
+        out_kind = MaterialKind::Diffuse;
+        return true;
+    }
+    if (iequals(name, "Metal"))
+    {
+        out_kind = MaterialKind::Metal;
+        return true;
+    }
+    if (iequals(name, "Glass") || iequals(name, "Transparent"))
+    {
+        out_kind = MaterialKind::Glass;
+        return true;
+    }
+    return false;
+}
+
+void assign_rgb(MaterialEntry& entry, const std::vector<float>& comps)
+{
+    entry.r = clamp01(comps[0]);
+    entry.g = clamp01(comps[1]);
+    entry.b = clamp01(comps[2]);
+}
+
+void assign_diffuse(MaterialEntry& entry, const std::vector<float>& comps)
+{
+    assign_rgb(entry, comps);
+    entry.kind = MaterialKind::Diffuse;
+    entry.metallic = 0.f;
+    entry.transmission = 0.f;
+    entry.roughness = comps.size() >= 4u ? clamp01(comps[3]) : 0.5f;
+    entry.emission = comps.size() >= 5u ? std::max(0.f, comps[4]) : 0.f;
+}
+
+void assign_metal(MaterialEntry& entry, const std::vector<float>& comps)
+{
+    assign_rgb(entry, comps);
+    entry.kind = MaterialKind::Metal;
+    entry.metallic = 1.f;
+    entry.transmission = 0.f;
+    entry.roughness = comps.size() >= 4u ? clamp01(comps[3]) : 0.5f;
+    entry.emission = comps.size() >= 5u ? std::max(0.f, comps[4]) : 0.f;
+}
+
+void assign_glass(MaterialEntry& entry, const std::vector<float>& comps)
+{
+    assign_rgb(entry, comps);
+    entry.kind = MaterialKind::Glass;
+    entry.metallic = 0.f;
+    entry.transmission = 1.f;
+    entry.ior = clamp_ior(comps[3]);
+    entry.roughness = comps.size() >= 5u ? clamp01(comps[4]) : 0.f;
+    entry.emission = comps.size() >= 6u ? std::max(0.f, comps[5]) : 0.f;
+}
+
+void validate_component_count(std::string_view line, MaterialKind kind, std::size_t count)
+{
+    switch (kind)
+    {
+    case MaterialKind::Diffuse:
+        if (count < 3u || count > 5u)
+        {
+            material_parse_error(line, "Diffuse requires 3 to 5 components (r, g, b, [roughness], [emission])");
+        }
+        return;
+    case MaterialKind::Metal:
+        if (count < 3u || count > 5u)
+        {
+            material_parse_error(line, "Metal requires 3 to 5 components (r, g, b, [roughness], [emission])");
+        }
+        return;
+    case MaterialKind::Glass:
+        if (count < 4u || count > 6u)
+        {
+            material_parse_error(line, "Glass requires 4 to 6 components (r, g, b, ior, [roughness], [emission])");
+        }
+        return;
+    }
+}
+
+void assign_entry_from_kind(MaterialEntry& entry, MaterialKind kind, const std::vector<float>& comps)
+{
+    switch (kind)
+    {
+    case MaterialKind::Diffuse:
+        assign_diffuse(entry, comps);
+        return;
+    case MaterialKind::Metal:
+        assign_metal(entry, comps);
+        return;
+    case MaterialKind::Glass:
+        assign_glass(entry, comps);
+        return;
+    }
+}
+
+bool parse_brace_float_list(std::string_view line, std::size_t& pos, std::vector<float>& comps)
+{
+    skip_ws(line, pos);
+    if (pos >= line.size() || line[pos] != '{')
+    {
+        return false;
+    }
+    ++pos;
+
+    comps.clear();
+    for (;;)
+    {
+        skip_ws(line, pos);
+        if (pos < line.size() && line[pos] == '}')
+        {
+            ++pos;
+            return true;
+        }
+        float v = 0.f;
+        if (!parse_float(line, pos, v))
+        {
+            material_parse_error(line, "material declaration expected number");
+        }
+        comps.push_back(v);
+        skip_ws(line, pos);
+        if (pos < line.size() && line[pos] == ',')
+        {
+            ++pos;
+            continue;
+        }
+        if (pos < line.size() && line[pos] == '}')
+        {
+            ++pos;
+            return true;
+        }
+        material_parse_error(line, "material declaration expected ',' or '}'");
+    }
+}
+
 } // namespace
 
 bool is_material_declaration_line(std::string_view trimmed_line)
@@ -101,7 +280,18 @@ bool is_material_declaration_line(std::string_view trimmed_line)
         return false;
     }
     skip_ws(trimmed_line, pos);
-    return pos < trimmed_line.size() && trimmed_line[pos] == '=';
+    if (pos >= trimmed_line.size() || trimmed_line[pos] != '=')
+    {
+        return false;
+    }
+    ++pos;
+    std::string type_name;
+    if (!parse_identifier(trimmed_line, pos, type_name))
+    {
+        return false;
+    }
+    skip_ws(trimmed_line, pos);
+    return pos < trimmed_line.size() && trimmed_line[pos] == '{';
 }
 
 bool material_id_defined(const std::vector<MaterialDefinition>& definitions, const std::uint32_t id)
@@ -136,65 +326,32 @@ bool try_parse_material_line(std::string_view trimmed_line, std::vector<Material
         return false;
     }
     ++pos;
-    while (pos < trimmed_line.size() && std::isspace(static_cast<unsigned char>(trimmed_line[pos])))
+
+    std::string type_name;
+    if (!parse_identifier(trimmed_line, pos, type_name))
     {
-        ++pos;
+        material_parse_error(trimmed_line, "material declaration requires type keyword (Diffuse, Metal, Glass)");
     }
-    if (pos >= trimmed_line.size() || trimmed_line[pos] != '{')
+
+    MaterialKind kind{};
+    if (!resolve_material_kind(type_name, kind))
+    {
+        material_parse_error(trimmed_line, "unknown material type");
+    }
+
+    std::vector<float> comps;
+    if (!parse_brace_float_list(trimmed_line, pos, comps))
     {
         material_parse_error(trimmed_line, "material declaration expected '{'");
     }
-    ++pos;
 
-    std::vector<float> comps;
-    comps.reserve(5);
-    for (;;)
-    {
-        while (pos < trimmed_line.size() && std::isspace(static_cast<unsigned char>(trimmed_line[pos])))
-        {
-            ++pos;
-        }
-        if (pos < trimmed_line.size() && trimmed_line[pos] == '}')
-        {
-            ++pos;
-            break;
-        }
-        float v = 0.f;
-        if (!parse_float(trimmed_line, pos, v))
-        {
-            material_parse_error(trimmed_line, "material declaration expected number");
-        }
-        comps.push_back(v);
-        while (pos < trimmed_line.size() && std::isspace(static_cast<unsigned char>(trimmed_line[pos])))
-        {
-            ++pos;
-        }
-        if (pos < trimmed_line.size() && trimmed_line[pos] == ',')
-        {
-            ++pos;
-            continue;
-        }
-        if (pos < trimmed_line.size() && trimmed_line[pos] == '}')
-        {
-            ++pos;
-            break;
-        }
-        material_parse_error(trimmed_line, "material declaration expected ',' or '}'");
-    }
-
-    while (pos < trimmed_line.size() && std::isspace(static_cast<unsigned char>(trimmed_line[pos])))
-    {
-        ++pos;
-    }
+    skip_ws(trimmed_line, pos);
     if (pos != trimmed_line.size())
     {
         material_parse_error(trimmed_line, "unexpected text after material declaration");
     }
 
-    if (comps.size() < 3u || comps.size() > 6u)
-    {
-        material_parse_error(trimmed_line, "material declaration requires 3 to 6 components");
-    }
+    validate_component_count(trimmed_line, kind, comps.size());
 
     if (material_id_defined(definitions, id))
     {
@@ -203,21 +360,7 @@ bool try_parse_material_line(std::string_view trimmed_line, std::vector<Material
 
     MaterialDefinition def;
     def.id = id;
-    def.entry.r = clamp01(comps[0]);
-    def.entry.g = clamp01(comps[1]);
-    def.entry.b = clamp01(comps[2]);
-    if (comps.size() >= 4u)
-    {
-        def.entry.roughness = clamp01(comps[3]);
-    }
-    if (comps.size() >= 5u)
-    {
-        def.entry.metallic = clamp01(comps[4]);
-    }
-    if (comps.size() >= 6u)
-    {
-        def.entry.emission = std::max(0.f, comps[5]);
-    }
+    assign_entry_from_kind(def.entry, kind, comps);
     definitions.push_back(def);
     return true;
 }

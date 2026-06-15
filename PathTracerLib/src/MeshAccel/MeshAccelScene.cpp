@@ -32,6 +32,7 @@ MaterialGpu defaultMaterial()
     material.emission = 0.0f;
     material.ior = 1.5f;
     material.transmission = 0.0f;
+    material.kind = 0;
     return material;
 }
 

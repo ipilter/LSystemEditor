@@ -1371,6 +1371,12 @@ bool PathTracer::rebuildMeshScene(
     return true;
 }
 
+bool PathTracer::exportMeshSceneWavefrontObj(const QString& objFilePath, QString* errorMessage) const
+{
+    std::lock_guard<std::mutex> meshSceneLock(m_impl->meshSceneMutex);
+    return m_impl->meshScene.exportWavefrontObj(objFilePath, errorMessage);
+}
+
 void PathTracer::notifyWorker()
 {
     m_impl->workerCv.notify_all();

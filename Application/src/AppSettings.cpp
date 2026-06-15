@@ -39,6 +39,9 @@ constexpr const char* kEnvironmentHdrPathKey = "environmentHdrPath";
 constexpr const char* kFStopKey = "fStop";
 constexpr const char* kShutterSpeedSecondsKey = "shutterSpeedSeconds";
 constexpr const char* kIsoKey = "iso";
+constexpr const char* kWindowGeometryKey = "windowGeometry";
+constexpr const char* kHorizontalSplitterStateKey = "horizontalSplitterState";
+constexpr const char* kVerticalSplitterStateKey = "verticalSplitterState";
 constexpr const char* kAccelBvhColorRedKey = "accelBvhColorRed";
 constexpr const char* kAccelBvhColorGreenKey = "accelBvhColorGreen";
 constexpr const char* kAccelBvhColorBlueKey = "accelBvhColorBlue";
@@ -287,6 +290,51 @@ void AppSettings::setIso(float value)
     save();
 }
 
+QByteArray AppSettings::windowGeometry() const
+{
+    return m_windowGeometry;
+}
+
+void AppSettings::setWindowGeometry(const QByteArray& geometry)
+{
+    if (m_windowGeometry == geometry) {
+        return;
+    }
+
+    m_windowGeometry = geometry;
+    save();
+}
+
+QByteArray AppSettings::horizontalSplitterState() const
+{
+    return m_horizontalSplitterState;
+}
+
+void AppSettings::setHorizontalSplitterState(const QByteArray& state)
+{
+    if (m_horizontalSplitterState == state) {
+        return;
+    }
+
+    m_horizontalSplitterState = state;
+    save();
+}
+
+QByteArray AppSettings::verticalSplitterState() const
+{
+    return m_verticalSplitterState;
+}
+
+void AppSettings::setVerticalSplitterState(const QByteArray& state)
+{
+    if (m_verticalSplitterState == state) {
+        return;
+    }
+
+    m_verticalSplitterState = state;
+    save();
+}
+
 float AppSettings::clampFStop(float value)
 {
     return PhysicalCamera::clampFStop(value);
@@ -507,6 +555,9 @@ void AppSettings::load()
         }
     }
 
+    m_windowGeometry = settings.value(kWindowGeometryKey).toByteArray();
+    m_horizontalSplitterState = settings.value(kHorizontalSplitterStateKey).toByteArray();
+    m_verticalSplitterState = settings.value(kVerticalSplitterStateKey).toByteArray();
 }
 
 void AppSettings::save()
@@ -535,5 +586,8 @@ void AppSettings::save()
     settings.setValue(kFStopKey, static_cast<double>(m_fStop));
     settings.setValue(kShutterSpeedSecondsKey, static_cast<double>(m_shutterSpeedSeconds));
     settings.setValue(kIsoKey, static_cast<double>(m_iso));
+    settings.setValue(kWindowGeometryKey, m_windowGeometry);
+    settings.setValue(kHorizontalSplitterStateKey, m_horizontalSplitterState);
+    settings.setValue(kVerticalSplitterStateKey, m_verticalSplitterState);
     settings.sync();
 }

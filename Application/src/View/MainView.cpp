@@ -6,6 +6,8 @@
 #include "PhysicalCamera.h"
 #include "RenderAccumulationState.h"
 
+#include <QApplication>
+#include <QCloseEvent>
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QEvent>
@@ -52,10 +54,10 @@ MainView::MainView(QWidget* parent)
     rootLayout->setContentsMargins(0, 0, 0, 0);
     rootLayout->setSpacing(0);
 
-    auto* horizontalSplitter = new QSplitter(Qt::Horizontal, this);
-    horizontalSplitter->setChildrenCollapsible(false);
+    m_horizontalSplitter = new QSplitter(Qt::Horizontal, this);
+    m_horizontalSplitter->setChildrenCollapsible(false);
 
-    m_viewportHost = new QWidget(horizontalSplitter);
+    m_viewportHost = new QWidget(m_horizontalSplitter);
     m_viewportHost->setAutoFillBackground(true);
     m_viewportHost->setStyleSheet(QStringLiteral("background-color: #2a2a2a;"));
     m_viewportHost->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
@@ -65,7 +67,7 @@ MainView::MainView(QWidget* parent)
     m_viewport->setGeometry(m_viewportHost->rect());
     m_pendingViewportSize = m_viewportHost->size();
 
-    auto* controlPanel = new QWidget(horizontalSplitter);
+    auto* controlPanel = new QWidget(m_horizontalSplitter);
     controlPanel->setMinimumWidth(kControlPanelMinWidth);
     auto* controlLayout = new QVBoxLayout(controlPanel);
     controlLayout->setContentsMargins(8, 8, 8, 8);
@@ -226,7 +228,7 @@ MainView::MainView(QWidget* parent)
 
     m_lsystemEdit = new QPlainTextEdit(lsystemGroup);
     m_lsystemEdit->setPlaceholderText(QStringLiteral("L-system definition (axiom and rules)"));
-    m_lsystemEdit->setPlainText(QStringLiteral("Mat(0) = { 0.0, 0.0, 0.0, 1, 0 }\nMat(1) = { 0.5, 0.5, 0.5, 1, 0 }\nMat(2) = { 1.0, 1.0, 1.0, 1, 0 }\n\nPitch(-90)\n\n[Mat(1) f(-10000) F(0, 10000)]\n\nMat(0)\nF\nf(0)\nMat(1)\nF\nf(0)\nMat(2)\nF\n"));
+    m_lsystemEdit->setPlainText(QStringLiteral("Mat(0) = Metal { 0.0, 0.0, 0.0, 1, 0 }\nMat(1) = Diffuse { 0.5, 0.5, 0.5, 1.0 }\nMat(2) = Diffuse { 1.0, 1.0, 1.0, 1.0 }\nMat(3) = Glass { 0.95, 0.98, 1.00, 1.452 }\nPitch(-90)\n\n[Mat(1) f(-10000) F(0, 10000)]\n\nMat(0)\nF\nf(0)\nMat(1)\nF\nf(0)\nMat(2)\nF\nf(0.1)\nMat(3)\nF(0)"));
 
     m_lsystemEdit->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     lsystemLayout->addWidget(m_lsystemEdit, 1);
@@ -251,6 +253,11 @@ MainView::MainView(QWidget* parent)
     auto* applicationGroup = new QGroupBox(QStringLiteral("Application"), controlPanel);
     auto* applicationLayout = new QVBoxLayout(applicationGroup);
 
+    m_exportSceneButton = new QPushButton(QStringLiteral("Export Scene"), applicationGroup);
+    m_exportSceneButton->setToolTip(
+        QStringLiteral("Export cached scene geometry and materials as Wavefront OBJ + MTL for Blender."));
+    applicationLayout->addWidget(m_exportSceneButton);
+
     m_settingsButton = new QPushButton(QStringLiteral("Settings"), applicationGroup);
     applicationLayout->addWidget(m_settingsButton);
 
@@ -260,11 +267,11 @@ MainView::MainView(QWidget* parent)
 
     controlLayout->addWidget(applicationGroup);
 
-    horizontalSplitter->addWidget(m_viewportHost);
-    horizontalSplitter->addWidget(controlPanel);
-    horizontalSplitter->setStretchFactor(0, 1);
-    horizontalSplitter->setStretchFactor(1, 0);
-    horizontalSplitter->setSizes({580, kControlPanelInitialWidth});
+    m_horizontalSplitter->addWidget(m_viewportHost);
+    m_horizontalSplitter->addWidget(controlPanel);
+    m_horizontalSplitter->setStretchFactor(0, 1);
+    m_horizontalSplitter->setStretchFactor(1, 0);
+    m_horizontalSplitter->setSizes({580, kControlPanelInitialWidth});
 
     m_logView = new QPlainTextEdit(this);
     m_logView->setReadOnly(true);
@@ -272,15 +279,21 @@ MainView::MainView(QWidget* parent)
     m_logView->setMaximumBlockCount(kLogMaxBlockCount);
     m_logView->setPlaceholderText(QStringLiteral("Log messages appear here..."));
 
-    auto* verticalSplitter = new QSplitter(Qt::Vertical, this);
-    verticalSplitter->setChildrenCollapsible(false);
-    verticalSplitter->addWidget(horizontalSplitter);
-    verticalSplitter->addWidget(m_logView);
-    verticalSplitter->setStretchFactor(0, 1);
-    verticalSplitter->setStretchFactor(1, 0);
-    verticalSplitter->setSizes({500, kLogPanelInitialHeight});
+    m_verticalSplitter = new QSplitter(Qt::Vertical, this);
+    m_verticalSplitter->setChildrenCollapsible(false);
+    m_verticalSplitter->addWidget(m_horizontalSplitter);
+    m_verticalSplitter->addWidget(m_logView);
+    m_verticalSplitter->setStretchFactor(0, 1);
+    m_verticalSplitter->setStretchFactor(1, 0);
+    m_verticalSplitter->setSizes({500, kLogPanelInitialHeight});
 
-    rootLayout->addWidget(verticalSplitter);
+    rootLayout->addWidget(m_verticalSplitter);
+
+    restoreLayoutFromSettings();
+
+    connect(qApp, &QApplication::aboutToQuit, this, [this]() {
+        saveLayoutToSettings();
+    });
 
     connect(&AppLog::instance(), &AppLog::messageLogged, this, [this](const QString& line) {
         m_logView->appendPlainText(line);
@@ -390,6 +403,11 @@ QPushButton* MainView::addPrimitiveButton() const
     return m_addPrimitiveButton;
 }
 
+QPushButton* MainView::exportSceneButton() const
+{
+    return m_exportSceneButton;
+}
+
 QPlainTextEdit* MainView::lsystemEdit() const
 {
     return m_lsystemEdit;
@@ -423,6 +441,50 @@ void MainView::setRenderState(RenderAccumulationState state, int sampleCount, in
     }
 
     m_renderStateLabel->setText(text);
+}
+
+void MainView::closeEvent(QCloseEvent* event)
+{
+    saveLayoutToSettings();
+    QWidget::closeEvent(event);
+}
+
+void MainView::restoreLayoutFromSettings()
+{
+    AppSettings& settings = AppSettings::instance();
+
+    const QByteArray geometry = settings.windowGeometry();
+    if (!geometry.isEmpty()) {
+        restoreGeometry(geometry);
+    }
+
+    if (m_horizontalSplitter != nullptr) {
+        const QByteArray horizontalState = settings.horizontalSplitterState();
+        if (!horizontalState.isEmpty()) {
+            m_horizontalSplitter->restoreState(horizontalState);
+        }
+    }
+
+    if (m_verticalSplitter != nullptr) {
+        const QByteArray verticalState = settings.verticalSplitterState();
+        if (!verticalState.isEmpty()) {
+            m_verticalSplitter->restoreState(verticalState);
+        }
+    }
+}
+
+void MainView::saveLayoutToSettings()
+{
+    AppSettings& settings = AppSettings::instance();
+    settings.setWindowGeometry(saveGeometry());
+
+    if (m_horizontalSplitter != nullptr) {
+        settings.setHorizontalSplitterState(m_horizontalSplitter->saveState());
+    }
+
+    if (m_verticalSplitter != nullptr) {
+        settings.setVerticalSplitterState(m_verticalSplitter->saveState());
+    }
 }
 
 bool MainView::eventFilter(QObject* watched, QEvent* event)
