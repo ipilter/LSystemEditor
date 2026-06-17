@@ -16,7 +16,7 @@ struct TurtleState
 struct TurtleSegment
 {
     std::vector<TurtleState> states;
-    uint32_t materialId = 0;
+    std::string materialId = "0";
 };
 
 struct BranchGroup

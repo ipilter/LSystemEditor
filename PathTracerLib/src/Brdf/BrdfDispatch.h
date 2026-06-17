@@ -1,15 +1,6 @@
 #pragma once
 
-#include "DiffuseBrdf.h"
-#include "GlassBrdf.h"
-#include "MetalBrdf.h"
-
-enum class BrdfType : int
-{
-    Diffuse = 0,
-    Metal = 1,
-    Glass = 2,
-};
+#include "PrincipledBrdf.h"
 
 #if defined(__CUDACC__)
 #define BRDF_DISPATCH_FN __host__ __device__ inline
@@ -17,79 +8,62 @@ enum class BrdfType : int
 #define BRDF_DISPATCH_FN inline
 #endif
 
-BRDF_DISPATCH_FN BrdfType brdfForMaterial(const MaterialGpu& material)
+BRDF_DISPATCH_FN Vec3 brdfEval(const BrdfContext& ctx, Vec3 wi)
 {
-    switch (material.kind) {
-    case 1:
-        return BrdfType::Metal;
-    case 2:
-        return BrdfType::Glass;
-    default:
-        return BrdfType::Diffuse;
-    }
+    const PrincipledBrdf brdf{};
+    return brdf.eval(ctx, wi);
 }
 
-BRDF_DISPATCH_FN Vec3 brdfEval(BrdfType type, const BrdfContext& ctx, Vec3 wi)
+BRDF_DISPATCH_FN BrdfSampleResult brdfSample(const BrdfContext& ctx, float u1, float u2)
 {
-    switch (type) {
-    case BrdfType::Metal: {
-        const MetalBrdf brdf{};
-        return brdf.eval(ctx, wi);
-    }
-    case BrdfType::Glass: {
-        const GlassBrdf brdf{};
-        return brdf.eval(ctx, wi);
-    }
-    case BrdfType::Diffuse:
-    default: {
-        const DiffuseBrdf brdf{};
-        return brdf.eval(ctx, wi);
-    }
-    }
+    const PrincipledBrdf brdf{};
+    return brdf.sample(ctx, u1, u2);
 }
 
-BRDF_DISPATCH_FN BrdfSampleResult brdfSample(BrdfType type, const BrdfContext& ctx, float u1, float u2)
+BRDF_DISPATCH_FN float brdfPdf(const BrdfContext& ctx, Vec3 wi)
 {
-    switch (type) {
-    case BrdfType::Metal: {
-        const MetalBrdf brdf{};
-        return brdf.sample(ctx, u1, u2);
-    }
-    case BrdfType::Glass: {
-        const GlassBrdf brdf{};
-        return brdf.sample(ctx, u1, u2);
-    }
-    case BrdfType::Diffuse:
-    default: {
-        const DiffuseBrdf brdf{};
-        return brdf.sample(ctx, u1, u2);
-    }
-    }
-}
-
-BRDF_DISPATCH_FN float brdfPdf(BrdfType type, const BrdfContext& ctx, Vec3 wi)
-{
-    switch (type) {
-    case BrdfType::Metal: {
-        const MetalBrdf brdf{};
-        return brdf.pdf(ctx, wi);
-    }
-    case BrdfType::Glass: {
-        const GlassBrdf brdf{};
-        return brdf.pdf(ctx, wi);
-    }
-    case BrdfType::Diffuse:
-    default: {
-        const DiffuseBrdf brdf{};
-        return brdf.pdf(ctx, wi);
-    }
-    }
+    const PrincipledBrdf brdf{};
+    return brdf.pdf(ctx, wi);
 }
 
 BRDF_DISPATCH_FN float brdfThroughputLuminance(Vec3 throughput)
 {
-    const DiffuseBrdf brdf{};
+    const PrincipledBrdf brdf{};
     return brdf.luminance(throughput);
+}
+
+BRDF_DISPATCH_FN bool brdfSkipsEnvironmentNee(const MaterialGpu& material)
+{
+    const float transmission = vecMax2(0.0f, vecMin2(1.0f, material.transmission));
+    const float metallic = vecMax2(0.0f, vecMin2(1.0f, material.metallic));
+    return transmission > 0.99f && metallic < 0.01f;
+}
+
+BRDF_DISPATCH_FN Vec3 brdfApplyThroughput(Vec3 throughput, const BrdfContext& ctx, const BrdfSampleResult& sample, Vec3 bsdfValue)
+{
+    if (!sample.valid || sample.pdf <= BrdfDetail::kMinPdf) {
+        return vecMake3(0.0f, 0.0f, 0.0f);
+    }
+
+    const float transmission = vecMax2(0.0f, vecMin2(1.0f, ctx.material.transmission));
+    const float thin = vecMax2(0.0f, vecMin2(1.0f, ctx.material.thin));
+    const bool pureTransmitLobe = transmission > 0.99f && ctx.material.metallic < 0.01f;
+
+    Vec3 scale{};
+    if (pureTransmitLobe && thin < 0.5f) {
+        scale = vecScale3(bsdfValue, 1.0f / sample.pdf);
+    } else if (sample.transmitted) {
+        const float cosTheta = vecAbs(vecDot3(ctx.normal, sample.direction));
+        scale = vecScale3(bsdfValue, cosTheta / sample.pdf);
+    } else {
+        const float cosTheta = vecMax2(0.0f, vecDot3(ctx.normal, sample.direction));
+        scale = vecScale3(bsdfValue, cosTheta / sample.pdf);
+    }
+
+    return vecMake3(
+        throughput.x * scale.x,
+        throughput.y * scale.y,
+        throughput.z * scale.z);
 }
 
 #undef BRDF_DISPATCH_FN

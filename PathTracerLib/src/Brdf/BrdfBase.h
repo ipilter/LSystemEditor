@@ -26,6 +26,8 @@ struct BrdfSampleResult
     bool valid = false;
     /** @brief True when the sampled path transmits through the surface (glass refraction). */
     bool transmitted = false;
+    /** @brief IOR of the medium the ray travels in after this bounce. */
+    float nextMediumEta = 1.0f;
 };
 
 struct BrdfContext
@@ -33,6 +35,10 @@ struct BrdfContext
     Vec3 normal{};
     Vec3 wo{};
     MaterialGpu material{};
+    /** @brief IOR of the medium the ray is currently in (1.0 = air). */
+    float etaMedium = 1.0f;
+    /** @brief Hero wavelength for this path in nanometers. */
+    float wavelengthNm = 550.0f;
 };
 
 template<typename Derived>
@@ -160,14 +166,14 @@ BRDF_BASE_FN float brdfDielectricFresnel(float cosThetaI, float etaI, float etaT
     return 0.5f * (rParallel * rParallel + rPerpendicular * rPerpendicular);
 }
 
-BRDF_BASE_FN bool brdfRefract3(Vec3 wo, Vec3 normal, float eta, Vec3& outWi)
+BRDF_BASE_FN bool brdfRefractRelative(Vec3 wo, Vec3 normal, float etaI, float etaT, Vec3& outWi)
 {
     float cosThetaO = vecDot3(normal, wo);
     Vec3 n = normal;
-    float etaRel = eta;
+    float etaRel = etaI / vecMax2(etaT, 1.0e-8f);
     if (cosThetaO > 0.0f) {
         n = vecScale3(normal, -1.0f);
-        etaRel = 1.0f / eta;
+        etaRel = 1.0f / etaRel;
         cosThetaO = -cosThetaO;
     }
 
@@ -181,6 +187,11 @@ BRDF_BASE_FN bool brdfRefract3(Vec3 wo, Vec3 normal, float eta, Vec3& outWi)
         vecScale3(wo, -etaRel),
         vecScale3(n, etaRel * cosThetaO + cosT)));
     return true;
+}
+
+BRDF_BASE_FN bool brdfRefract3(Vec3 wo, Vec3 normal, float eta, Vec3& outWi)
+{
+    return brdfRefractRelative(wo, normal, 1.0f, eta, outWi);
 }
 
 #undef BRDF_BASE_FN

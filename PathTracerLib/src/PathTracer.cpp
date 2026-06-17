@@ -11,6 +11,7 @@
 #include "PathTracerCuda.h"
 #include "PathTracerPreviewLevels.h"
 #include "RenderTypes.h"
+#include "Spectral/SpectralState.h"
 
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
@@ -78,6 +79,7 @@ struct PathTracerDetail::PathTracerImpl
     MeshAccelBoundsMesh boundsMesh;
 
     EnvironmentMap environmentMap;
+    SpectralStateHost spectralState;
     RenderParamsGpu hostRenderParams{};
     RenderParamsGpu* d_renderParams = nullptr;
     bool deviceParamsArePreview = false;
@@ -419,6 +421,45 @@ void freeRenderParamsGpu(PathTracerDetail::PathTracerImpl* impl)
         impl->d_renderParams = nullptr;
     }
     impl->deviceParamsArePreview = false;
+}
+
+void freeSpectralState(PathTracerDetail::PathTracerImpl* impl)
+{
+    if (impl == nullptr) {
+        return;
+    }
+    impl->spectralState.freeDevice();
+}
+
+bool initSpectralState(PathTracerDetail::PathTracerImpl* impl, QString* outError)
+{
+    if (impl == nullptr) {
+        if (outError != nullptr) {
+            *outError = QStringLiteral("invalid path tracer impl");
+        }
+        return false;
+    }
+
+    freeSpectralState(impl);
+
+    std::string loadError;
+    if (!impl->spectralState.loadCoeffFile(PATHTRACER_RGB2SPEC_COEFF_PATH, &loadError)) {
+        if (outError != nullptr) {
+            *outError = QString::fromStdString(loadError);
+        }
+        return false;
+    }
+
+    if (!impl->spectralState.uploadToDevice(&loadError)) {
+        if (outError != nullptr) {
+            *outError = QString::fromStdString(loadError);
+        }
+        freeSpectralState(impl);
+        return false;
+    }
+
+    spectralSetHostModel(impl->spectralState.hostModel());
+    return true;
 }
 
 bool initRenderParamsGpu(PathTracerDetail::PathTracerImpl* impl, QString* outError)
@@ -852,6 +893,7 @@ PathTracer::~PathTracer()
     unregisterPboResources(m_impl.get());
     freeCameraGpu(m_impl.get());
     freeRenderParamsGpu(m_impl.get());
+    freeSpectralState(m_impl.get());
     m_impl->environmentMap.release();
     freeAccumulator(&m_impl->acc);
     freePreviewBuffers(&m_impl->previewLevels);
@@ -886,6 +928,7 @@ bool PathTracer::configure(
     unregisterPboResources(m_impl.get());
     freeCameraGpu(m_impl.get());
     freeRenderParamsGpu(m_impl.get());
+    freeSpectralState(m_impl.get());
     m_impl->environmentMap.release();
     freeAccumulator(&m_impl->acc);
     freePreviewBuffers(&m_impl->previewLevels);
@@ -959,6 +1002,16 @@ bool PathTracer::configure(
             QStringLiteral("PathTracer configure: render params allocation failed: %1").arg(error));
         unregisterPboResources(m_impl.get());
         freeCameraGpu(m_impl.get());
+        freeAccumulator(&m_impl->acc);
+        return false;
+    }
+
+    if (!initSpectralState(m_impl.get(), &error)) {
+        AppLog::instance().error(
+            QStringLiteral("PathTracer configure: spectral state init failed: %1").arg(error));
+        unregisterPboResources(m_impl.get());
+        freeCameraGpu(m_impl.get());
+        freeRenderParamsGpu(m_impl.get());
         freeAccumulator(&m_impl->acc);
         return false;
     }
@@ -1310,6 +1363,32 @@ void PathTracer::setEnvironmentIntensity(float intensity)
 float PathTracer::environmentIntensity() const
 {
     return m_impl->hostRenderParams.environmentIntensity;
+}
+
+void PathTracer::setRussianRouletteMinDepth(int depth)
+{
+    if (depth < 0) {
+        depth = 0;
+    }
+    if (depth > 256) {
+        depth = 256;
+    }
+
+    if (m_impl->hostRenderParams.russianRouletteMinDepth == depth) {
+        return;
+    }
+
+    m_impl->hostRenderParams.russianRouletteMinDepth = depth;
+    m_impl->renderParamsDirty.store(true);
+
+    if (m_impl->configured.load()) {
+        resetAccumulation();
+    }
+}
+
+int PathTracer::russianRouletteMinDepth() const
+{
+    return m_impl->hostRenderParams.russianRouletteMinDepth;
 }
 
 void PathTracer::setPhysicalCamera(float fStop, float shutterSpeedSeconds, float iso)

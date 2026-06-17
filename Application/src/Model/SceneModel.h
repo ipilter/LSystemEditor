@@ -33,6 +33,9 @@ public:
     int previewStepsPerLevel() const;
     void setPreviewStepsPerLevel(int value);
 
+    int russianRouletteMinDepth() const;
+    void setRussianRouletteMinDepth(int value);
+
     MeshAccelBoundsOverlayMode boundsOverlayMode() const;
     void setBoundsOverlayMode(MeshAccelBoundsOverlayMode mode);
 
@@ -69,6 +72,7 @@ signals:
     void renderSizeChanged(const QSize& size);
     void maxSamplesPerPixelChanged(int value);
     void previewStepsPerLevelChanged(int value);
+    void russianRouletteMinDepthChanged(int value);
     void boundsOverlayModeChanged(MeshAccelBoundsOverlayMode mode);
     void accelBvhColorChanged(const QColor& color);
     void environmentHdrPathChanged(const QString& path);
@@ -83,6 +87,7 @@ private:
     static int clampDimension(int value);
     static int clampMaxSamples(int value);
     static int clampPreviewSteps(int value);
+    static int clampRussianRouletteMinDepth(int value);
     static float clampCreaseAngleDeg(float value);
     static float clampFStop(float value);
     static float clampShutterSpeedSeconds(float value);
@@ -93,6 +98,7 @@ private:
     QSize m_renderSize;
     int m_maxSamplesPerPixel = 8;
     int m_previewStepsPerLevel = 2;
+    int m_russianRouletteMinDepth = 3;
     MeshAccelBoundsOverlayMode m_boundsOverlayMode = MeshAccelBoundsOverlayMode::Off;
     QColor m_accelBvhColor = QColor(230, 200, 0);
     float m_creaseAngleDeg = 50.0f;

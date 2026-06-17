@@ -21,19 +21,28 @@ namespace PathIntegratorRandDetail {
 
 constexpr float kRayTMax = 1.0e6f;
 constexpr float kShadowBias = 1.0e-4f;
+constexpr float kRelativeShadowBias = 1.0e-3f;
 constexpr float kMinPdf = 1.0e-8f;
+constexpr float kAirIor = 1.0f;
+constexpr float kDefaultWavelengthNm = 550.0f;
 constexpr int kRussianRouletteStartDepth = 3;
 constexpr float kMaxRussianRouletteProb = 0.95f;
+constexpr int kDefaultMaxPathDepth = 32;
+constexpr int kUnlimitedPathDepth = 256;
 
 } // namespace PathIntegratorRandDetail
 
+PATH_INTEGRATOR_RAND_FN Vec3 vecMul3(Vec3 a, Vec3 b)
+{
+    return vecMake3(a.x * b.x, a.y * b.y, a.z * b.z);
+}
+
 PATH_INTEGRATOR_RAND_FN Vec3 pathIntegratorRandEmission(const MaterialGpu& material)
 {
-    const Vec3 baseColor = brdfBaseColor(material);
     return vecMake3(
-        baseColor.x * material.emission,
-        baseColor.y * material.emission,
-        baseColor.z * material.emission);
+        material.r * material.emission,
+        material.g * material.emission,
+        material.b * material.emission);
 }
 
 PATH_INTEGRATOR_RAND_FN Vec3 pathIntegratorRandEvaluateEnvironmentNee(
@@ -41,12 +50,16 @@ PATH_INTEGRATOR_RAND_FN Vec3 pathIntegratorRandEvaluateEnvironmentNee(
     Vec3 normal,
     Vec3 wo,
     const MaterialGpu& material,
+    float etaMedium,
+    float wavelengthNm,
     const MeshAccelSceneGpu* scene,
     const EnvironmentMapGpu* env,
     const RenderParamsGpu* params,
     curandState* rng)
 {
-    const BrdfType brdfType = brdfForMaterial(material);
+    if (brdfSkipsEnvironmentNee(material)) {
+        return vecMake3(0.0f, 0.0f, 0.0f);
+    }
 
     float u1 = 0.0f;
     float u2 = 0.0f;
@@ -67,28 +80,14 @@ PATH_INTEGRATOR_RAND_FN Vec3 pathIntegratorRandEvaluateEnvironmentNee(
         return vecMake3(0.0f, 0.0f, 0.0f);
     }
 
-    const BrdfContext ctx{normal, wo, material};
+    const BrdfContext ctx{normal, wo, material, etaMedium, wavelengthNm};
     const Vec3 lightRadiance = lightEvalEnvironmentOrBackground(env, params, wi);
-
-    if (brdfType == BrdfType::Glass) {
-        const float cosWo = vecMax2(0.0f, vecDot3(normal, wo));
-        const float fresnel = brdfDielectricFresnel(cosWo, 1.0f, material.ior);
-        const Vec3 baseColor = brdfBaseColor(material);
-        const float scale = fresnel * cosTheta / lightPdf;
-        return vecMake3(
-            baseColor.x * lightRadiance.x * scale,
-            baseColor.y * lightRadiance.y * scale,
-            baseColor.z * lightRadiance.z * scale);
-    }
-
-    const Vec3 bsdf = brdfEval(brdfType, ctx, wi);
-    const float bsdfPdfValue = brdfPdf(brdfType, ctx, wi);
+    const Vec3 bsdf = brdfEval(ctx, wi);
+    const float bsdfPdfValue = brdfPdf(ctx, wi);
     const float misWeight = misBalanceWeight(lightPdf, bsdfPdfValue);
     const float scale = misWeight * cosTheta / lightPdf;
-    return vecMake3(
-        bsdf.x * lightRadiance.x * scale,
-        bsdf.y * lightRadiance.y * scale,
-        bsdf.z * lightRadiance.z * scale);
+
+    return vecMul3(bsdf, vecScale3(lightRadiance, scale));
 }
 
 PATH_INTEGRATOR_RAND_FN Vec3 tracePathRandFromHit(
@@ -104,11 +103,13 @@ PATH_INTEGRATOR_RAND_FN Vec3 tracePathRandFromHit(
         return lightEvalEnvironmentOrBackground(env, params, rayDir);
     }
 
-    int maxDepth = 8;
+    int maxDepth = PathIntegratorRandDetail::kDefaultMaxPathDepth;
     int rrMinDepth = PathIntegratorRandDetail::kRussianRouletteStartDepth;
     if (params != nullptr) {
         if (params->maxPathDepth > 0) {
             maxDepth = params->maxPathDepth;
+        } else if (params->maxPathDepth == 0) {
+            maxDepth = PathIntegratorRandDetail::kUnlimitedPathDepth;
         }
         if (params->russianRouletteMinDepth >= 0) {
             rrMinDepth = params->russianRouletteMinDepth;
@@ -120,6 +121,7 @@ PATH_INTEGRATOR_RAND_FN Vec3 tracePathRandFromHit(
     Vec3 currentOrigin = rayOrigin;
     Vec3 currentDir = rayDir;
     MeshHit currentHit = hit;
+    float etaMedium = PathIntegratorRandDetail::kAirIor;
 
     for (int depth = 0; depth < maxDepth; ++depth) {
         const Vec3 position = vecEvalRay(currentOrigin, currentDir, currentHit.t);
@@ -127,75 +129,77 @@ PATH_INTEGRATOR_RAND_FN Vec3 tracePathRandFromHit(
         const Vec3 wo = vecScale3(currentDir, -1.0f);
         const MaterialGpu material = lightFetchMaterial(scene, currentHit.triangleIndex);
 
-        const Vec3 emission = pathIntegratorRandEmission(material);
-        radiance = vecAdd3(radiance, vecMake3(
-            throughput.x * emission.x,
-            throughput.y * emission.y,
-            throughput.z * emission.z));
+        radiance = vecAdd3(radiance, vecMul3(throughput, pathIntegratorRandEmission(material)));
 
-        const Vec3 direct = pathIntegratorRandEvaluateEnvironmentNee(
-            position, normal, wo, material, scene, env, params, rng);
-        radiance = vecAdd3(radiance, vecMake3(
-            throughput.x * direct.x,
-            throughput.y * direct.y,
-            throughput.z * direct.z));
+        radiance = vecAdd3(
+            radiance,
+            vecMul3(
+                throughput,
+                pathIntegratorRandEvaluateEnvironmentNee(
+                    position,
+                    normal,
+                    wo,
+                    material,
+                    etaMedium,
+                    PathIntegratorRandDetail::kDefaultWavelengthNm,
+                    scene,
+                    env,
+                    params,
+                    rng)));
 
-        const BrdfType brdfType = brdfForMaterial(material);
-        const BrdfContext ctx{normal, wo, material};
+        const BrdfContext ctx{normal, wo, material, etaMedium, PathIntegratorRandDetail::kDefaultWavelengthNm};
 
         float u1 = 0.0f;
         float u2 = 0.0f;
         rand02(rng, u1, u2);
-        const BrdfSampleResult sample = brdfSample(brdfType, ctx, u1, u2);
+        const BrdfSampleResult sample = brdfSample(ctx, u1, u2);
         if (!sample.valid || sample.pdf <= PathIntegratorRandDetail::kMinPdf) {
             break;
         }
 
-        const Vec3 bsdfValue = brdfEval(brdfType, ctx, sample.direction);
-        if (sample.transmitted) {
-            const float cosTheta = vecAbs(vecDot3(normal, sample.direction));
-            throughput = vecMake3(
-                throughput.x * bsdfValue.x * cosTheta / sample.pdf,
-                throughput.y * bsdfValue.y * cosTheta / sample.pdf,
-                throughput.z * bsdfValue.z * cosTheta / sample.pdf);
-        } else {
-            const float cosTheta = vecMax2(0.0f, vecDot3(normal, sample.direction));
-            throughput = vecMake3(
-                throughput.x * bsdfValue.x * cosTheta / sample.pdf,
-                throughput.y * bsdfValue.y * cosTheta / sample.pdf,
-                throughput.z * bsdfValue.z * cosTheta / sample.pdf);
+        const Vec3 bsdfValue = brdfEval(ctx, sample.direction);
+        throughput = brdfApplyThroughput(throughput, ctx, sample, bsdfValue);
+
+        const float throughputLuminance = brdfThroughputLuminance(throughput);
+        if (!isfinite(throughputLuminance) || throughputLuminance <= 0.0f || throughputLuminance > 1.0e8f) {
+            break;
         }
 
         if (depth >= rrMinDepth) {
             const float survivalProb = vecMin2(
                 PathIntegratorRandDetail::kMaxRussianRouletteProb,
-                vecMax2(brdfThroughputLuminance(throughput), 0.05f));
+                vecMax2(throughputLuminance, 0.05f));
             if (rand01(rng) > survivalProb) {
                 break;
             }
             throughput = vecScale3(throughput, 1.0f / survivalProb);
         }
 
+        etaMedium = sample.nextMediumEta;
+
+        const float continuationBias = vecMax2(
+            PathIntegratorRandDetail::kShadowBias,
+            PathIntegratorRandDetail::kRelativeShadowBias * currentHit.t);
+
         if (sample.transmitted) {
-            currentOrigin = vecSub3(position, vecScale3(normal, PathIntegratorRandDetail::kShadowBias));
+            currentOrigin = vecSub3(position, vecScale3(normal, continuationBias));
         } else {
-            currentOrigin = vecAdd3(position, vecScale3(normal, PathIntegratorRandDetail::kShadowBias));
+            currentOrigin = vecAdd3(position, vecScale3(normal, continuationBias));
         }
         currentDir = sample.direction;
         currentHit = meshAccelTraceRay(
             currentOrigin,
             currentDir,
             scene,
-            PathIntegratorRandDetail::kShadowBias,
+            continuationBias,
             PathIntegratorRandDetail::kRayTMax);
         if (!currentHit.hit) {
             const Vec3 envRadiance = lightEvalEnvironmentOrBackground(env, params, currentDir);
             const float lightPdf = lightPdfEnvironmentOrBackground(env, params, currentDir);
             const float misWeight = misBalanceWeight(sample.pdf, lightPdf);
-            radiance = vecAdd3(radiance, vecMake3(
-                throughput.x * envRadiance.x * misWeight,
-                throughput.y * envRadiance.y * misWeight,
-                throughput.z * envRadiance.z * misWeight));
+            radiance = vecAdd3(
+                radiance,
+                vecMul3(throughput, vecScale3(envRadiance, misWeight)));
             break;
         }
     }

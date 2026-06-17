@@ -11,6 +11,8 @@ constexpr int kMinMaxSamplesPerPixel = 0;
 constexpr int kMaxMaxSamplesPerPixel = 1'000'000;
 constexpr int kMinPreviewStepsPerLevel = 0;
 constexpr int kMaxPreviewStepsPerLevel = 8;
+constexpr int kMinRussianRouletteMinDepth = 0;
+constexpr int kMaxRussianRouletteMinDepth = 64;
 constexpr float kMinCreaseAngleDeg = 0.0f;
 constexpr float kMaxCreaseAngleDeg = 180.0f;
 constexpr float kMinEnvironmentIntensity = 0.0f;
@@ -23,6 +25,7 @@ SceneModel::SceneModel(QObject* parent)
     , m_renderSize(AppSettings::instance().renderSize())
     , m_maxSamplesPerPixel(AppSettings::instance().maxSamplesPerPixel())
     , m_previewStepsPerLevel(AppSettings::instance().previewStepsPerLevel())
+    , m_russianRouletteMinDepth(AppSettings::instance().russianRouletteMinDepth())
     , m_accelBvhColor(AppSettings::instance().accelBvhColor())
     , m_creaseAngleDeg(AppSettings::instance().creaseAngleDeg())
     , m_environmentHdrPath(AppSettings::instance().environmentHdrPath())
@@ -104,6 +107,23 @@ void SceneModel::setPreviewStepsPerLevel(int value)
     m_previewStepsPerLevel = clamped;
     AppSettings::instance().setPreviewStepsPerLevel(clamped);
     emit previewStepsPerLevelChanged(m_previewStepsPerLevel);
+}
+
+int SceneModel::russianRouletteMinDepth() const
+{
+    return m_russianRouletteMinDepth;
+}
+
+void SceneModel::setRussianRouletteMinDepth(int value)
+{
+    const int clamped = clampRussianRouletteMinDepth(value);
+    if (m_russianRouletteMinDepth == clamped) {
+        return;
+    }
+
+    m_russianRouletteMinDepth = clamped;
+    AppSettings::instance().setRussianRouletteMinDepth(clamped);
+    emit russianRouletteMinDepthChanged(m_russianRouletteMinDepth);
 }
 
 MeshAccelBoundsOverlayMode SceneModel::boundsOverlayMode() const
@@ -307,6 +327,17 @@ int SceneModel::clampPreviewSteps(int value)
     }
     if (value > kMaxPreviewStepsPerLevel) {
         return kMaxPreviewStepsPerLevel;
+    }
+    return value;
+}
+
+int SceneModel::clampRussianRouletteMinDepth(int value)
+{
+    if (value < kMinRussianRouletteMinDepth) {
+        return kMinRussianRouletteMinDepth;
+    }
+    if (value > kMaxRussianRouletteMinDepth) {
+        return kMaxRussianRouletteMinDepth;
     }
     return value;
 }

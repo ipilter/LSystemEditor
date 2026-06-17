@@ -4,6 +4,7 @@
 
 #include <cmath>
 #include <cctype>
+#include <cstdint>
 #include <string>
 
 namespace {
@@ -50,6 +51,30 @@ bool trySymbolFloat(const Symbol& sym, size_t argIndex, float& outValue)
     }
     outValue = static_cast<float>(sym.args[argIndex]->number_value);
     return true;
+}
+
+bool trySymbolMaterialId(const Symbol& sym, std::string& outId)
+{
+    if (sym.args.empty() || !sym.args[0]) {
+        return false;
+    }
+
+    const Expr& arg = *sym.args[0];
+    if (arg.kind == Expr::Kind::Ident) {
+        outId = arg.ident;
+        return true;
+    }
+
+    if (arg.kind == Expr::Kind::Number) {
+        const double value = arg.number_value;
+        if (value < 0.0 || value != std::floor(value)) {
+            return false;
+        }
+        outId = std::to_string(static_cast<std::uint64_t>(value));
+        return true;
+    }
+
+    return false;
 }
 
 struct ForwardStep
@@ -196,6 +221,8 @@ public:
 
             float arg = 0.0f;
             const bool hasArg = trySymbolFloat(sym, 0, arg);
+            std::string materialId;
+            const bool hasMaterialId = trySymbolMaterialId(sym, materialId);
 
             if (symbolNameIs(sym, "Yaw") && hasArg) {
                 applyYaw(m_pose, arg);
@@ -212,8 +239,8 @@ public:
                 continue;
             }
 
-            if (symbolNameIs(sym, "Mat") && hasArg) {
-                m_currentMaterialId = static_cast<uint32_t>(arg);
+            if (symbolNameIs(sym, "Mat") && hasMaterialId) {
+                m_currentMaterialId = std::move(materialId);
                 continue;
             }
         }
@@ -244,7 +271,7 @@ private:
     TurtlePose m_pose;
     std::vector<TurtleState> m_currentStates;
     std::vector<BranchFrame> m_branchStack;
-    uint32_t m_currentMaterialId = 0;
+    std::string m_currentMaterialId = "0";
 };
 
 } // namespace

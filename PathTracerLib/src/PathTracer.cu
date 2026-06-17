@@ -2,11 +2,34 @@
 #include "MeshAccel/MeshAccelScene.cuh"
 #include "PathIntegratorRandCore.h"
 #include "PathTracerCuda.h"
+#include "Spectral/SpectralState.h"
 
 #include <cuda_runtime.h>
 #include <vector_types.h>
 
 #include <cstdint>
+
+__constant__ SpectralStateGpu kSpectralState{};
+
+__device__ Rgb2SpecGpu spectralActiveModel()
+{
+    Rgb2SpecGpu model{};
+    model.scale = kSpectralState.rgb2specScale;
+    model.data = kSpectralState.rgb2specData;
+    model.res = kSpectralState.rgb2specRes;
+    model.whiteNormR = kSpectralState.whiteNormR;
+    model.whiteNormG = kSpectralState.whiteNormG;
+    model.whiteNormB = kSpectralState.whiteNormB;
+    return model;
+}
+
+extern "C" cudaError_t spectralUploadStateToSymbol(const SpectralStateGpu* hostState)
+{
+    if (hostState == nullptr) {
+        return cudaErrorInvalidValue;
+    }
+    return cudaMemcpyToSymbol(kSpectralState, hostState, sizeof(SpectralStateGpu));
+}
 
 namespace {
 
@@ -17,6 +40,15 @@ __device__ Vec3 float3ToVec3(float3 v)
 
 __device__ Vec3 clampSampleFirefly(Vec3 radiance)
 {
+    if (!isfinite(radiance.x) || !isfinite(radiance.y) || !isfinite(radiance.z)) {
+        return vecMake3(0.0f, 0.0f, 0.0f);
+    }
+
+    radiance = vecMake3(
+        vecMax2(0.0f, radiance.x),
+        vecMax2(0.0f, radiance.y),
+        vecMax2(0.0f, radiance.z));
+
     constexpr float kMaxLuminance = 100.0f;
     const float luminance = radiance.x * 0.2126f + radiance.y * 0.7152f + radiance.z * 0.0722f;
     if (luminance <= kMaxLuminance) {
@@ -52,14 +84,13 @@ __device__ void tracePixelRadiance(
     float3 rdFloat{};
     cameraPrimaryRay(camera, u, v, roFloat, rdFloat);
 
-    Vec3 radiance = tracePathRand(
+    outRadiance = clampSampleFirefly(tracePathRand(
         float3ToVec3(roFloat),
         float3ToVec3(rdFloat),
         scene,
         params,
         env,
-        &rng);
-    outRadiance = clampSampleFirefly(radiance);
+        &rng));
 }
 
 __global__ void sampleKernel(

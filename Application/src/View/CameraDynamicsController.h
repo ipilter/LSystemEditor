@@ -12,9 +12,9 @@ class CameraDynamicsController
 public:
     static constexpr float kMass = 1.0f;
     static constexpr float kInertia = 1.0f;
-    static constexpr float kVelocityEpsilon = 1.0e-5f;
-    static constexpr float kPositionEpsilon = 1.0e-6f;
-    static constexpr float kAngleEpsilon = 1.0e-7f;
+    static constexpr float kVelocityEpsilon = 1.0e-3f;
+    static constexpr float kPositionEpsilon = 1.0e-4f;
+    static constexpr float kAngleEpsilon = 1.0e-3f;
 
     void applySettings(const CameraDynamicsSettings& settings)
     {

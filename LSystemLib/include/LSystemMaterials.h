@@ -1,19 +1,10 @@
 #pragma once
 
-#include <cstdint>
+#include <string>
 
-/** @brief BRDF kind for `Mat(id) = Type { ... }` declarations. Values match PathTracer `MaterialKind`. */
-enum class MaterialKind : std::uint8_t
-{
-    Diffuse = 0,
-    Metal = 1,
-    Glass = 2,
-};
-
-/** @brief Parsed material properties from `Mat(id) = Type { ... }` lines. */
+/** @brief Parsed material properties from `Mat(id) = { ... }` lines. */
 struct MaterialEntry
 {
-    MaterialKind kind = MaterialKind::Diffuse;
     float r = 0.8f;
     float g = 0.8f;
     float b = 0.8f;
@@ -22,12 +13,18 @@ struct MaterialEntry
     /** @brief Emissive strength multiplier on base color (0 = non-emissive). */
     float emission = 0.f;
     float ior = 1.5f;
-    float transmission = 0.f;
+    /** @brief Transmission in [0, 1]; 0 = opaque, 1 = fully transmissive. */
+    float transmission = 0.0f;
+    /** @brief Thin shell in [0, 1]; 0 = thick, 1 = thin translucency. */
+    float thin = 0.0f;
+    /** @brief Subsurface influence in [0, 1]. */
+    float subsurface = 0.0f;
 };
 
 /** @brief One material definition collected during L-system parse. */
 struct MaterialDefinition
 {
-    std::uint32_t id = 0;
+    /** @brief Material name or numeric id as string (e.g. `"Glass"`, `"0"`). */
+    std::string id;
     MaterialEntry entry;
 };

@@ -28,11 +28,14 @@ private:
     void applyMaxSamplesFromSpinBox();
     void onPreviewStepsSpinBoxChanged();
     void applyPreviewStepsFromSpinBox();
+    void onRussianRouletteMinDepthSpinBoxChanged();
+    void syncRussianRouletteMinDepthSpinBox();
     void onBoundsOverlayComboBoxChanged();
     void onStartButtonClicked();
     void onStopButtonClicked();
     void onSettingsButtonClicked();
     void onAddPrimitiveButtonClicked();
+    void onLsystemLoadButtonClicked();
     void onResetSceneButtonClicked();
     void onExportSceneButtonClicked();
     void onEnvironmentHdrBrowseClicked();
@@ -51,6 +54,8 @@ private:
     void syncMaxSamplesSpinBox();
     void syncPreviewStepsSpinBox();
     void syncBoundsOverlayComboBox();
+    bool loadLsystemFromFile(const QString& path);
+    void restoreLsystemFromSettings();
 
     SceneModel* m_model = nullptr;
     MainView* m_view = nullptr;

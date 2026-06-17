@@ -39,7 +39,8 @@ MaterialGpu toMaterialGpu(const MaterialEntry& entry)
     material.emission = entry.emission;
     material.ior = entry.ior;
     material.transmission = entry.transmission;
-    material.kind = static_cast<MaterialKindGpu>(static_cast<std::uint8_t>(entry.kind));
+    material.thin = entry.thin;
+    material.subsurface = entry.subsurface;
     return material;
 }
 
@@ -54,14 +55,15 @@ MaterialGpu defaultMaterialGpu()
     material.emission = 0.0f;
     material.ior = 1.5f;
     material.transmission = 0.0f;
-    material.kind = 0;
+    material.thin = 0.0f;
+    material.subsurface = 0.0f;
     return material;
 }
 
 void buildMaterialTable(
     const std::vector<MaterialDefinition>& definitions,
     std::vector<MaterialGpu>& outMaterials,
-    std::unordered_map<uint32_t, uint32_t>& outLSystemIdToIndex)
+    std::unordered_map<std::string, uint32_t>& outLSystemIdToIndex)
 {
     outMaterials.clear();
     outLSystemIdToIndex.clear();
@@ -76,21 +78,23 @@ void buildMaterialTable(
         outMaterials.push_back(toMaterialGpu(definition.entry));
     }
 
-    if (outLSystemIdToIndex.find(0) == outLSystemIdToIndex.end()) {
+    if (outLSystemIdToIndex.find("0") == outLSystemIdToIndex.end()) {
         const uint32_t index = static_cast<uint32_t>(outMaterials.size());
-        outLSystemIdToIndex.emplace(0, index);
+        outLSystemIdToIndex.emplace("0", index);
         outMaterials.push_back(defaultMaterialGpu());
     }
 }
 
-uint32_t remapMaterialId(const std::unordered_map<uint32_t, uint32_t>& table, const uint32_t lsystemId)
+uint32_t remapMaterialId(
+    const std::unordered_map<std::string, uint32_t>& table,
+    const std::string& lsystemId)
 {
     const auto it = table.find(lsystemId);
     if (it != table.end()) {
         return it->second;
     }
 
-    const auto fallback = table.find(0);
+    const auto fallback = table.find("0");
     if (fallback != table.end()) {
         return fallback->second;
     }
@@ -124,7 +128,7 @@ bool ProceduralMeshBuilder::buildHostMesh(
         return false;
     }
 
-    std::unordered_map<uint32_t, uint32_t> lsystemIdToIndex;
+    std::unordered_map<std::string, uint32_t> lsystemIdToIndex;
     buildMaterialTable(eval.materials, outMesh.materials, lsystemIdToIndex);
 
     for (const TurtleSegment& segment : turtleOutput.segments) {

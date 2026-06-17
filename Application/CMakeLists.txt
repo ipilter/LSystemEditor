@@ -11,6 +11,18 @@ set(PATHTRACER_MESH_BUILDER_SOURCES
     "${APPLICATION_SRC_DIR}/Procedural/ProceduralMeshBuilder.cpp")
 
 add_library(pathtracer_mesh_builder STATIC ${PATHTRACER_MESH_BUILDER_SOURCES})
+
+file(GLOB_RECURSE PATHTRACER_MESH_BUILDER_HEADERS CONFIGURE_DEPENDS
+    "${APPLICATION_SRC_DIR}/MeshBuilder/*.h"
+    "${APPLICATION_SRC_DIR}/Procedural/*.h")
+
+target_sources(pathtracer_mesh_builder PRIVATE ${PATHTRACER_MESH_BUILDER_HEADERS})
+set_source_files_properties(${PATHTRACER_MESH_BUILDER_HEADERS} PROPERTIES HEADER_FILE_ONLY TRUE)
+
+source_group(TREE "${APPLICATION_SRC_DIR}" PREFIX "" FILES
+    ${PATHTRACER_MESH_BUILDER_SOURCES}
+    ${PATHTRACER_MESH_BUILDER_HEADERS})
+
 target_include_directories(pathtracer_mesh_builder PUBLIC
     "${APPLICATION_SRC_DIR}"
     "${APPLICATION_SRC_DIR}/MeshBuilder"

@@ -40,11 +40,13 @@ public:
     QSpinBox* renderHeightSpinBox() const;
     QSpinBox* maxSamplesSpinBox() const;
     QSpinBox* previewStepsSpinBox() const;
+    QSpinBox* russianRouletteMinDepthSpinBox() const;
     QComboBox* boundsOverlayComboBox() const;
     QPushButton* startButton() const;
     QPushButton* stopButton() const;
     QPushButton* settingsButton() const;
     QPushButton* addPrimitiveButton() const;
+    QPushButton* lsystemLoadButton() const;
     QPushButton* resetSceneButton() const;
     QPushButton* exportSceneButton() const;
     QPlainTextEdit* lsystemEdit() const;
@@ -79,6 +81,7 @@ private:
     QSpinBox* m_renderHeightSpinBox = nullptr;
     QSpinBox* m_maxSamplesSpinBox = nullptr;
     QSpinBox* m_previewStepsSpinBox = nullptr;
+    QSpinBox* m_russianRouletteMinDepthSpinBox = nullptr;
     QComboBox* m_boundsOverlayComboBox = nullptr;
     QLabel* m_iterationLabel = nullptr;
     QLabel* m_renderStateLabel = nullptr;
@@ -86,6 +89,7 @@ private:
     QPushButton* m_stopButton = nullptr;
     QPushButton* m_settingsButton = nullptr;
     QPushButton* m_addPrimitiveButton = nullptr;
+    QPushButton* m_lsystemLoadButton = nullptr;
     QPushButton* m_resetSceneButton = nullptr;
     QPushButton* m_exportSceneButton = nullptr;
     QPlainTextEdit* m_lsystemEdit = nullptr;

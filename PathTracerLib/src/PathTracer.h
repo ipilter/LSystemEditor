@@ -90,6 +90,10 @@ public:
     void setEnvironmentIntensity(float intensity);
     float environmentIntensity() const;
 
+    /// Minimum path depth before Russian roulette termination (0 = from first bounce).
+    void setRussianRouletteMinDepth(int depth);
+    int russianRouletteMinDepth() const;
+
     void rebuildMeshBoundsMesh(const QColor& boundsColor);
     const MeshAccelBoundsMesh& meshBoundsMesh() const;
 

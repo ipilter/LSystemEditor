@@ -249,6 +249,10 @@ void OpenGLViewportWidget::setSceneModel(SceneModel* model)
         emitRenderState();
     });
 
+    connect(m_model, &SceneModel::russianRouletteMinDepthChanged, this, [this](int depth) {
+        m_pathTracer.setRussianRouletteMinDepth(depth);
+    });
+
     connect(m_model, &SceneModel::boundsOverlayModeChanged, this, [this](MeshAccelBoundsOverlayMode) {
         update();
     });
@@ -824,6 +828,7 @@ void OpenGLViewportWidget::recreateGpuBuffers()
 
     m_pathTracer.setMaxSamplesPerPixel(m_model->maxSamplesPerPixel());
     m_pathTracer.setPreviewStepsPerLevel(m_model->previewStepsPerLevel());
+    m_pathTracer.setRussianRouletteMinDepth(m_model->russianRouletteMinDepth());
     m_pathTracer.setEnvironmentHdrPath(m_model->environmentHdrPath());
     m_pathTracer.setPhysicalCamera(m_model->fStop(), m_model->shutterSpeedSeconds(), m_model->iso());
 

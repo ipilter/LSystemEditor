@@ -10,7 +10,7 @@ struct PreviewLevelDimensions
     int downscale = 1;
 };
 
-constexpr int kPreviewMaxPathDepth = 2;
+constexpr int kPreviewMaxPathDepth = 4;
 
 /// Downscale factor for preview level `levelIndex` (0 = coarsest) when `previewLevelCount` levels exist.
 /// Level 0 is 1/2^N, level N-1 is 1/2 of full resolution.

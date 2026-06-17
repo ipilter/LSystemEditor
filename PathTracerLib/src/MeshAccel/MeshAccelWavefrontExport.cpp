@@ -12,22 +12,14 @@ namespace {
 
 constexpr int kFloatPrecision = 6;
 
-const char* materialKindLabel(MaterialKindGpu kind)
+float clamp01(float value)
 {
-    switch (kind) {
-    case 1:
-        return "Metal";
-    case 2:
-        return "Glass";
-    case 0:
-    default:
-        return "Diffuse";
-    }
+    return value < 0.0f ? 0.0f : (value > 1.0f ? 1.0f : value);
 }
 
 float specularExponentFromRoughness(float roughness)
 {
-    const float clamped = roughness < 0.0f ? 0.0f : (roughness > 1.0f ? 1.0f : roughness);
+    const float clamped = clamp01(roughness);
     return 10.0f + (1.0f - clamped) * 990.0f;
 }
 
@@ -35,46 +27,24 @@ void writeMaterialEntry(QTextStream& out, uint32_t materialIndex, const Material
 {
     const float ns = specularExponentFromRoughness(material.roughness);
     const float emissionScale = material.emission > 0.0f ? material.emission : 0.0f;
+    const float opacity = 1.0f - clamp01(material.transmission);
 
     out << "newmtl mat_" << materialIndex << '\n';
-    out << "# PathTracer kind: " << materialKindLabel(material.kind) << '\n';
+    out << "# PathTracer r g b: " << material.r << ' ' << material.g << ' ' << material.b << '\n';
     out << "# PathTracer roughness: " << material.roughness << '\n';
     out << "# PathTracer metallic: " << material.metallic << '\n';
     out << "# PathTracer transmission: " << material.transmission << '\n';
+    out << "# PathTracer thin: " << material.thin << '\n';
+    out << "# PathTracer ior: " << material.ior << '\n';
+    out << "# PathTracer subsurface: " << material.subsurface << '\n';
 
-    switch (material.kind) {
-    case 1: {
-        const float kdScale = 0.04f * (1.0f - material.metallic);
-        out << "Ka " << material.r * 0.2f << ' ' << material.g * 0.2f << ' ' << material.b * 0.2f << '\n';
-        out << "Kd " << material.r * kdScale << ' ' << material.g * kdScale << ' ' << material.b * kdScale << '\n';
-        out << "Ks " << material.r << ' ' << material.g << ' ' << material.b << '\n';
-        out << "Ns " << ns << '\n';
-        out << "Ni " << material.ior << '\n';
-        out << "d 1.0\n";
-        break;
-    }
-    case 2: {
-        const float alpha = material.transmission < 0.0f ? 0.0f
-            : (material.transmission > 1.0f ? 1.0f : material.transmission);
-        const float opacity = 1.0f - alpha;
-        out << "Ka " << material.r * 0.2f << ' ' << material.g * 0.2f << ' ' << material.b * 0.2f << '\n';
-        out << "Kd " << material.r << ' ' << material.g << ' ' << material.b << '\n';
-        out << "Ks 0.04 0.04 0.04\n";
-        out << "Ns " << ns << '\n';
-        out << "Ni " << material.ior << '\n';
-        out << "d " << opacity << '\n';
-        break;
-    }
-    case 0:
-    default:
-        out << "Ka " << material.r * 0.2f << ' ' << material.g * 0.2f << ' ' << material.b * 0.2f << '\n';
-        out << "Kd " << material.r << ' ' << material.g << ' ' << material.b << '\n';
-        out << "Ks 0.04 0.04 0.04\n";
-        out << "Ns " << ns << '\n';
-        out << "Ni " << material.ior << '\n';
-        out << "d 1.0\n";
-        break;
-    }
+    out << "Ka " << material.r * 0.2f << ' ' << material.g * 0.2f << ' ' << material.b * 0.2f << '\n';
+    out << "Kd " << material.r << ' ' << material.g << ' ' << material.b << '\n';
+    out << "Ks " << material.r * material.metallic << ' ' << material.g * material.metallic << ' '
+        << material.b * material.metallic << '\n';
+    out << "Ns " << ns << '\n';
+    out << "Ni " << material.ior << '\n';
+    out << "d " << opacity << '\n';
 
     if (emissionScale > 0.0f) {
         out << "Ke " << material.r * emissionScale << ' ' << material.g * emissionScale << ' '

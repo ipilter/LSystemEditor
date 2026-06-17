@@ -23,6 +23,9 @@ constexpr int kMinMaxSamplesPerPixel = 0;
 constexpr int kMaxMaxSamplesPerPixel = 1'000'000;
 constexpr int kMinPreviewStepsPerLevel = 0;
 constexpr int kMaxPreviewStepsPerLevel = 128;
+constexpr int kMinRussianRouletteMinDepth = 0;
+constexpr int kMaxRussianRouletteMinDepth = 64;
+constexpr int kDefaultRussianRouletteMinDepth = 3;
 constexpr const char* kSettingsOrg = "PathTracer";
 constexpr const char* kSettingsApp = "pathtracer";
 constexpr const char* kDebounceGroup = "debounce";
@@ -33,6 +36,7 @@ constexpr const char* kClearColorGreenKey = "clearColorGreen";
 constexpr const char* kClearColorBlueKey = "clearColorBlue";
 constexpr const char* kMaxSamplesPerPixelKey = "maxSamplesPerPixel";
 constexpr const char* kPreviewStepsPerLevelKey = "previewStepsPerLevel";
+constexpr const char* kRussianRouletteMinDepthKey = "russianRouletteMinDepth";
 constexpr float kDefaultCreaseAngleDeg = 50.0f;
 constexpr float kMinCreaseAngleDeg = 0.0f;
 constexpr float kMaxCreaseAngleDeg = 180.0f;
@@ -40,6 +44,7 @@ constexpr float kMinEnvironmentIntensity = 0.0f;
 constexpr float kMaxEnvironmentIntensity = 100.0f;
 constexpr const char* kCreaseAngleDegKey = "creaseAngleDeg";
 constexpr const char* kEnvironmentHdrPathKey = "environmentHdrPath";
+constexpr const char* kLsystemFilePathKey = "lsystemFilePath";
 constexpr const char* kEnvironmentIntensityKey = "environmentIntensity";
 constexpr const char* kFStopKey = "fStop";
 constexpr const char* kShutterSpeedSecondsKey = "shutterSpeedSeconds";
@@ -231,6 +236,22 @@ void AppSettings::setPreviewStepsPerLevel(int value)
     save();
 }
 
+int AppSettings::russianRouletteMinDepth() const
+{
+    return m_russianRouletteMinDepth;
+}
+
+void AppSettings::setRussianRouletteMinDepth(int value)
+{
+    const int clamped = clampRussianRouletteMinDepth(value);
+    if (m_russianRouletteMinDepth == clamped) {
+        return;
+    }
+
+    m_russianRouletteMinDepth = clamped;
+    save();
+}
+
 QColor AppSettings::accelBvhColor() const
 {
     return m_accelBvhColor;
@@ -275,6 +296,22 @@ void AppSettings::setEnvironmentHdrPath(const QString& path)
     }
 
     m_environmentHdrPath = normalized;
+    save();
+}
+
+QString AppSettings::lsystemFilePath() const
+{
+    return m_lsystemFilePath;
+}
+
+void AppSettings::setLsystemFilePath(const QString& path)
+{
+    const QString normalized = path.trimmed();
+    if (m_lsystemFilePath == normalized) {
+        return;
+    }
+
+    m_lsystemFilePath = normalized;
     save();
 }
 
@@ -485,6 +522,17 @@ int AppSettings::clampPreviewStepsPerLevel(int value)
     return value;
 }
 
+int AppSettings::clampRussianRouletteMinDepth(int value)
+{
+    if (value < kMinRussianRouletteMinDepth) {
+        return kMinRussianRouletteMinDepth;
+    }
+    if (value > kMaxRussianRouletteMinDepth) {
+        return kMaxRussianRouletteMinDepth;
+    }
+    return value;
+}
+
 CameraDynamicsSettings AppSettings::clampCameraDynamicsSettings(const CameraDynamicsSettings& settings)
 {
     CameraDynamicsSettings clamped = settings;
@@ -571,6 +619,15 @@ void AppSettings::load()
         }
     }
 
+    const QVariant rrDepthValue = settings.value(kRussianRouletteMinDepthKey);
+    if (rrDepthValue.isValid()) {
+        bool ok = false;
+        const int rrDepth = rrDepthValue.toInt(&ok);
+        if (ok) {
+            m_russianRouletteMinDepth = clampRussianRouletteMinDepth(rrDepth);
+        }
+    }
+
     auto loadColor = [&settings](const char* redKey, const char* greenKey, const char* blueKey, const QColor& fallback) {
         const QVariant redValue = settings.value(redKey);
         const QVariant greenValue = settings.value(greenKey);
@@ -626,6 +683,11 @@ void AppSettings::load()
     const QVariant environmentHdrPathValue = settings.value(kEnvironmentHdrPathKey);
     if (environmentHdrPathValue.isValid()) {
         m_environmentHdrPath = environmentHdrPathValue.toString().trimmed();
+    }
+
+    const QVariant lsystemFilePathValue = settings.value(kLsystemFilePathKey);
+    if (lsystemFilePathValue.isValid()) {
+        m_lsystemFilePath = lsystemFilePathValue.toString().trimmed();
     }
 
     const QVariant environmentIntensityValue = settings.value(kEnvironmentIntensityKey);
@@ -721,11 +783,13 @@ void AppSettings::save()
     settings.setValue(kClearColorBlueKey, m_clearColor.blue());
     settings.setValue(kMaxSamplesPerPixelKey, m_maxSamplesPerPixel);
     settings.setValue(kPreviewStepsPerLevelKey, m_previewStepsPerLevel);
+    settings.setValue(kRussianRouletteMinDepthKey, m_russianRouletteMinDepth);
     settings.setValue(kAccelBvhColorRedKey, m_accelBvhColor.red());
     settings.setValue(kAccelBvhColorGreenKey, m_accelBvhColor.green());
     settings.setValue(kAccelBvhColorBlueKey, m_accelBvhColor.blue());
     settings.setValue(kCreaseAngleDegKey, static_cast<double>(m_creaseAngleDeg));
     settings.setValue(kEnvironmentHdrPathKey, m_environmentHdrPath);
+    settings.setValue(kLsystemFilePathKey, m_lsystemFilePath);
     settings.setValue(kEnvironmentIntensityKey, static_cast<double>(m_environmentIntensity));
     settings.setValue(kFStopKey, static_cast<double>(m_fStop));
     settings.setValue(kShutterSpeedSecondsKey, static_cast<double>(m_shutterSpeedSeconds));

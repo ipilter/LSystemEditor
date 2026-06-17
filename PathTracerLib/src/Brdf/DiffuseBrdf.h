@@ -18,9 +18,9 @@ struct DiffuseBrdf : BrdfBase<DiffuseBrdf>
             return vecMake3(0.0f, 0.0f, 0.0f);
         }
 
-        const Vec3 baseColor = brdfBaseColor(ctx.material);
-        const float diffuseWeight = (1.0f - ctx.material.metallic) * (1.0f - ctx.material.transmission);
-        return vecScale3(baseColor, diffuseWeight * BrdfDetail::kInvPi);
+        const Vec3 base = vecMake3(ctx.material.r, ctx.material.g, ctx.material.b);
+        const float diffuseWeight = (1.0f - ctx.material.metallic) * BrdfDetail::kInvPi;
+        return vecScale3(base, diffuseWeight);
     }
 
     DIFFUSE_BRDF_FN BrdfSampleResult sampleImpl(const BrdfContext& ctx, float u1, float u2) const
@@ -35,6 +35,7 @@ struct DiffuseBrdf : BrdfBase<DiffuseBrdf>
         result.direction = brdfLocalToWorld(local, ctx.normal, tangent, bitangent);
         result.pdf = pdfImpl(ctx, result.direction);
         result.valid = vecDot3(ctx.normal, result.direction) > 0.0f && result.pdf > BrdfDetail::kMinPdf;
+        result.nextMediumEta = ctx.etaMedium;
         return result;
     }
 

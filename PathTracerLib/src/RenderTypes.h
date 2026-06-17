@@ -18,6 +18,6 @@ struct RenderParamsGpu
     float backgroundG = 10.0f / 255.0f;
     float backgroundB = 10.0f / 255.0f;
     float environmentIntensity = 1.0f;
-    int maxPathDepth = 8;
+    int maxPathDepth = 32;
     int russianRouletteMinDepth = 3;
 };

@@ -16,9 +16,6 @@ enum MeshBvhNodeFlags : uint32_t
     MeshBvhFlagLeaf = 1u << 0,
 };
 
-/** @brief BRDF kind stored on GPU materials (0=Diffuse, 1=Metal, 2=Glass). Matches LSystem `MaterialKind`. */
-using MaterialKindGpu = uint8_t;
-
 struct alignas(16) MaterialGpu
 {
     float r = 0.8f;
@@ -26,10 +23,14 @@ struct alignas(16) MaterialGpu
     float b = 0.8f;
     float roughness = 0.5f;
     float metallic = 0.0f;
-    float emission = 0.0f;
-    float ior = 1.5f;
+    /** @brief Transmission in [0, 1]; 0 = opaque, 1 = fully transmissive. */
     float transmission = 0.0f;
-    MaterialKindGpu kind = 0;
+    /** @brief Thin shell in [0, 1]; 0 = thick medium, 1 = thin-shell translucency. */
+    float thin = 0.0f;
+    float ior = 1.5f;
+    /** @brief Subsurface influence in [0, 1]. */
+    float subsurface = 0.0f;
+    float emission = 0.0f;
 };
 
 static_assert(sizeof(MaterialGpu) % alignof(MaterialGpu) == 0);

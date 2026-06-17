@@ -10,6 +10,7 @@
 #include "SettingsDialog.h"
 #include <QColorDialog>
 #include <QDialog>
+#include <QFile>
 #include <QFileDialog>
 #include <QPlainTextEdit>
 #include <QComboBox>
@@ -109,6 +110,7 @@ SceneController::SceneController(SceneModel* model, MainView* view, QObject* par
     syncRenderSpinBoxes();
     syncMaxSamplesSpinBox();
     syncPreviewStepsSpinBox();
+    syncRussianRouletteMinDepthSpinBox();
     syncBoundsOverlayComboBox();
     syncEnvironmentHdrPath();
     syncEnvironmentIntensitySpinBox();
@@ -116,12 +118,16 @@ SceneController::SceneController(SceneModel* model, MainView* view, QObject* par
     syncPhysicalCameraUi();
     updateExposureValueLabel();
     applyPhysicalCameraToViewport();
+    restoreLsystemFromSettings();
 
     connect(m_view->colorButton(), &QPushButton::clicked, this, &SceneController::onColorButtonClicked);
     connect(m_model, &SceneModel::clearColorChanged, this, &SceneController::onClearColorChanged);
     connect(m_model, &SceneModel::renderSizeChanged, this, &SceneController::onRenderSizeChanged);
     connect(m_model, &SceneModel::maxSamplesPerPixelChanged, this, [this](int) { syncMaxSamplesSpinBox(); });
     connect(m_model, &SceneModel::previewStepsPerLevelChanged, this, [this](int) { syncPreviewStepsSpinBox(); });
+    connect(m_model, &SceneModel::russianRouletteMinDepthChanged, this, [this](int) {
+        syncRussianRouletteMinDepthSpinBox();
+    });
     connect(m_model, &SceneModel::boundsOverlayModeChanged, this, [this](MeshAccelBoundsOverlayMode) {
         syncBoundsOverlayComboBox();
     });
@@ -129,6 +135,11 @@ SceneController::SceneController(SceneModel* model, MainView* view, QObject* par
     connect(m_view->renderHeightSpinBox(), &QSpinBox::valueChanged, this, &SceneController::onRenderSizeSpinBoxChanged);
     connect(m_view->maxSamplesSpinBox(), &QSpinBox::valueChanged, this, &SceneController::onMaxSamplesSpinBoxChanged);
     connect(m_view->previewStepsSpinBox(), &QSpinBox::valueChanged, this, &SceneController::onPreviewStepsSpinBoxChanged);
+    connect(
+        m_view->russianRouletteMinDepthSpinBox(),
+        &QSpinBox::valueChanged,
+        this,
+        &SceneController::onRussianRouletteMinDepthSpinBoxChanged);
     connect(
         m_view->boundsOverlayComboBox(),
         QOverload<int>::of(&QComboBox::currentIndexChanged),
@@ -141,6 +152,7 @@ SceneController::SceneController(SceneModel* model, MainView* view, QObject* par
     connect(m_view->stopButton(), &QPushButton::clicked, this, &SceneController::onStopButtonClicked);
     connect(m_view->settingsButton(), &QPushButton::clicked, this, &SceneController::onSettingsButtonClicked);
     connect(m_view->addPrimitiveButton(), &QPushButton::clicked, this, &SceneController::onAddPrimitiveButtonClicked);
+    connect(m_view->lsystemLoadButton(), &QPushButton::clicked, this, &SceneController::onLsystemLoadButtonClicked);
     connect(m_view->resetSceneButton(), &QPushButton::clicked, this, &SceneController::onResetSceneButtonClicked);
     connect(m_view->exportSceneButton(), &QPushButton::clicked, this, &SceneController::onExportSceneButtonClicked);
     connect(
@@ -270,6 +282,11 @@ void SceneController::applyPreviewStepsFromSpinBox()
     m_model->setPreviewStepsPerLevel(m_view->previewStepsSpinBox()->value());
 }
 
+void SceneController::onRussianRouletteMinDepthSpinBoxChanged()
+{
+    m_model->setRussianRouletteMinDepth(m_view->russianRouletteMinDepthSpinBox()->value());
+}
+
 void SceneController::onBoundsOverlayComboBoxChanged()
 {
     m_model->setBoundsOverlayMode(
@@ -314,6 +331,49 @@ void SceneController::onAddPrimitiveButtonClicked()
     instance.translation = dialog.translation();
     instance.rotationDeg = dialog.rotationDeg();
     m_model->addProceduralInstance(std::move(instance));
+}
+
+bool SceneController::loadLsystemFromFile(const QString& path)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        return false;
+    }
+
+    m_view->lsystemEdit()->setPlainText(QString::fromUtf8(file.readAll()));
+    AppSettings::instance().setLsystemFilePath(path);
+    AppLog::instance().info(QStringLiteral("L-system loaded from %1").arg(path));
+    return true;
+}
+
+void SceneController::restoreLsystemFromSettings()
+{
+    const QString path = AppSettings::instance().lsystemFilePath();
+    if (path.isEmpty() || !QFile::exists(path)) {
+        return;
+    }
+
+    if (!loadLsystemFromFile(path)) {
+        AppLog::instance().warning(
+            QStringLiteral("Failed to restore L-system from saved path: %1").arg(path));
+    }
+}
+
+void SceneController::onLsystemLoadButtonClicked()
+{
+    const QString path = QFileDialog::getOpenFileName(
+        m_view,
+        QStringLiteral("Load L-System"),
+        AppSettings::instance().lsystemFilePath(),
+        QStringLiteral("L-System Files (*.lsystem);;All Files (*)"));
+
+    if (path.isEmpty()) {
+        return;
+    }
+
+    if (!loadLsystemFromFile(path)) {
+        AppLog::instance().error(QStringLiteral("Failed to load L-system from %1").arg(path));
+    }
 }
 
 void SceneController::onResetSceneButtonClicked()
@@ -373,6 +433,13 @@ void SceneController::syncPreviewStepsSpinBox()
     m_view->previewStepsSpinBox()->blockSignals(true);
     m_view->previewStepsSpinBox()->setValue(m_model->previewStepsPerLevel());
     m_view->previewStepsSpinBox()->blockSignals(false);
+}
+
+void SceneController::syncRussianRouletteMinDepthSpinBox()
+{
+    m_view->russianRouletteMinDepthSpinBox()->blockSignals(true);
+    m_view->russianRouletteMinDepthSpinBox()->setValue(m_model->russianRouletteMinDepth());
+    m_view->russianRouletteMinDepthSpinBox()->blockSignals(false);
 }
 
 void SceneController::syncBoundsOverlayComboBox()

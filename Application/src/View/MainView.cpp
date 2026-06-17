@@ -36,6 +36,9 @@ constexpr int kDefaultMaxSamplesPerPixel = 1024;
 constexpr int kMinPreviewStepsPerLevel = 0;
 constexpr int kMaxPreviewStepsPerLevel = 4;
 constexpr int kDefaultPreviewStepsPerLevel = 1;
+constexpr int kMinRussianRouletteMinDepth = 0;
+constexpr int kMaxRussianRouletteMinDepth = 64;
+constexpr int kDefaultRussianRouletteMinDepth = 3;
 constexpr int kLogMaxBlockCount = 500;
 constexpr int kControlPanelMinWidth = 160;
 constexpr int kControlPanelInitialWidth = 220;
@@ -112,6 +115,18 @@ MainView::MainView(QWidget* parent)
             "Preview uses primary-ray-only shading for fast feedback."));
     previewRow->addWidget(m_previewStepsSpinBox);
     renderLayout->addLayout(previewRow);
+
+    auto* rrDepthRow = new QHBoxLayout();
+    rrDepthRow->addWidget(new QLabel(QStringLiteral("RR depth:"), renderGroup));
+    m_russianRouletteMinDepthSpinBox = new QSpinBox(renderGroup);
+    m_russianRouletteMinDepthSpinBox->setRange(kMinRussianRouletteMinDepth, kMaxRussianRouletteMinDepth);
+    m_russianRouletteMinDepthSpinBox->setValue(kDefaultRussianRouletteMinDepth);
+    m_russianRouletteMinDepthSpinBox->setToolTip(
+        QStringLiteral(
+            "Minimum path depth before Russian roulette may terminate a path. "
+            "Higher values keep paths alive longer (0 = from the first bounce)."));
+    rrDepthRow->addWidget(m_russianRouletteMinDepthSpinBox);
+    renderLayout->addLayout(rrDepthRow);
 
     auto* boundsOverlayRow = new QHBoxLayout();
     boundsOverlayRow->addWidget(new QLabel(QStringLiteral("Bounds:"), renderGroup));
@@ -250,7 +265,20 @@ MainView::MainView(QWidget* parent)
 
     m_lsystemEdit = new QPlainTextEdit(lsystemGroup);
     m_lsystemEdit->setPlaceholderText(QStringLiteral("L-system definition (axiom and rules)"));
-    m_lsystemEdit->setPlainText(QStringLiteral("Mat(0) = Diffuse { 0.01, 0.01, 0.01, 1 }\nMat(1) = Diffuse { 0.5, 0.5, 0.5, 1 }\nMat(2) = Diffuse { 1.0, 1.0, 1.0, 1 }\nMat(3) = Glass { 0.95, 0.98, 0.90, 1.452 }\nMat(4) = Metal { 0.60, 0.58, 0.10, 0.0 }\n\n[Pitch(-90) Mat(1) f(-10000.5) F(0, 10000)]\n\nMat(0)\nF(0)\nf(0.15)\nMat(1)\nF(0)\nf(0.15)\nMat(2)\nF(0)\nf(0.15)\nMat(3)\nF(0)\nf(0.15)\nMat(4)\nF(0)"));
+    m_lsystemEdit->setPlainText(QStringLiteral(
+        "Mat(Black) = { 0.01, 0.01, 0.01, 1, 0, 0, 0, 1.5, 0, 0 }\n"
+        "Mat(MediumGrey) = { 0.5, 0.5, 0.5, 1, 0, 0, 0, 1.5, 0, 0 }\n"
+        "Mat(White) = { 1.0, 1.0, 1.0, 1, 0, 0, 0, 1.5, 0, 0 }\n"
+        "Mat(GreenGlass) = { 0.8, 0.95, 0.75, 0, 0, 0.95, 0, 1.45, 0, 0 }\n"
+        "Mat(Light) = { 0.60, 0.58, 0.10, 0, 0, 0, 0, 0, 0, 1 }\n"
+        "d=0.2\n"
+        "[Pitch(-90) Mat(White) f(-10000.5) F(0, 10000)]\n"
+        "\n"
+        "Mat(Black)\nF(0)\nf(d)\n"
+        "Mat(MediumGrey)\nF(0)\nf(d)\n"
+        "Mat(White)\nF(0)\nf(d)\n"
+        "Mat(GreenGlass)\nF(0)\nf(d)\n"
+        "Mat(Light)\nF(0, 0.05, 0.05)"));
 
     m_lsystemEdit->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     lsystemLayout->addWidget(m_lsystemEdit, 1);
@@ -266,9 +294,14 @@ MainView::MainView(QWidget* parent)
     lsystemIterationsRow->addWidget(m_lsystemIterationsSpinBox, 1);
     lsystemLayout->addLayout(lsystemIterationsRow);
 
+    auto* lsystemActionsRow = new QHBoxLayout();
+    m_lsystemLoadButton = new QPushButton(QStringLiteral("Load"), lsystemGroup);
+    m_lsystemLoadButton->setToolTip(QStringLiteral("Load an L-system definition from a .lsystem file"));
+    lsystemActionsRow->addWidget(m_lsystemLoadButton);
     m_addPrimitiveButton = new QPushButton(QStringLiteral("Add"), lsystemGroup);
     m_addPrimitiveButton->setToolTip(QStringLiteral("Build procedural mesh from L-system and add to scene"));
-    lsystemLayout->addWidget(m_addPrimitiveButton);
+    lsystemActionsRow->addWidget(m_addPrimitiveButton);
+    lsystemLayout->addLayout(lsystemActionsRow);
 
     controlLayout->addWidget(lsystemGroup, 1);
 
@@ -415,6 +448,11 @@ QSpinBox* MainView::previewStepsSpinBox() const
     return m_previewStepsSpinBox;
 }
 
+QSpinBox* MainView::russianRouletteMinDepthSpinBox() const
+{
+    return m_russianRouletteMinDepthSpinBox;
+}
+
 QComboBox* MainView::boundsOverlayComboBox() const
 {
     return m_boundsOverlayComboBox;
@@ -438,6 +476,11 @@ QPushButton* MainView::settingsButton() const
 QPushButton* MainView::addPrimitiveButton() const
 {
     return m_addPrimitiveButton;
+}
+
+QPushButton* MainView::lsystemLoadButton() const
+{
+    return m_lsystemLoadButton;
 }
 
 QPushButton* MainView::resetSceneButton() const

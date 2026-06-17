@@ -28,10 +28,15 @@ struct MetalBrdf : BrdfBase<MetalBrdf>
         const float alpha = brdfAlphaFromRoughness(ctx.material.roughness);
         const float D = brdfGGXD(cosThetaH, alpha);
         const float G = brdfSmithG1(cosWo, alpha) * brdfSmithG1(cosWi, alpha);
-        const Vec3 f0 = brdfBaseColor(ctx.material);
-        const Vec3 F = brdfSchlickF(cosThetaHo, f0);
+        const Vec3 f0 = vecMake3(ctx.material.r, ctx.material.g, ctx.material.b);
+        const float fresnelTerm = powf(vecMax2(0.0f, 1.0f - cosThetaHo), 5.0f);
+        const Vec3 F = vecMake3(
+            f0.x + (1.0f - f0.x) * fresnelTerm,
+            f0.y + (1.0f - f0.y) * fresnelTerm,
+            f0.z + (1.0f - f0.z) * fresnelTerm);
         const float denom = vecMax2(4.0f * cosWo * cosWi, 1.0e-8f);
-        return vecScale3(F, (D * G) / denom);
+        const float scale = (D * G) / denom;
+        return vecMake3(F.x * scale, F.y * scale, F.z * scale);
     }
 
     METAL_BRDF_FN BrdfSampleResult sampleImpl(const BrdfContext& ctx, float u1, float u2) const
@@ -64,6 +69,7 @@ struct MetalBrdf : BrdfBase<MetalBrdf>
 
         result.pdf = hPdf / vecMax2(4.0f * cosThetaHo, 1.0e-8f);
         result.valid = result.pdf > BrdfDetail::kMinPdf;
+        result.nextMediumEta = ctx.etaMedium;
         return result;
     }
 

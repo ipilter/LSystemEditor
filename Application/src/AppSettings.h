@@ -60,6 +60,9 @@ public:
     int previewStepsPerLevel() const;
     void setPreviewStepsPerLevel(int value);
 
+    int russianRouletteMinDepth() const;
+    void setRussianRouletteMinDepth(int value);
+
     QColor accelBvhColor() const;
     void setAccelBvhColor(const QColor& color);
 
@@ -68,6 +71,9 @@ public:
 
     QString environmentHdrPath() const;
     void setEnvironmentHdrPath(const QString& path);
+
+    QString lsystemFilePath() const;
+    void setLsystemFilePath(const QString& path);
 
     float environmentIntensity() const;
     void setEnvironmentIntensity(float value);
@@ -106,6 +112,7 @@ private:
     static int clampRenderDimension(int value);
     static int clampMaxSamplesPerPixel(int value);
     static int clampPreviewStepsPerLevel(int value);
+    static int clampRussianRouletteMinDepth(int value);
     static float clampCreaseAngleDeg(float value);
     static float clampFStop(float value);
     static float clampShutterSpeedSeconds(float value);
@@ -120,9 +127,11 @@ private:
     QColor m_clearColor = QColor(10, 10, 10);
     int m_maxSamplesPerPixel = 1024;
     int m_previewStepsPerLevel = 0;
+    int m_russianRouletteMinDepth = 3;
     QColor m_accelBvhColor = QColor(230, 200, 0);
     float m_creaseAngleDeg = 50.0f;
     QString m_environmentHdrPath;
+    QString m_lsystemFilePath;
     float m_environmentIntensity = 1.0f;
     float m_fStop = 0.0f;
     float m_shutterSpeedSeconds = 0.0f;
