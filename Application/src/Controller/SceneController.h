@@ -26,6 +26,8 @@ private:
     void applyRenderSizeFromSpinBoxes();
     void onMaxSamplesSpinBoxChanged();
     void applyMaxSamplesFromSpinBox();
+    void onMinSamplesSpinBoxChanged();
+    void onRelativeErrorThresholdSpinBoxChanged();
     void onPreviewStepsSpinBoxChanged();
     void applyPreviewStepsFromSpinBox();
     void onRussianRouletteMinDepthSpinBoxChanged();
@@ -52,6 +54,8 @@ private:
     void syncColorButtonStyle();
     void syncRenderSpinBoxes();
     void syncMaxSamplesSpinBox();
+    void syncMinSamplesSpinBox();
+    void syncRelativeErrorThresholdSpinBox();
     void syncPreviewStepsSpinBox();
     void syncBoundsOverlayComboBox();
     bool loadLsystemFromFile(const QString& path);

@@ -63,6 +63,12 @@ target_include_directories(path_tracer_budget_tests PRIVATE "${PATHTRACER_LIB_IN
 set_target_properties(path_tracer_budget_tests PROPERTIES FOLDER "PathTracerLib/tests")
 add_test(NAME PathTracerBudget COMMAND path_tracer_budget_tests)
 
+add_executable(path_tracer_adaptive_sampling_tests tests/PathTracerAdaptiveSamplingTests.cpp)
+target_link_libraries(path_tracer_adaptive_sampling_tests PRIVATE PathTracerLib)
+target_include_directories(path_tracer_adaptive_sampling_tests PRIVATE "${PATHTRACER_LIB_INCLUDE_DIR}")
+set_target_properties(path_tracer_adaptive_sampling_tests PROPERTIES FOLDER "PathTracerLib/tests")
+add_test(NAME PathTracerAdaptiveSampling COMMAND path_tracer_adaptive_sampling_tests)
+
 add_executable(path_tracer_preview_levels_tests tests/PathTracerPreviewLevelsTests.cpp)
 target_link_libraries(path_tracer_preview_levels_tests PRIVATE PathTracerLib)
 target_include_directories(path_tracer_preview_levels_tests PRIVATE "${PATHTRACER_LIB_INCLUDE_DIR}")

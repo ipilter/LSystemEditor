@@ -46,7 +46,7 @@ public:
 
 signals:
     void iterationChanged(int sampleCount);
-    void renderStateChanged(RenderAccumulationState state, int sampleCount, int budgetTotal);
+    void renderStateChanged(RenderAccumulationState state, int sampleCount, int budgetTotal, int activePixelCount);
 
 protected:
     void initializeGL() override;

@@ -164,9 +164,6 @@ OpenGLViewportWidget::OpenGLViewportWidget(QWidget* parent)
         if (!m_frameCallbackQueued.exchange(true)) {
             QMetaObject::invokeMethod(this, "dispatchFrameUpdate", Qt::QueuedConnection);
         }
-        if (!m_iterationCallbackQueued.exchange(true)) {
-            QMetaObject::invokeMethod(this, "notifyIterationChanged", Qt::QueuedConnection);
-        }
     });
 }
 
@@ -253,8 +250,17 @@ void OpenGLViewportWidget::setSceneModel(SceneModel* model)
         m_pathTracer.setRussianRouletteMinDepth(depth);
     });
 
-    connect(m_model, &SceneModel::boundsOverlayModeChanged, this, [this](MeshAccelBoundsOverlayMode) {
+    connect(m_model, &SceneModel::boundsOverlayModeChanged, this, [this](MeshAccelBoundsOverlayMode mode) {
+        m_pathTracer.setDebugOverlayMode(static_cast<int>(mode));
         update();
+    });
+
+    connect(m_model, &SceneModel::minSamplesChanged, this, [this](int min) {
+        m_pathTracer.setMinSamples(min);
+    });
+
+    connect(m_model, &SceneModel::relativeErrorThresholdChanged, this, [this](float threshold) {
+        m_pathTracer.setRelativeErrorThreshold(threshold);
     });
 
     connect(m_model, &SceneModel::accelBvhColorChanged, this, [this](const QColor&) {
@@ -673,6 +679,8 @@ void OpenGLViewportWidget::dispatchFrameUpdate()
     }
 
     m_displayRefreshTimer.restart();
+    emit iterationChanged(m_pathTracer.currentSampleCount());
+    emitRenderState();
     update();
 }
 
@@ -700,17 +708,22 @@ void OpenGLViewportWidget::emitRenderState()
         return;
     }
 
-    const RenderAccumulationState state = renderAccumulationState(
-        m_pathTracer.isRunning(),
-        m_renderPaused,
-        m_pathTracer.currentSampleCount(),
-        m_model->previewStepsPerLevel(),
-        m_model->maxSamplesPerPixel());
+    const RenderAccumulationState state =
+        (m_renderPaused || !m_pathTracer.isRunning())
+        ? RenderAccumulationState::Stopped
+        : (m_pathTracer.isSampleBudgetExhausted() ? RenderAccumulationState::BudgetReached
+                                                  : RenderAccumulationState::Accumulating);
+
+    const int previewSteps = m_model != nullptr ? m_model->previewStepsPerLevel() : 0;
+    const int sampleCount = m_pathTracer.currentSampleCount();
+    const int activePixelCount =
+        sampleCount >= previewSteps ? m_pathTracer.currentActivePixelCount() : -1;
 
     emit renderStateChanged(
         state,
-        m_pathTracer.currentSampleCount(),
-        m_pathTracer.sampleBudgetTotalIterations());
+        sampleCount,
+        m_pathTracer.sampleBudgetTotalIterations(),
+        activePixelCount);
 }
 
 void OpenGLViewportWidget::restartRender()
@@ -827,6 +840,9 @@ void OpenGLViewportWidget::recreateGpuBuffers()
     rebuildBoundsOverlay();
 
     m_pathTracer.setMaxSamplesPerPixel(m_model->maxSamplesPerPixel());
+    m_pathTracer.setMinSamples(m_model->minSamples());
+    m_pathTracer.setRelativeErrorThreshold(m_model->relativeErrorThreshold());
+    m_pathTracer.setDebugOverlayMode(static_cast<int>(m_model->boundsOverlayMode()));
     m_pathTracer.setPreviewStepsPerLevel(m_model->previewStepsPerLevel());
     m_pathTracer.setRussianRouletteMinDepth(m_model->russianRouletteMinDepth());
     m_pathTracer.setEnvironmentHdrPath(m_model->environmentHdrPath());

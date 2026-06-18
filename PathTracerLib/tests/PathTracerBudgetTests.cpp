@@ -54,6 +54,15 @@ void testIncreasingMaxResumes()
         "raising max above current count resumes accumulation");
 }
 
+void testAdaptiveBudgetExhaustedWhenNoActivePixels()
+{
+    constexpr int previewSteps = 1;
+    expectTrue(!isAdaptiveSampleBudgetExhausted(100, previewSteps, 0), "preview phase not exhausted");
+    expectTrue(!isAdaptiveSampleBudgetExhausted(100, previewSteps, 1), "preview phase not exhausted at iter 1");
+    expectTrue(isAdaptiveSampleBudgetExhausted(0, previewSteps, 10), "full-res exhausted when active count is 0");
+    expectTrue(!isAdaptiveSampleBudgetExhausted(5, previewSteps, 10), "full-res not exhausted with active pixels");
+}
+
 } // namespace
 
 int main()
@@ -62,6 +71,7 @@ int main()
     testUnlimitedSamples();
     testPreviewOnlyBudget();
     testIncreasingMaxResumes();
+    testAdaptiveBudgetExhaustedWhenNoActivePixels();
 
     if (gFailures == 0) {
         std::cout << "All PathTracer budget tests passed.\n";

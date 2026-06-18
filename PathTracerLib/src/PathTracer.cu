@@ -1,6 +1,7 @@
 #include "CameraDevice.cuh"
 #include "MeshAccel/MeshAccelScene.cuh"
 #include "PathIntegratorRandCore.h"
+#include "PathTracerAdaptiveSampling.h"
 #include "PathTracerCuda.h"
 #include "Spectral/SpectralState.h"
 
@@ -33,9 +34,16 @@ extern "C" cudaError_t spectralUploadStateToSymbol(const SpectralStateGpu* hostS
 
 namespace {
 
+constexpr int kDebugOverlayAdaptiveSampling = 2;
+
 __device__ Vec3 float3ToVec3(float3 v)
 {
     return vecMake3(v.x, v.y, v.z);
+}
+
+__device__ float deviceSampleLuminance(float r, float g, float b)
+{
+    return r * 0.2126f + g * 0.7152f + b * 0.0722f;
 }
 
 __device__ Vec3 clampSampleFirefly(Vec3 radiance)
@@ -50,7 +58,7 @@ __device__ Vec3 clampSampleFirefly(Vec3 radiance)
         vecMax2(0.0f, radiance.z));
 
     constexpr float kMaxLuminance = 100.0f;
-    const float luminance = radiance.x * 0.2126f + radiance.y * 0.7152f + radiance.z * 0.0722f;
+    const float luminance = deviceSampleLuminance(radiance.x, radiance.y, radiance.z);
     if (luminance <= kMaxLuminance) {
         return radiance;
     }
@@ -91,6 +99,31 @@ __device__ void tracePixelRadiance(
         params,
         env,
         &rng));
+}
+
+__device__ bool deviceIsPixelConverged(
+    uint32_t sampleCount,
+    float lumMean,
+    float m2,
+    int minSamples,
+    float relativeErrorThreshold)
+{
+    if (sampleCount < static_cast<uint32_t>(minSamples)) {
+        return false;
+    }
+    if (sampleCount == 0) {
+        return false;
+    }
+
+    if (lumMean < kAdaptiveMinLuminanceForConvergence) {
+        return false;
+    }
+
+    const float variance = m2 / static_cast<float>(sampleCount);
+    const float stdDev = sqrtf(variance);
+    const float denom = fmaxf(lumMean, kAdaptiveLuminanceEpsilon);
+    const float relativeError = stdDev / denom;
+    return relativeError < relativeErrorThreshold;
 }
 
 __global__ void sampleKernel(
@@ -147,17 +180,149 @@ __global__ void sampleKernel(
     counts[idx] = n + 1;
 }
 
-__global__ void clearAccumulatorKernel(float4* acc, uint32_t* counts, int width, int height)
+__global__ void sampleAdaptiveKernel(
+    float4* acc,
+    uint32_t* counts,
+    float* lumMean,
+    float* m2,
+    uint8_t* converged,
+    const int* activeIndices,
+    int activeCount,
+    const CameraGpu* camera,
+    const MeshAccelSceneGpu* scene,
+    const EnvironmentMapGpu* env,
+    const RenderParamsGpu* params,
+    int width,
+    int height,
+    unsigned int globalSeed)
 {
-    const int x = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
-    const int y = static_cast<int>(blockIdx.y * blockDim.y + threadIdx.y);
-    if (x >= width || y >= height) {
+    const int t = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
+    if (t >= activeCount || camera == nullptr || params == nullptr) {
         return;
     }
 
+    const int idx = activeIndices[t];
+    if (idx < 0 || converged[idx] != 0) {
+        return;
+    }
+
+    const int x = idx % width;
+    const int y = idx / width;
+    const int sampleIndex = static_cast<int>(counts[idx]);
+
+    Vec3 radiance{};
+    tracePixelRadiance(
+        idx,
+        x,
+        y,
+        width,
+        height,
+        true,
+        sampleIndex,
+        camera,
+        scene,
+        env,
+        params,
+        globalSeed,
+        radiance);
+
+    const float4 sample = make_float4(radiance.x, radiance.y, radiance.z, 1.0f);
+    const float sampleLum = deviceSampleLuminance(sample.x, sample.y, sample.z);
+
+    const uint32_t n = counts[idx];
+    const float prevLumMean = lumMean[idx];
+    const float prevM2 = m2[idx];
+    const float delta = sampleLum - prevLumMean;
+    const float newLumMean = prevLumMean + delta / static_cast<float>(n + 1);
+    const float newM2 = prevM2 + delta * (sampleLum - newLumMean);
+    lumMean[idx] = newLumMean;
+    m2[idx] = newM2;
+
+    const float4 prev = acc[idx];
+    const float invN = 1.0f / static_cast<float>(n + 1);
+    acc[idx] = make_float4(
+        (prev.x * static_cast<float>(n) + sample.x) * invN,
+        (prev.y * static_cast<float>(n) + sample.y) * invN,
+        (prev.z * static_cast<float>(n) + sample.z) * invN,
+        1.0f);
+
+    const uint32_t newCount = n + 1;
+    counts[idx] = newCount;
+
+    const int maxSamples = params->maxSamplesPerPixel;
+    if (maxSamples > 0 && newCount >= static_cast<uint32_t>(maxSamples)) {
+        converged[idx] = 1;
+        return;
+    }
+
+    if ((newCount % static_cast<uint32_t>(kAdaptiveConvergenceCheckInterval)) != 0) {
+        return;
+    }
+
+    if (deviceIsPixelConverged(
+            newCount,
+            newLumMean,
+            newM2,
+            params->minSamples,
+            params->relativeErrorThreshold)) {
+        converged[idx] = 1;
+    }
+}
+
+__global__ void clearAccumulatorKernel(
+    float4* acc,
+    uint32_t* counts,
+    float* lumMean,
+    float* m2,
+    uint8_t* converged,
+    int* activeIndices,
+    int* activeCount,
+    int width,
+    int height)
+{
+    const int x = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
+    const int y = static_cast<int>(blockIdx.y * blockDim.y + threadIdx.y);
+    const int pixelCount = width * height;
     const int idx = y * width + x;
-    acc[idx] = make_float4(0.0f, 0.0f, 0.0f, 1.0f);
-    counts[idx] = 0;
+
+    if (x < width && y < height) {
+        acc[idx] = make_float4(0.0f, 0.0f, 0.0f, 1.0f);
+        counts[idx] = 0;
+        lumMean[idx] = 0.0f;
+        m2[idx] = 0.0f;
+        converged[idx] = 0;
+        activeIndices[idx] = idx;
+    }
+
+    if (idx == 0 && activeCount != nullptr) {
+        *activeCount = pixelCount;
+    }
+}
+
+__global__ void compactActiveListKernel(
+    const int* activeIndicesIn,
+    int* activeIndicesOut,
+    int* activeCount,
+    const uint8_t* converged,
+    const uint32_t* counts,
+    int maxSamplesPerPixel,
+    int inCount)
+{
+    const int tid = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
+    if (tid >= inCount) {
+        return;
+    }
+
+    const int pixelIdx = activeIndicesIn[tid];
+    if (converged[pixelIdx] != 0) {
+        return;
+    }
+    if (maxSamplesPerPixel > 0 && counts[pixelIdx] >= static_cast<uint32_t>(maxSamplesPerPixel)) {
+        return;
+    }
+
+    const int slot = atomicAdd(activeCount, 1);
+    activeIndicesOut[slot] = pixelIdx;
 }
 
 __device__ float3 backgroundRgb(const RenderParamsGpu* params)
@@ -214,6 +379,7 @@ __device__ float3 readDisplayRgb(
 __global__ void writeDisplayToPboKernel(
     const float4* source,
     const uint32_t* counts,
+    const uint8_t* converged,
     uchar4* pbo,
     int outputWidth,
     int outputHeight,
@@ -240,7 +406,22 @@ __global__ void writeDisplayToPboKernel(
         sourceIndex = clampedPy * sourceWidth + clampedPx;
     }
 
-    float3 rgb = readDisplayRgb(source, counts, sourceIndex, useAccumulator, params);
+    float3 rgb{};
+    if (params != nullptr && params->debugOverlayMode == kDebugOverlayAdaptiveSampling) {
+        if (useAccumulator && converged != nullptr) {
+            if (converged[sourceIndex] != 0) {
+                rgb = make_float3(0.0f, 0.35f, 0.0f);
+            } else {
+                rgb = make_float3(1.0f, 0.0f, 0.0f);
+            }
+        } else {
+            rgb = make_float3(1.0f, 0.0f, 0.0f);
+        }
+        pbo[y * outputWidth + x] = toneMapToUchar4(rgb);
+        return;
+    }
+
+    rgb = readDisplayRgb(source, counts, sourceIndex, useAccumulator, params);
     rgb = applyDisplayPipeline(rgb, exposure);
     pbo[y * outputWidth + x] = toneMapToUchar4(rgb);
 }
@@ -250,6 +431,11 @@ dim3 grid2d(int width, int height, dim3 block)
     return dim3(
         static_cast<unsigned int>((width + static_cast<int>(block.x) - 1) / static_cast<int>(block.x)),
         static_cast<unsigned int>((height + static_cast<int>(block.y) - 1) / static_cast<int>(block.y)));
+}
+
+dim3 grid1d(int count, int blockSize)
+{
+    return dim3(static_cast<unsigned int>((count + blockSize - 1) / blockSize));
 }
 
 bool checkLaunch(cudaError_t error)
@@ -301,23 +487,46 @@ bool launchSampleKernel(
 bool pathTracerClearAccumulator(
     float4* d_buffer,
     uint32_t* d_samples,
+    float* d_lumMean,
+    float* d_m2,
+    uint8_t* d_converged,
+    int* d_activeIndices,
+    int* d_activeScratch,
+    int* d_activeCount,
     int width,
     int height,
     cudaStream_t stream)
 {
-    if (d_buffer == nullptr || d_samples == nullptr || width <= 0 || height <= 0) {
+    (void)d_activeScratch;
+    if (d_buffer == nullptr || d_samples == nullptr || d_lumMean == nullptr || d_m2 == nullptr ||
+        d_converged == nullptr || d_activeIndices == nullptr || d_activeCount == nullptr || width <= 0 ||
+        height <= 0) {
         return false;
     }
 
     const dim3 block(16, 16);
     const dim3 grid = grid2d(width, height, block);
-    clearAccumulatorKernel<<<grid, block, 0, stream>>>(d_buffer, d_samples, width, height);
+    clearAccumulatorKernel<<<grid, block, 0, stream>>>(
+        d_buffer,
+        d_samples,
+        d_lumMean,
+        d_m2,
+        d_converged,
+        d_activeIndices,
+        d_activeCount,
+        width,
+        height);
     return checkLaunch(cudaSuccess);
 }
 
-bool pathTracerSample(
+bool pathTracerAdaptiveSample(
     float4* d_buffer,
     uint32_t* d_samples,
+    float* d_lumMean,
+    float* d_m2,
+    uint8_t* d_converged,
+    const int* d_activeIndices,
+    int activeCount,
     int width,
     int height,
     const CameraGpu* d_camera,
@@ -327,18 +536,65 @@ bool pathTracerSample(
     unsigned int globalSeed,
     cudaStream_t stream)
 {
-    return launchSampleKernel(
+    if (d_buffer == nullptr || d_samples == nullptr || d_lumMean == nullptr || d_m2 == nullptr ||
+        d_converged == nullptr || d_activeIndices == nullptr || d_camera == nullptr || d_params == nullptr ||
+        width <= 0 || height <= 0 || activeCount <= 0) {
+        return false;
+    }
+
+    constexpr int kBlockSize = 256;
+    const dim3 block(kBlockSize);
+    const dim3 grid = grid1d(activeCount, kBlockSize);
+    sampleAdaptiveKernel<<<grid, block, 0, stream>>>(
         d_buffer,
         d_samples,
-        width,
-        height,
+        d_lumMean,
+        d_m2,
+        d_converged,
+        d_activeIndices,
+        activeCount,
         d_camera,
         d_scene,
         d_env,
         d_params,
-        globalSeed,
-        false,
-        stream);
+        width,
+        height,
+        globalSeed);
+    return checkLaunch(cudaSuccess);
+}
+
+bool pathTracerCompactActiveList(
+    const int* d_activeIndicesIn,
+    int* d_activeIndicesOut,
+    int* d_activeCount,
+    const uint8_t* d_converged,
+    const uint32_t* d_counts,
+    int maxSamplesPerPixel,
+    int inCount,
+    cudaStream_t stream)
+{
+    if (d_activeIndicesIn == nullptr || d_activeIndicesOut == nullptr || d_activeCount == nullptr ||
+        d_converged == nullptr || d_counts == nullptr || inCount <= 0) {
+        return false;
+    }
+
+    const cudaError_t memsetError = cudaMemsetAsync(d_activeCount, 0, sizeof(int), stream);
+    if (memsetError != cudaSuccess) {
+        return false;
+    }
+
+    constexpr int kBlockSize = 256;
+    const dim3 block(kBlockSize);
+    const dim3 grid = grid1d(inCount, kBlockSize);
+    compactActiveListKernel<<<grid, block, 0, stream>>>(
+        d_activeIndicesIn,
+        d_activeIndicesOut,
+        d_activeCount,
+        d_converged,
+        d_counts,
+        maxSamplesPerPixel,
+        inCount);
+    return checkLaunch(cudaSuccess);
 }
 
 bool pathTracerPreviewSample(
@@ -369,6 +625,7 @@ bool pathTracerPreviewSample(
 bool pathTracerCopyToPbo(
     const float4* acc,
     const uint32_t* counts,
+    const uint8_t* converged,
     uchar4* pbo,
     int width,
     int height,
@@ -385,6 +642,7 @@ bool pathTracerCopyToPbo(
     writeDisplayToPboKernel<<<grid, block, 0, stream>>>(
         acc,
         counts,
+        converged,
         pbo,
         width,
         height,
@@ -418,6 +676,7 @@ bool pathTracerUpsamplePreviewToPbo(
     const dim3 grid = grid2d(fullWidth, fullHeight, block);
     writeDisplayToPboKernel<<<grid, block, 0, stream>>>(
         preview,
+        nullptr,
         nullptr,
         pbo,
         fullWidth,

@@ -63,12 +63,23 @@ public:
     void setMaxSamplesPerPixel(int max);
     int maxSamplesPerPixel() const;
 
+    void setMinSamples(int min);
+    int minSamples() const;
+
+    void setRelativeErrorThreshold(float threshold);
+    float relativeErrorThreshold() const;
+
+    void setDebugOverlayMode(int mode);
+    int debugOverlayMode() const;
+
     /// 0 = disabled (no preview passes). N > 0 runs N dense low-res preview passes (1/2^N .. 1/2)
     /// with shallow path tracing before full-resolution accumulation.
     void setPreviewStepsPerLevel(int steps);
     int previewStepsPerLevel() const;
 
     int currentSampleCount() const;
+
+    int currentActivePixelCount() const;
 
     int sampleBudgetTotalIterations() const;
     bool isSampleBudgetExhausted() const;

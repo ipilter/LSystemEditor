@@ -34,7 +34,15 @@ constexpr const char* kRenderHeightKey = "renderHeight";
 constexpr const char* kClearColorRedKey = "clearColorRed";
 constexpr const char* kClearColorGreenKey = "clearColorGreen";
 constexpr const char* kClearColorBlueKey = "clearColorBlue";
+constexpr int kDefaultMinSamples = 16;
+constexpr int kMinMinSamples = 1;
+constexpr int kMaxMinSamples = 10'000;
+constexpr float kDefaultRelativeErrorThreshold = 0.02f;
+constexpr float kMinRelativeErrorThreshold = 0.001f;
+constexpr float kMaxRelativeErrorThreshold = 1.0f;
 constexpr const char* kMaxSamplesPerPixelKey = "maxSamplesPerPixel";
+constexpr const char* kMinSamplesKey = "minSamples";
+constexpr const char* kRelativeErrorThresholdKey = "relativeErrorThreshold";
 constexpr const char* kPreviewStepsPerLevelKey = "previewStepsPerLevel";
 constexpr const char* kRussianRouletteMinDepthKey = "russianRouletteMinDepth";
 constexpr float kDefaultCreaseAngleDeg = 50.0f;
@@ -217,6 +225,38 @@ void AppSettings::setMaxSamplesPerPixel(int value)
     }
 
     m_maxSamplesPerPixel = clamped;
+    save();
+}
+
+int AppSettings::minSamples() const
+{
+    return m_minSamples;
+}
+
+void AppSettings::setMinSamples(int value)
+{
+    const int clamped = clampMinSamples(value);
+    if (m_minSamples == clamped) {
+        return;
+    }
+
+    m_minSamples = clamped;
+    save();
+}
+
+float AppSettings::relativeErrorThreshold() const
+{
+    return m_relativeErrorThreshold;
+}
+
+void AppSettings::setRelativeErrorThreshold(float value)
+{
+    const float clamped = clampRelativeErrorThreshold(value);
+    if (m_relativeErrorThreshold == clamped) {
+        return;
+    }
+
+    m_relativeErrorThreshold = clamped;
     save();
 }
 
@@ -511,6 +551,28 @@ int AppSettings::clampMaxSamplesPerPixel(int value)
     return value;
 }
 
+int AppSettings::clampMinSamples(int value)
+{
+    if (value < kMinMinSamples) {
+        return kMinMinSamples;
+    }
+    if (value > kMaxMinSamples) {
+        return kMaxMinSamples;
+    }
+    return value;
+}
+
+float AppSettings::clampRelativeErrorThreshold(float value)
+{
+    if (value < kMinRelativeErrorThreshold) {
+        return kMinRelativeErrorThreshold;
+    }
+    if (value > kMaxRelativeErrorThreshold) {
+        return kMaxRelativeErrorThreshold;
+    }
+    return value;
+}
+
 int AppSettings::clampPreviewStepsPerLevel(int value)
 {
     if (value < kMinPreviewStepsPerLevel) {
@@ -607,6 +669,24 @@ void AppSettings::load()
         const int maxSamples = maxSamplesValue.toInt(&ok);
         if (ok) {
             m_maxSamplesPerPixel = clampMaxSamplesPerPixel(maxSamples);
+        }
+    }
+
+    const QVariant minSamplesValue = settings.value(kMinSamplesKey);
+    if (minSamplesValue.isValid()) {
+        bool ok = false;
+        const int minSamples = minSamplesValue.toInt(&ok);
+        if (ok) {
+            m_minSamples = clampMinSamples(minSamples);
+        }
+    }
+
+    const QVariant relativeErrorValue = settings.value(kRelativeErrorThresholdKey);
+    if (relativeErrorValue.isValid()) {
+        bool ok = false;
+        const double relativeError = relativeErrorValue.toDouble(&ok);
+        if (ok) {
+            m_relativeErrorThreshold = clampRelativeErrorThreshold(static_cast<float>(relativeError));
         }
     }
 
@@ -782,6 +862,8 @@ void AppSettings::save()
     settings.setValue(kClearColorGreenKey, m_clearColor.green());
     settings.setValue(kClearColorBlueKey, m_clearColor.blue());
     settings.setValue(kMaxSamplesPerPixelKey, m_maxSamplesPerPixel);
+    settings.setValue(kMinSamplesKey, m_minSamples);
+    settings.setValue(kRelativeErrorThresholdKey, static_cast<double>(m_relativeErrorThreshold));
     settings.setValue(kPreviewStepsPerLevelKey, m_previewStepsPerLevel);
     settings.setValue(kRussianRouletteMinDepthKey, m_russianRouletteMinDepth);
     settings.setValue(kAccelBvhColorRedKey, m_accelBvhColor.red());

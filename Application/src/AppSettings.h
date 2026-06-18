@@ -57,6 +57,12 @@ public:
     int maxSamplesPerPixel() const;
     void setMaxSamplesPerPixel(int value);
 
+    int minSamples() const;
+    void setMinSamples(int value);
+
+    float relativeErrorThreshold() const;
+    void setRelativeErrorThreshold(float value);
+
     int previewStepsPerLevel() const;
     void setPreviewStepsPerLevel(int value);
 
@@ -111,6 +117,8 @@ private:
     static CameraDynamicsSettings clampCameraDynamicsSettings(const CameraDynamicsSettings& settings);
     static int clampRenderDimension(int value);
     static int clampMaxSamplesPerPixel(int value);
+    static int clampMinSamples(int value);
+    static float clampRelativeErrorThreshold(float value);
     static int clampPreviewStepsPerLevel(int value);
     static int clampRussianRouletteMinDepth(int value);
     static float clampCreaseAngleDeg(float value);
@@ -126,6 +134,8 @@ private:
     QSize m_renderSize = QSize(16, 16);
     QColor m_clearColor = QColor(10, 10, 10);
     int m_maxSamplesPerPixel = 1024;
+    int m_minSamples = 16;
+    float m_relativeErrorThreshold = 0.02f;
     int m_previewStepsPerLevel = 0;
     int m_russianRouletteMinDepth = 3;
     QColor m_accelBvhColor = QColor(230, 200, 0);

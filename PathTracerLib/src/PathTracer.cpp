@@ -5,6 +5,7 @@
 #include "EnvironmentMap.h"
 #include "PhysicalCamera.h"
 #include "PathTracerSampleBudget.h"
+#include "PathTracerAdaptiveSampling.h"
 #include "MeshAccel/MeshAccelBoundsMesh.h"
 #include "MeshAccel/MeshAccelScene.h"
 #include "MeshAccel/MeshSceneContent.h"
@@ -37,6 +38,12 @@ struct AccumulatorData
 {
     float4* d_buffer = nullptr;
     uint32_t* d_samples = nullptr;
+    float* d_lumMean = nullptr;
+    float* d_m2 = nullptr;
+    uint8_t* d_converged = nullptr;
+    int* d_activeIndices = nullptr;
+    int* d_activeScratch = nullptr;
+    int* d_activeCount = nullptr;
     int width = 0;
     int height = 0;
 };
@@ -70,6 +77,10 @@ struct PathTracerDetail::PathTracerImpl
     std::condition_variable workerCv;
 
     std::atomic<int> maxSamplesPerPixel{8};
+    std::atomic<int> minSamples{16};
+    std::atomic<float> relativeErrorThreshold{0.02f};
+    std::atomic<int> debugOverlayMode{0};
+    std::atomic<int> activePixelCount{0};
     std::atomic<int> previewStepsPerLevel{0};
     std::atomic<int> sampleCount{0};
     std::atomic<int> finestCompletedPreview{-1};
@@ -100,6 +111,11 @@ namespace {
 
 constexpr int kMaxSamplesUpperBound = 1'000'000;
 constexpr int kMaxPreviewStepsPerLevel = 128;
+constexpr int kMinMinSamples = 1;
+constexpr int kMaxMinSamples = 10'000;
+constexpr float kMinRelativeErrorThreshold = 0.001f;
+constexpr float kMaxRelativeErrorThreshold = 1.0f;
+constexpr int kCompactActiveListInterval = kAdaptiveCompactActiveListInterval;
 
 bool hasDisplayableContent(const PathTracerDetail::PathTracerImpl& impl)
 {
@@ -122,6 +138,28 @@ int clampMaxSamples(int value)
     }
     if (value > kMaxSamplesUpperBound) {
         return kMaxSamplesUpperBound;
+    }
+    return value;
+}
+
+int clampMinSamples(int value)
+{
+    if (value < kMinMinSamples) {
+        return kMinMinSamples;
+    }
+    if (value > kMaxMinSamples) {
+        return kMaxMinSamples;
+    }
+    return value;
+}
+
+float clampRelativeErrorThreshold(float value)
+{
+    if (value < kMinRelativeErrorThreshold) {
+        return kMinRelativeErrorThreshold;
+    }
+    if (value > kMaxRelativeErrorThreshold) {
+        return kMaxRelativeErrorThreshold;
     }
     return value;
 }
@@ -240,6 +278,30 @@ void freeAccumulator(AccumulatorData* acc)
         cudaFree(acc->d_samples);
         acc->d_samples = nullptr;
     }
+    if (acc->d_lumMean != nullptr) {
+        cudaFree(acc->d_lumMean);
+        acc->d_lumMean = nullptr;
+    }
+    if (acc->d_m2 != nullptr) {
+        cudaFree(acc->d_m2);
+        acc->d_m2 = nullptr;
+    }
+    if (acc->d_converged != nullptr) {
+        cudaFree(acc->d_converged);
+        acc->d_converged = nullptr;
+    }
+    if (acc->d_activeIndices != nullptr) {
+        cudaFree(acc->d_activeIndices);
+        acc->d_activeIndices = nullptr;
+    }
+    if (acc->d_activeScratch != nullptr) {
+        cudaFree(acc->d_activeScratch);
+        acc->d_activeScratch = nullptr;
+    }
+    if (acc->d_activeCount != nullptr) {
+        cudaFree(acc->d_activeCount);
+        acc->d_activeCount = nullptr;
+    }
     acc->width = 0;
     acc->height = 0;
 }
@@ -266,6 +328,60 @@ bool initAccumulator(AccumulatorData* acc, int width, int height, QString* outEr
     }
 
     error = cudaMalloc(&acc->d_samples, pixelCount * sizeof(uint32_t));
+    if (error != cudaSuccess) {
+        freeAccumulator(acc);
+        if (outError != nullptr) {
+            *outError = cudaErrorString(error);
+        }
+        return false;
+    }
+
+    error = cudaMalloc(&acc->d_lumMean, pixelCount * sizeof(float));
+    if (error != cudaSuccess) {
+        freeAccumulator(acc);
+        if (outError != nullptr) {
+            *outError = cudaErrorString(error);
+        }
+        return false;
+    }
+
+    error = cudaMalloc(&acc->d_m2, pixelCount * sizeof(float));
+    if (error != cudaSuccess) {
+        freeAccumulator(acc);
+        if (outError != nullptr) {
+            *outError = cudaErrorString(error);
+        }
+        return false;
+    }
+
+    error = cudaMalloc(&acc->d_converged, pixelCount * sizeof(uint8_t));
+    if (error != cudaSuccess) {
+        freeAccumulator(acc);
+        if (outError != nullptr) {
+            *outError = cudaErrorString(error);
+        }
+        return false;
+    }
+
+    error = cudaMalloc(&acc->d_activeIndices, pixelCount * sizeof(int));
+    if (error != cudaSuccess) {
+        freeAccumulator(acc);
+        if (outError != nullptr) {
+            *outError = cudaErrorString(error);
+        }
+        return false;
+    }
+
+    error = cudaMalloc(&acc->d_activeScratch, pixelCount * sizeof(int));
+    if (error != cudaSuccess) {
+        freeAccumulator(acc);
+        if (outError != nullptr) {
+            *outError = cudaErrorString(error);
+        }
+        return false;
+    }
+
+    error = cudaMalloc(&acc->d_activeCount, sizeof(int));
     if (error != cudaSuccess) {
         freeAccumulator(acc);
         if (outError != nullptr) {
@@ -381,13 +497,22 @@ bool clearPreviewBuffers(PathTracerDetail::PathTracerImpl* impl, QString* outErr
 bool clearAccumulator(PathTracerDetail::PathTracerImpl* impl, QString* outError)
 {
     if (impl == nullptr || impl->acc.d_buffer == nullptr || impl->acc.d_samples == nullptr ||
-        impl->acc.width <= 0 || impl->acc.height <= 0 || impl->stream == nullptr) {
+        impl->acc.d_lumMean == nullptr || impl->acc.d_m2 == nullptr || impl->acc.d_converged == nullptr ||
+        impl->acc.d_activeIndices == nullptr || impl->acc.d_activeScratch == nullptr ||
+        impl->acc.d_activeCount == nullptr || impl->acc.width <= 0 || impl->acc.height <= 0 ||
+        impl->stream == nullptr) {
         return true;
     }
 
     if (!pathTracerClearAccumulator(
             impl->acc.d_buffer,
             impl->acc.d_samples,
+            impl->acc.d_lumMean,
+            impl->acc.d_m2,
+            impl->acc.d_converged,
+            impl->acc.d_activeIndices,
+            impl->acc.d_activeScratch,
+            impl->acc.d_activeCount,
             impl->acc.width,
             impl->acc.height,
             impl->stream)) {
@@ -397,6 +522,8 @@ bool clearAccumulator(PathTracerDetail::PathTracerImpl* impl, QString* outError)
         return false;
     }
 
+    const int pixelCount = impl->acc.width * impl->acc.height;
+    impl->activePixelCount.store(pixelCount);
     return true;
 }
 
@@ -483,6 +610,10 @@ bool initRenderParamsGpu(PathTracerDetail::PathTracerImpl* impl, QString* outErr
     }
 
     impl->hostRenderParams = RenderParamsGpu{};
+    impl->hostRenderParams.minSamples = clampMinSamples(impl->minSamples.load());
+    impl->hostRenderParams.maxSamplesPerPixel = clampMaxSamples(impl->maxSamplesPerPixel.load());
+    impl->hostRenderParams.relativeErrorThreshold = clampRelativeErrorThreshold(impl->relativeErrorThreshold.load());
+    impl->hostRenderParams.debugOverlayMode = impl->debugOverlayMode.load();
     impl->deviceParamsArePreview = false;
     impl->renderParamsDirty.store(true);
     return true;
@@ -492,7 +623,8 @@ bool syncRenderParamsToDevice(
     PathTracerDetail::PathTracerImpl* impl,
     cudaStream_t stream,
     bool previewPass,
-    QString* outError)
+    QString* outError,
+    bool force = false)
 {
     if (impl == nullptr || impl->d_renderParams == nullptr) {
         if (outError != nullptr) {
@@ -505,11 +637,15 @@ bool syncRenderParamsToDevice(
         if (impl->deviceParamsArePreview) {
             return true;
         }
-    } else if (!impl->renderParamsDirty.load() && !impl->deviceParamsArePreview) {
+    } else if (!force && !impl->renderParamsDirty.load() && !impl->deviceParamsArePreview) {
         return true;
     }
 
     RenderParamsGpu deviceParams = impl->hostRenderParams;
+    deviceParams.minSamples = clampMinSamples(impl->minSamples.load());
+    deviceParams.maxSamplesPerPixel = clampMaxSamples(impl->maxSamplesPerPixel.load());
+    deviceParams.relativeErrorThreshold = clampRelativeErrorThreshold(impl->relativeErrorThreshold.load());
+    deviceParams.debugOverlayMode = impl->debugOverlayMode.load();
     if (previewPass) {
         deviceParams.maxPathDepth = kPreviewMaxPathDepth;
     }
@@ -705,10 +841,15 @@ bool ensureSampleEvent(PathTracerDetail::PathTracerImpl* impl, QString* outError
 
 bool canTakeSample(const PathTracerDetail::PathTracerImpl* impl)
 {
-    return canTakeSampleAtIteration(
-        impl->sampleCount.load(),
-        impl->previewStepsPerLevel.load(),
-        impl->maxSamplesPerPixel.load());
+    const int previewSteps = impl->previewStepsPerLevel.load();
+    const int sampleCount = impl->sampleCount.load();
+    if (sampleCount < previewSteps) {
+        return canTakeSampleAtIteration(
+            sampleCount,
+            previewSteps,
+            impl->maxSamplesPerPixel.load());
+    }
+    return impl->activePixelCount.load() > 0;
 }
 
 void checkCudaGlDeviceAffinity(PathTracerDetail::PathTracerImpl* impl)
@@ -1160,6 +1301,14 @@ bool PathTracer::publishDisplayFrame(int slot)
         return false;
     }
 
+    QString paramsError;
+    const bool forceParamsSync = m_impl->renderParamsDirty.load();
+    if (!syncRenderParamsToDevice(m_impl.get(), m_impl->stream, false, &paramsError, forceParamsSync)) {
+        AppLog::instance().error(
+            QStringLiteral("PathTracer render params upload failed during publish: %1").arg(paramsError));
+        return false;
+    }
+
     void* devicePointer = nullptr;
     if (!mapPboResource(resource, m_impl->stream, &devicePointer, &error)) {
         AppLog::instance().error(QStringLiteral("CUDA-GL PBO map failed: %1").arg(error));
@@ -1200,6 +1349,7 @@ bool PathTracer::publishDisplayFrame(int slot)
         copied = pathTracerCopyToPbo(
             m_impl->acc.d_buffer,
             m_impl->acc.d_samples,
+            m_impl->acc.d_converged,
             static_cast<uchar4*>(devicePointer),
             m_impl->acc.width,
             m_impl->acc.height,
@@ -1231,13 +1381,69 @@ bool PathTracer::publishDisplayFrame(int slot)
 
 void PathTracer::setMaxSamplesPerPixel(int max)
 {
-    m_impl->maxSamplesPerPixel.store(clampMaxSamples(max));
+    const int clamped = clampMaxSamples(max);
+    m_impl->maxSamplesPerPixel.store(clamped);
+    m_impl->hostRenderParams.maxSamplesPerPixel = clamped;
+    m_impl->renderParamsDirty.store(true);
     notifyWorker();
 }
 
 int PathTracer::maxSamplesPerPixel() const
 {
     return m_impl->maxSamplesPerPixel.load();
+}
+
+void PathTracer::setMinSamples(int min)
+{
+    const int clamped = clampMinSamples(min);
+    m_impl->minSamples.store(clamped);
+    m_impl->hostRenderParams.minSamples = clamped;
+    m_impl->renderParamsDirty.store(true);
+    if (m_impl->configured.load()) {
+        resetAccumulation();
+    }
+    notifyWorker();
+}
+
+int PathTracer::minSamples() const
+{
+    return m_impl->minSamples.load();
+}
+
+void PathTracer::setRelativeErrorThreshold(float threshold)
+{
+    const float clamped = clampRelativeErrorThreshold(threshold);
+    m_impl->relativeErrorThreshold.store(clamped);
+    m_impl->hostRenderParams.relativeErrorThreshold = clamped;
+    m_impl->renderParamsDirty.store(true);
+    if (m_impl->configured.load()) {
+        resetAccumulation();
+    }
+    notifyWorker();
+}
+
+float PathTracer::relativeErrorThreshold() const
+{
+    return m_impl->relativeErrorThreshold.load();
+}
+
+void PathTracer::setDebugOverlayMode(int mode)
+{
+    if (mode < 0) {
+        mode = 0;
+    }
+    if (mode > 2) {
+        mode = 2;
+    }
+    m_impl->debugOverlayMode.store(mode);
+    m_impl->hostRenderParams.debugOverlayMode = mode;
+    m_impl->renderParamsDirty.store(true);
+    notifyWorker();
+}
+
+int PathTracer::debugOverlayMode() const
+{
+    return m_impl->debugOverlayMode.load();
 }
 
 void PathTracer::setPreviewStepsPerLevel(int steps)
@@ -1282,6 +1488,11 @@ int PathTracer::currentSampleCount() const
     return m_impl->sampleCount.load();
 }
 
+int PathTracer::currentActivePixelCount() const
+{
+    return m_impl->activePixelCount.load();
+}
+
 int PathTracer::sampleBudgetTotalIterations() const
 {
     return ::sampleBudgetTotalIterations(
@@ -1291,10 +1502,18 @@ int PathTracer::sampleBudgetTotalIterations() const
 
 bool PathTracer::isSampleBudgetExhausted() const
 {
-    return ::isSampleBudgetExhausted(
-        m_impl->sampleCount.load(),
-        m_impl->previewStepsPerLevel.load(),
-        m_impl->maxSamplesPerPixel.load());
+    const int previewSteps = m_impl->previewStepsPerLevel.load();
+    const int sampleCount = m_impl->sampleCount.load();
+    if (sampleCount < previewSteps) {
+        return ::isSampleBudgetExhausted(
+            sampleCount,
+            previewSteps,
+            m_impl->maxSamplesPerPixel.load());
+    }
+    return isAdaptiveSampleBudgetExhausted(
+        m_impl->activePixelCount.load(),
+        previewSteps,
+        sampleCount);
 }
 
 void PathTracer::setCamera(const CameraGpu& camera)
@@ -1650,6 +1869,9 @@ void PathTracer::renderLoop()
 
         QString cameraError;
         bool sampleLaunched = false;
+        bool pendingActiveListUpdate = false;
+        bool pendingActiveIndicesSwap = false;
+        int pendingNewActiveCount = 0;
         {
             std::lock_guard<std::mutex> streamLock(m_impl->streamMutex);
 
@@ -1701,19 +1923,64 @@ void PathTracer::renderLoop()
                     AppLog::instance().error(QStringLiteral("PathTracer preview sample kernel launch failed"));
                 }
             } else {
-                sampleLaunched = pathTracerSample(
-                    m_impl->acc.d_buffer,
-                    m_impl->acc.d_samples,
-                    m_impl->acc.width,
-                    m_impl->acc.height,
-                    m_impl->d_camera,
-                    deviceScene,
-                    deviceEnv,
-                    m_impl->d_renderParams,
-                    globalSeed,
-                    m_impl->stream);
-                if (!sampleLaunched) {
-                    AppLog::instance().error(QStringLiteral("PathTracer sample kernel launch failed"));
+                const int activeCount = m_impl->activePixelCount.load();
+                const int fullResWave = iter - previewCount + 1;
+                const bool runCompact =
+                    activeCount > 0 &&
+                    (fullResWave % kCompactActiveListInterval) == 0;
+
+                if (activeCount > 0) {
+                    sampleLaunched = pathTracerAdaptiveSample(
+                        m_impl->acc.d_buffer,
+                        m_impl->acc.d_samples,
+                        m_impl->acc.d_lumMean,
+                        m_impl->acc.d_m2,
+                        m_impl->acc.d_converged,
+                        m_impl->acc.d_activeIndices,
+                        activeCount,
+                        m_impl->acc.width,
+                        m_impl->acc.height,
+                        m_impl->d_camera,
+                        deviceScene,
+                        deviceEnv,
+                        m_impl->d_renderParams,
+                        globalSeed,
+                        m_impl->stream);
+                    if (!sampleLaunched) {
+                        AppLog::instance().error(QStringLiteral("PathTracer adaptive sample kernel launch failed"));
+                    } else if (runCompact) {
+                        const int maxSamples = m_impl->maxSamplesPerPixel.load();
+                        if (!pathTracerCompactActiveList(
+                                m_impl->acc.d_activeIndices,
+                                m_impl->acc.d_activeScratch,
+                                m_impl->acc.d_activeCount,
+                                m_impl->acc.d_converged,
+                                m_impl->acc.d_samples,
+                                maxSamples,
+                                activeCount,
+                                m_impl->stream)) {
+                            AppLog::instance().error(
+                                QStringLiteral("PathTracer compact active list kernel launch failed"));
+                            sampleLaunched = false;
+                        } else {
+                            pendingNewActiveCount = 0;
+                            const cudaError_t countError = cudaMemcpyAsync(
+                                &pendingNewActiveCount,
+                                m_impl->acc.d_activeCount,
+                                sizeof(int),
+                                cudaMemcpyDeviceToHost,
+                                m_impl->stream);
+                            if (countError != cudaSuccess) {
+                                AppLog::instance().error(
+                                    QStringLiteral("PathTracer active count readback failed: %1")
+                                        .arg(cudaErrorString(countError)));
+                                sampleLaunched = false;
+                            } else {
+                                pendingActiveListUpdate = true;
+                                pendingActiveIndicesSwap = true;
+                            }
+                        }
+                    }
                 }
             }
 
@@ -1724,11 +1991,16 @@ void PathTracer::renderLoop()
                     AppLog::instance().error(
                         QStringLiteral("CUDA event record failed: %1").arg(cudaErrorString(recordError)));
                     sampleLaunched = false;
+                    pendingActiveListUpdate = false;
+                    pendingActiveIndicesSwap = false;
                 }
             }
         }
 
         if (!sampleLaunched) {
+            if (!previewPass && m_impl->activePixelCount.load() > 0) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
             continue;
         }
 
@@ -1755,6 +2027,13 @@ void PathTracer::renderLoop()
 
         if (waitResult == SampleWaitResult::ResetDuringWait) {
             continue;
+        }
+
+        if (pendingActiveListUpdate) {
+            m_impl->activePixelCount.store(pendingNewActiveCount);
+            if (pendingActiveIndicesSwap) {
+                std::swap(m_impl->acc.d_activeIndices, m_impl->acc.d_activeScratch);
+            }
         }
 
 #ifdef PATHTRACER_PROFILE

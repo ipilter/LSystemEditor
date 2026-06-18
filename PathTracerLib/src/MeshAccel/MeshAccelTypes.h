@@ -9,6 +9,7 @@ enum class MeshAccelBoundsOverlayMode : int
 {
     Off = 0,
     Bvh = 1,
+    AdaptiveSampling = 2,
 };
 
 enum MeshBvhNodeFlags : uint32_t

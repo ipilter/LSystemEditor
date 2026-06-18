@@ -12,13 +12,24 @@
 bool pathTracerClearAccumulator(
     float4* d_buffer,
     uint32_t* d_samples,
+    float* d_lumMean,
+    float* d_m2,
+    uint8_t* d_converged,
+    int* d_activeIndices,
+    int* d_activeScratch,
+    int* d_activeCount,
     int width,
     int height,
     cudaStream_t stream);
 
-bool pathTracerSample(
+bool pathTracerAdaptiveSample(
     float4* d_buffer,
     uint32_t* d_samples,
+    float* d_lumMean,
+    float* d_m2,
+    uint8_t* d_converged,
+    const int* d_activeIndices,
+    int activeCount,
     int width,
     int height,
     const CameraGpu* d_camera,
@@ -26,6 +37,16 @@ bool pathTracerSample(
     const EnvironmentMapGpu* d_env,
     const RenderParamsGpu* d_params,
     unsigned int globalSeed,
+    cudaStream_t stream);
+
+bool pathTracerCompactActiveList(
+    const int* d_activeIndicesIn,
+    int* d_activeIndicesOut,
+    int* d_activeCount,
+    const uint8_t* d_converged,
+    const uint32_t* d_counts,
+    int maxSamplesPerPixel,
+    int inCount,
     cudaStream_t stream);
 
 bool pathTracerPreviewSample(
@@ -42,6 +63,7 @@ bool pathTracerPreviewSample(
 bool pathTracerCopyToPbo(
     const float4* acc,
     const uint32_t* counts,
+    const uint8_t* converged,
     uchar4* pbo,
     int width,
     int height,

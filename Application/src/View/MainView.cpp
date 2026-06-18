@@ -33,6 +33,12 @@ constexpr int kDefaultRenderDimension = 256;
 constexpr int kMinMaxSamplesPerPixel = 0;
 constexpr int kMaxMaxSamplesPerPixel = 1'000'000;
 constexpr int kDefaultMaxSamplesPerPixel = 1024;
+constexpr int kMinMinSamples = 1;
+constexpr int kMaxMinSamples = 10000;
+constexpr int kDefaultMinSamples = 16;
+constexpr double kMinRelativeErrorThreshold = 0.001;
+constexpr double kMaxRelativeErrorThreshold = 1.0;
+constexpr double kDefaultRelativeErrorThreshold = 0.02;
 constexpr int kMinPreviewStepsPerLevel = 0;
 constexpr int kMaxPreviewStepsPerLevel = 4;
 constexpr int kDefaultPreviewStepsPerLevel = 1;
@@ -94,14 +100,37 @@ MainView::MainView(QWidget* parent)
     heightRow->addWidget(m_renderHeightSpinBox);
     renderLayout->addLayout(heightRow);
 
-    auto* samplesRow = new QHBoxLayout();
-    samplesRow->addWidget(new QLabel(QStringLiteral("Samples:"), renderGroup));
+    auto* maxSamplesRow = new QHBoxLayout();
+    maxSamplesRow->addWidget(new QLabel(QStringLiteral("Max samples:"), renderGroup));
     m_maxSamplesSpinBox = new QSpinBox(renderGroup);
     m_maxSamplesSpinBox->setRange(kMinMaxSamplesPerPixel, kMaxMaxSamplesPerPixel);
     m_maxSamplesSpinBox->setValue(kDefaultMaxSamplesPerPixel);
-    m_maxSamplesSpinBox->setToolTip(QStringLiteral("Max samples per pixel (0 = unlimited)"));
-    samplesRow->addWidget(m_maxSamplesSpinBox);
-    renderLayout->addLayout(samplesRow);
+    m_maxSamplesSpinBox->setToolTip(
+        QStringLiteral("Per-pixel sample cap for adaptive sampling (0 = unlimited)."));
+    maxSamplesRow->addWidget(m_maxSamplesSpinBox);
+    renderLayout->addLayout(maxSamplesRow);
+
+    auto* minSamplesRow = new QHBoxLayout();
+    minSamplesRow->addWidget(new QLabel(QStringLiteral("Min samples:"), renderGroup));
+    m_minSamplesSpinBox = new QSpinBox(renderGroup);
+    m_minSamplesSpinBox->setRange(kMinMinSamples, kMaxMinSamples);
+    m_minSamplesSpinBox->setValue(kDefaultMinSamples);
+    m_minSamplesSpinBox->setToolTip(
+        QStringLiteral("Minimum samples per pixel before convergence can be declared."));
+    minSamplesRow->addWidget(m_minSamplesSpinBox);
+    renderLayout->addLayout(minSamplesRow);
+
+    auto* errorRow = new QHBoxLayout();
+    errorRow->addWidget(new QLabel(QStringLiteral("Error:"), renderGroup));
+    m_relativeErrorThresholdSpinBox = new QDoubleSpinBox(renderGroup);
+    m_relativeErrorThresholdSpinBox->setRange(kMinRelativeErrorThreshold, kMaxRelativeErrorThreshold);
+    m_relativeErrorThresholdSpinBox->setDecimals(3);
+    m_relativeErrorThresholdSpinBox->setSingleStep(0.005);
+    m_relativeErrorThresholdSpinBox->setValue(kDefaultRelativeErrorThreshold);
+    m_relativeErrorThresholdSpinBox->setToolTip(
+        QStringLiteral("Relative luminance error threshold (lower = cleaner, slower)."));
+    errorRow->addWidget(m_relativeErrorThresholdSpinBox);
+    renderLayout->addLayout(errorRow);
 
     auto* previewRow = new QHBoxLayout();
     previewRow->addWidget(new QLabel(QStringLiteral("Preview:"), renderGroup));
@@ -133,8 +162,10 @@ MainView::MainView(QWidget* parent)
     m_boundsOverlayComboBox = new QComboBox(renderGroup);
     m_boundsOverlayComboBox->addItem(QStringLiteral("Off"));
     m_boundsOverlayComboBox->addItem(QStringLiteral("BVH"));
+    m_boundsOverlayComboBox->addItem(QStringLiteral("Adaptive"));
     m_boundsOverlayComboBox->setToolTip(
-        QStringLiteral("Debug wireframe overlay for BVH node bounds."));
+        QStringLiteral(
+            "Debug overlays: BVH wireframe bounds, or Adaptive sampling (red = active, dark green = converged)."));
     boundsOverlayRow->addWidget(m_boundsOverlayComboBox, 1);
     renderLayout->addLayout(boundsOverlayRow);
 
@@ -266,11 +297,11 @@ MainView::MainView(QWidget* parent)
     m_lsystemEdit = new QPlainTextEdit(lsystemGroup);
     m_lsystemEdit->setPlaceholderText(QStringLiteral("L-system definition (axiom and rules)"));
     m_lsystemEdit->setPlainText(QStringLiteral(
-        "Mat(Black) = { 0.01, 0.01, 0.01, 1, 0, 0, 0, 1.5, 0, 0 }\n"
-        "Mat(MediumGrey) = { 0.5, 0.5, 0.5, 1, 0, 0, 0, 1.5, 0, 0 }\n"
-        "Mat(White) = { 1.0, 1.0, 1.0, 1, 0, 0, 0, 1.5, 0, 0 }\n"
-        "Mat(GreenGlass) = { 0.8, 0.95, 0.75, 0, 0, 0.95, 0, 1.45, 0, 0 }\n"
-        "Mat(Light) = { 0.60, 0.58, 0.10, 0, 0, 0, 0, 0, 0, 1 }\n"
+        "Mat(Black) = { 0.01, 0.01, 0.01, 1 }\n"
+        "Mat(MediumGrey) = { 0.5, 0.5, 0.5, 1 }\n"
+        "Mat(White) = { 1.0, 1.0, 1.0, 1 }\n"
+        "Mat(GreenGlass) = { 0.8, 0.95, 0.75, 0, 0, 0.95, 0, 1.45 }\n"
+        "Mat(Light) = { 0.60, 0.58, 0.10, 0, 0, 0, 0, 0, 0, 15 }\n"
         "d=0.2\n"
         "[Pitch(-90) Mat(White) f(-10000.5) F(0, 10000)]\n"
         "\n"
@@ -443,6 +474,16 @@ QSpinBox* MainView::maxSamplesSpinBox() const
     return m_maxSamplesSpinBox;
 }
 
+QSpinBox* MainView::minSamplesSpinBox() const
+{
+    return m_minSamplesSpinBox;
+}
+
+QDoubleSpinBox* MainView::relativeErrorThresholdSpinBox() const
+{
+    return m_relativeErrorThresholdSpinBox;
+}
+
 QSpinBox* MainView::previewStepsSpinBox() const
 {
     return m_previewStepsSpinBox;
@@ -510,19 +551,29 @@ void MainView::setIteration(int value)
     }
 }
 
-void MainView::setRenderState(RenderAccumulationState state, int sampleCount, int budgetTotal)
+void MainView::setRenderState(
+    RenderAccumulationState state,
+    int sampleCount,
+    int budgetTotal,
+    int activePixelCount)
 {
-    Q_UNUSED(sampleCount);
-
     if (m_renderStateLabel == nullptr) {
         return;
     }
 
     QString text = renderAccumulationStateLabel(state);
-    if (budgetTotal >= 0 && state == RenderAccumulationState::BudgetReached) {
-        text += QStringLiteral(" (%1/%2)").arg(sampleCount).arg(budgetTotal);
-    } else if (budgetTotal >= 0 && state == RenderAccumulationState::Accumulating) {
-        text += QStringLiteral(" (%1/%2)").arg(sampleCount).arg(budgetTotal);
+    if (state == RenderAccumulationState::BudgetReached) {
+        if (activePixelCount >= 0) {
+            text += QStringLiteral(" (%1, converged)").arg(sampleCount);
+        } else if (budgetTotal >= 0) {
+            text += QStringLiteral(" (%1/%2)").arg(sampleCount).arg(budgetTotal);
+        }
+    } else if (state == RenderAccumulationState::Accumulating) {
+        if (activePixelCount >= 0) {
+            text += QStringLiteral(" (%1, %2 active)").arg(sampleCount).arg(activePixelCount);
+        } else if (budgetTotal >= 0) {
+            text += QStringLiteral(" (%1/%2)").arg(sampleCount).arg(budgetTotal);
+        }
     }
 
     m_renderStateLabel->setText(text);

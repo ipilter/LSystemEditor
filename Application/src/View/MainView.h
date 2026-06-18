@@ -39,6 +39,8 @@ public:
     QSpinBox* renderWidthSpinBox() const;
     QSpinBox* renderHeightSpinBox() const;
     QSpinBox* maxSamplesSpinBox() const;
+    QSpinBox* minSamplesSpinBox() const;
+    QDoubleSpinBox* relativeErrorThresholdSpinBox() const;
     QSpinBox* previewStepsSpinBox() const;
     QSpinBox* russianRouletteMinDepthSpinBox() const;
     QComboBox* boundsOverlayComboBox() const;
@@ -53,7 +55,7 @@ public:
     QSpinBox* lsystemIterationsSpinBox() const;
 
     void setIteration(int value);
-    void setRenderState(RenderAccumulationState state, int sampleCount, int budgetTotal);
+    void setRenderState(RenderAccumulationState state, int sampleCount, int budgetTotal, int activePixelCount);
 
 protected:
     void closeEvent(QCloseEvent* event) override;
@@ -80,6 +82,8 @@ private:
     QSpinBox* m_renderWidthSpinBox = nullptr;
     QSpinBox* m_renderHeightSpinBox = nullptr;
     QSpinBox* m_maxSamplesSpinBox = nullptr;
+    QSpinBox* m_minSamplesSpinBox = nullptr;
+    QDoubleSpinBox* m_relativeErrorThresholdSpinBox = nullptr;
     QSpinBox* m_previewStepsSpinBox = nullptr;
     QSpinBox* m_russianRouletteMinDepthSpinBox = nullptr;
     QComboBox* m_boundsOverlayComboBox = nullptr;

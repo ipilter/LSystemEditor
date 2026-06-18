@@ -30,6 +30,12 @@ public:
     int maxSamplesPerPixel() const;
     void setMaxSamplesPerPixel(int value);
 
+    int minSamples() const;
+    void setMinSamples(int value);
+
+    float relativeErrorThreshold() const;
+    void setRelativeErrorThreshold(float value);
+
     int previewStepsPerLevel() const;
     void setPreviewStepsPerLevel(int value);
 
@@ -71,6 +77,8 @@ signals:
     void clearColorChanged(const QColor& color);
     void renderSizeChanged(const QSize& size);
     void maxSamplesPerPixelChanged(int value);
+    void minSamplesChanged(int value);
+    void relativeErrorThresholdChanged(float value);
     void previewStepsPerLevelChanged(int value);
     void russianRouletteMinDepthChanged(int value);
     void boundsOverlayModeChanged(MeshAccelBoundsOverlayMode mode);
@@ -86,6 +94,8 @@ private:
     static MeshAccelBoundsOverlayMode clampBoundsOverlayMode(MeshAccelBoundsOverlayMode mode);
     static int clampDimension(int value);
     static int clampMaxSamples(int value);
+    static int clampMinSamples(int value);
+    static float clampRelativeErrorThreshold(float value);
     static int clampPreviewSteps(int value);
     static int clampRussianRouletteMinDepth(int value);
     static float clampCreaseAngleDeg(float value);
@@ -97,6 +107,8 @@ private:
     QColor m_clearColor;
     QSize m_renderSize;
     int m_maxSamplesPerPixel = 8;
+    int m_minSamples = 16;
+    float m_relativeErrorThreshold = 0.02f;
     int m_previewStepsPerLevel = 2;
     int m_russianRouletteMinDepth = 3;
     MeshAccelBoundsOverlayMode m_boundsOverlayMode = MeshAccelBoundsOverlayMode::Off;

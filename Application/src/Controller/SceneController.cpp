@@ -35,6 +35,8 @@ MeshAccelBoundsOverlayMode boundsOverlayModeFromComboIndex(int index)
     switch (index) {
     case 1:
         return MeshAccelBoundsOverlayMode::Bvh;
+    case 2:
+        return MeshAccelBoundsOverlayMode::AdaptiveSampling;
     case 0:
     default:
         return MeshAccelBoundsOverlayMode::Off;
@@ -46,6 +48,8 @@ int comboIndexFromBoundsOverlayMode(MeshAccelBoundsOverlayMode mode)
     switch (mode) {
     case MeshAccelBoundsOverlayMode::Bvh:
         return 1;
+    case MeshAccelBoundsOverlayMode::AdaptiveSampling:
+        return 2;
     case MeshAccelBoundsOverlayMode::Off:
     default:
         return 0;
@@ -109,6 +113,8 @@ SceneController::SceneController(SceneModel* model, MainView* view, QObject* par
 
     syncRenderSpinBoxes();
     syncMaxSamplesSpinBox();
+    syncMinSamplesSpinBox();
+    syncRelativeErrorThresholdSpinBox();
     syncPreviewStepsSpinBox();
     syncRussianRouletteMinDepthSpinBox();
     syncBoundsOverlayComboBox();
@@ -124,6 +130,10 @@ SceneController::SceneController(SceneModel* model, MainView* view, QObject* par
     connect(m_model, &SceneModel::clearColorChanged, this, &SceneController::onClearColorChanged);
     connect(m_model, &SceneModel::renderSizeChanged, this, &SceneController::onRenderSizeChanged);
     connect(m_model, &SceneModel::maxSamplesPerPixelChanged, this, [this](int) { syncMaxSamplesSpinBox(); });
+    connect(m_model, &SceneModel::minSamplesChanged, this, [this](int) { syncMinSamplesSpinBox(); });
+    connect(m_model, &SceneModel::relativeErrorThresholdChanged, this, [this](float) {
+        syncRelativeErrorThresholdSpinBox();
+    });
     connect(m_model, &SceneModel::previewStepsPerLevelChanged, this, [this](int) { syncPreviewStepsSpinBox(); });
     connect(m_model, &SceneModel::russianRouletteMinDepthChanged, this, [this](int) {
         syncRussianRouletteMinDepthSpinBox();
@@ -134,6 +144,12 @@ SceneController::SceneController(SceneModel* model, MainView* view, QObject* par
     connect(m_view->renderWidthSpinBox(), &QSpinBox::valueChanged, this, &SceneController::onRenderSizeSpinBoxChanged);
     connect(m_view->renderHeightSpinBox(), &QSpinBox::valueChanged, this, &SceneController::onRenderSizeSpinBoxChanged);
     connect(m_view->maxSamplesSpinBox(), &QSpinBox::valueChanged, this, &SceneController::onMaxSamplesSpinBoxChanged);
+    connect(m_view->minSamplesSpinBox(), &QSpinBox::valueChanged, this, &SceneController::onMinSamplesSpinBoxChanged);
+    connect(
+        m_view->relativeErrorThresholdSpinBox(),
+        QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+        this,
+        &SceneController::onRelativeErrorThresholdSpinBoxChanged);
     connect(m_view->previewStepsSpinBox(), &QSpinBox::valueChanged, this, &SceneController::onPreviewStepsSpinBoxChanged);
     connect(
         m_view->russianRouletteMinDepthSpinBox(),
@@ -270,6 +286,17 @@ void SceneController::onMaxSamplesSpinBoxChanged()
 void SceneController::applyMaxSamplesFromSpinBox()
 {
     m_model->setMaxSamplesPerPixel(m_view->maxSamplesSpinBox()->value());
+}
+
+void SceneController::onMinSamplesSpinBoxChanged()
+{
+    m_model->setMinSamples(m_view->minSamplesSpinBox()->value());
+}
+
+void SceneController::onRelativeErrorThresholdSpinBoxChanged()
+{
+    m_model->setRelativeErrorThreshold(
+        static_cast<float>(m_view->relativeErrorThresholdSpinBox()->value()));
 }
 
 void SceneController::onPreviewStepsSpinBoxChanged()
@@ -426,6 +453,20 @@ void SceneController::syncMaxSamplesSpinBox()
     m_view->maxSamplesSpinBox()->blockSignals(true);
     m_view->maxSamplesSpinBox()->setValue(m_model->maxSamplesPerPixel());
     m_view->maxSamplesSpinBox()->blockSignals(false);
+}
+
+void SceneController::syncMinSamplesSpinBox()
+{
+    m_view->minSamplesSpinBox()->blockSignals(true);
+    m_view->minSamplesSpinBox()->setValue(m_model->minSamples());
+    m_view->minSamplesSpinBox()->blockSignals(false);
+}
+
+void SceneController::syncRelativeErrorThresholdSpinBox()
+{
+    m_view->relativeErrorThresholdSpinBox()->blockSignals(true);
+    m_view->relativeErrorThresholdSpinBox()->setValue(m_model->relativeErrorThreshold());
+    m_view->relativeErrorThresholdSpinBox()->blockSignals(false);
 }
 
 void SceneController::syncPreviewStepsSpinBox()

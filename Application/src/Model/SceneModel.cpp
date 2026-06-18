@@ -17,6 +17,10 @@ constexpr float kMinCreaseAngleDeg = 0.0f;
 constexpr float kMaxCreaseAngleDeg = 180.0f;
 constexpr float kMinEnvironmentIntensity = 0.0f;
 constexpr float kMaxEnvironmentIntensity = 100.0f;
+constexpr int kMinMinSamples = 1;
+constexpr int kMaxMinSamples = 10'000;
+constexpr float kMinRelativeErrorThreshold = 0.001f;
+constexpr float kMaxRelativeErrorThreshold = 1.0f;
 } // namespace
 
 SceneModel::SceneModel(QObject* parent)
@@ -24,6 +28,8 @@ SceneModel::SceneModel(QObject* parent)
     , m_clearColor(AppSettings::instance().clearColor())
     , m_renderSize(AppSettings::instance().renderSize())
     , m_maxSamplesPerPixel(AppSettings::instance().maxSamplesPerPixel())
+    , m_minSamples(AppSettings::instance().minSamples())
+    , m_relativeErrorThreshold(AppSettings::instance().relativeErrorThreshold())
     , m_previewStepsPerLevel(AppSettings::instance().previewStepsPerLevel())
     , m_russianRouletteMinDepth(AppSettings::instance().russianRouletteMinDepth())
     , m_accelBvhColor(AppSettings::instance().accelBvhColor())
@@ -90,6 +96,40 @@ void SceneModel::setMaxSamplesPerPixel(int value)
     m_maxSamplesPerPixel = clamped;
     AppSettings::instance().setMaxSamplesPerPixel(clamped);
     emit maxSamplesPerPixelChanged(m_maxSamplesPerPixel);
+}
+
+int SceneModel::minSamples() const
+{
+    return m_minSamples;
+}
+
+void SceneModel::setMinSamples(int value)
+{
+    const int clamped = clampMinSamples(value);
+    if (m_minSamples == clamped) {
+        return;
+    }
+
+    m_minSamples = clamped;
+    AppSettings::instance().setMinSamples(clamped);
+    emit minSamplesChanged(m_minSamples);
+}
+
+float SceneModel::relativeErrorThreshold() const
+{
+    return m_relativeErrorThreshold;
+}
+
+void SceneModel::setRelativeErrorThreshold(float value)
+{
+    const float clamped = clampRelativeErrorThreshold(value);
+    if (m_relativeErrorThreshold == clamped) {
+        return;
+    }
+
+    m_relativeErrorThreshold = clamped;
+    AppSettings::instance().setRelativeErrorThreshold(clamped);
+    emit relativeErrorThresholdChanged(m_relativeErrorThreshold);
 }
 
 int SceneModel::previewStepsPerLevel() const
@@ -320,6 +360,28 @@ int SceneModel::clampMaxSamples(int value)
     return value;
 }
 
+int SceneModel::clampMinSamples(int value)
+{
+    if (value < kMinMinSamples) {
+        return kMinMinSamples;
+    }
+    if (value > kMaxMinSamples) {
+        return kMaxMinSamples;
+    }
+    return value;
+}
+
+float SceneModel::clampRelativeErrorThreshold(float value)
+{
+    if (value < kMinRelativeErrorThreshold) {
+        return kMinRelativeErrorThreshold;
+    }
+    if (value > kMaxRelativeErrorThreshold) {
+        return kMaxRelativeErrorThreshold;
+    }
+    return value;
+}
+
 int SceneModel::clampPreviewSteps(int value)
 {
     if (value < kMinPreviewStepsPerLevel) {
@@ -347,14 +409,10 @@ MeshAccelBoundsOverlayMode SceneModel::clampBoundsOverlayMode(MeshAccelBoundsOve
     switch (mode) {
     case MeshAccelBoundsOverlayMode::Off:
     case MeshAccelBoundsOverlayMode::Bvh:
+    case MeshAccelBoundsOverlayMode::AdaptiveSampling:
         return mode;
-    default: {
-        const int raw = static_cast<int>(mode);
-        if (raw == 1 || raw == 2 || raw == 3) {
-            return MeshAccelBoundsOverlayMode::Bvh;
-        }
+    default:
         return MeshAccelBoundsOverlayMode::Off;
-    }
     }
 }
 

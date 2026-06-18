@@ -20,4 +20,8 @@ struct RenderParamsGpu
     float environmentIntensity = 1.0f;
     int maxPathDepth = 32;
     int russianRouletteMinDepth = 3;
+    int minSamples = 16;
+    int maxSamplesPerPixel = 1024;
+    int debugOverlayMode = 0;
+    float relativeErrorThreshold = 0.02f;
 };
