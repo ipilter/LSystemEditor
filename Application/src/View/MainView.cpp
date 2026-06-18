@@ -159,14 +159,17 @@ MainView::MainView(QWidget* parent)
     renderLayout->addLayout(rrDepthRow);
 
     auto* boundsOverlayRow = new QHBoxLayout();
-    boundsOverlayRow->addWidget(new QLabel(QStringLiteral("Bounds:"), renderGroup));
+    boundsOverlayRow->addWidget(new QLabel(QStringLiteral("View Mode:"), renderGroup));
     m_boundsOverlayComboBox = new QComboBox(renderGroup);
     m_boundsOverlayComboBox->addItem(QStringLiteral("Off"));
     m_boundsOverlayComboBox->addItem(QStringLiteral("BVH"));
     m_boundsOverlayComboBox->addItem(QStringLiteral("Adaptive"));
+    m_boundsOverlayComboBox->addItem(QStringLiteral("UV"));
     m_boundsOverlayComboBox->setToolTip(
         QStringLiteral(
-            "Debug overlays: BVH wireframe bounds, or Adaptive sampling (red = active, dark green = converged)."));
+            "View modes: Off (path-traced image), BVH wireframe overlay, "
+            "Adaptive sampling (red = active, dark green = converged), "
+            "UV (U to red, V to green)."));
     boundsOverlayRow->addWidget(m_boundsOverlayComboBox, 1);
     renderLayout->addLayout(boundsOverlayRow);
 
@@ -338,19 +341,16 @@ MainView::MainView(QWidget* parent)
     m_lsystemEdit = new QPlainTextEdit(lsystemGroup);
     m_lsystemEdit->setPlaceholderText(QStringLiteral("L-system definition (axiom and rules)"));
     m_lsystemEdit->setPlainText(QStringLiteral(
-        "Mat(Black) = { 0.01, 0.01, 0.01, 1 }\n"
-        "Mat(MediumGrey) = { 0.5, 0.5, 0.5, 1 }\n"
-        "Mat(White) = { 1.0, 1.0, 1.0, 1 }\n"
-        "Mat(GreenGlass) = { 0.8, 0.95, 0.75, 0, 0, 0.95, 0, 1.45 }\n"
-        "Mat(Light) = { 0.60, 0.58, 0.10, 0, 0, 0, 0, 0, 0, 15 }\n"
-        "d=0.2\n"
-        "[Pitch(-90) Mat(White) f(-10000.5) F(0, 10000)]\n"
-        "\n"
-        "Mat(Black)\nF(0)\nf(d)\n"
-        "Mat(MediumGrey)\nF(0)\nf(d)\n"
-        "Mat(White)\nF(0)\nf(d)\n"
-        "Mat(GreenGlass)\nF(0)\nf(d)\n"
-        "Mat(Light)\nF(0, 0.05, 0.05)"));
+      "#{r, g, b, [roughness], [metallic], [transmission], [thin], [ior], [subsurface], [emission]}\n"
+      "#{{Grid, br, bg, bb, fr, fg, fb, [freq or freqU], [freqV], [thickness]}, [roughness], ..}\n"
+      "#{r, g, b, [roughness], [metallic], [transmission], [thin], [ior], [subsurface], {Stripe, frequency, lineThickness, [onValue], [offValue]}}\n\n"
+      "Mat(0) = { {Grid, 0.85, 0.85, 0.85,  0.05, 0.05, 0.05, 200, 200, 0.05}, 0.8 }\n"
+      "Mat(1) = { 0.9, 0.85, 0.7,   0.7, 1, 0, 0, 1.5, 0.8, {Stripe, 10, 0.1, 10, 0} }\n"
+      "Mat(0)\n"
+      "Pitch(-90) f(-1) F(1, 10.0, 10.0)\n"
+      "f(0.25)\n"
+      "Mat(1)\n"
+      "F(0, 0.25)\n"));;
 
     m_lsystemEdit->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     lsystemLayout->addWidget(m_lsystemEdit, 1);

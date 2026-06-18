@@ -33,6 +33,7 @@ public:
     const std::vector<TriangleGpu>& trianglesHost() const { return m_triangles; }
     const std::vector<MeshBvhNode>& bvhNodesHost() const { return m_bvhNodes; }
     const std::vector<MaterialGpu>& materialsHost() const { return m_materials; }
+    const std::vector<TextureDescGpu>& texturesHost() const { return m_textures; }
     const std::vector<uint32_t>& emissiveTriangleIndicesHost() const { return m_emissiveTriangleIndices; }
 
     /** @brief Writes Wavefront OBJ + sibling MTL from cached host geometry and materials. */
@@ -42,6 +43,7 @@ private:
     std::vector<MeshBvhNode> m_bvhNodes;
     std::vector<TriangleGpu> m_triangles;
     std::vector<MaterialGpu> m_materials;
+    std::vector<TextureDescGpu> m_textures;
     std::vector<uint32_t> m_emissiveTriangleIndices;
     MeshAccelSceneGpu m_hostScene{};
     bool m_built = false;
@@ -51,6 +53,7 @@ private:
     TriangleGpu* m_dTriangles = nullptr;
     MaterialGpu* m_dMaterials = nullptr;
     uint32_t* m_dEmissiveTriangleIndices = nullptr;
+    TextureDescGpu* m_dTextures = nullptr;
 
     bool m_deviceDirty = true;
 };

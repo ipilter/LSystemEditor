@@ -284,7 +284,8 @@ void OpenGLViewportWidget::setSceneModel(SceneModel* model)
 
     connect(m_model, &SceneModel::boundsOverlayModeChanged, this, [this](MeshAccelBoundsOverlayMode mode) {
         m_pathTracer.setDebugOverlayMode(static_cast<int>(mode));
-        update();
+        rebuildBoundsOverlay();
+        refreshDisplayImage();
     });
 
     connect(m_model, &SceneModel::minSamplesChanged, this, [this](int min) {
@@ -542,6 +543,23 @@ void OpenGLViewportWidget::rebuildBoundsOverlay()
 
     m_pathTracer.rebuildMeshBoundsMesh(m_model->accelBvhColor());
     m_boundsOverlay.rebuild(this, m_pathTracer.meshBoundsMesh());
+}
+
+void OpenGLViewportWidget::refreshDisplayImage()
+{
+    if (!m_glInitialized || m_model == nullptr || !m_textureAllocated) {
+        update();
+        return;
+    }
+
+    makeCurrent();
+    const int slot = m_displaySlot;
+    if (m_pathTracer.publishDisplayFrame(slot)) {
+        uploadDisplayTexture(slot, false);
+        m_displaySlot = 1 - slot;
+    }
+    doneCurrent();
+    update();
 }
 
 void OpenGLViewportWidget::drawSceneOverlays()

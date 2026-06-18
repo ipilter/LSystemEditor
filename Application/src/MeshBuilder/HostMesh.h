@@ -14,6 +14,9 @@ struct HostTriangle
     Vec3 n0{};
     Vec3 n1{};
     Vec3 n2{};
+    Vec2 uv0{};
+    Vec2 uv1{};
+    Vec2 uv2{};
     uint32_t materialIndex = 0;
 };
 
@@ -21,6 +24,7 @@ struct HostMesh
 {
     std::vector<HostTriangle> triangles;
     std::vector<MaterialGpu> materials;
+    std::vector<TextureDescGpu> textures;
 };
 
 struct HostMeshAabb
@@ -78,5 +82,36 @@ inline void hostMeshAppend(HostMesh& dst, const HostMesh& src, const uint32_t ma
         dst.triangles[i].materialIndex += materialIndexOffset;
     }
 
+    const uint32_t textureIndexOffset = static_cast<uint32_t>(dst.textures.size());
+    dst.textures.insert(dst.textures.end(), src.textures.begin(), src.textures.end());
+
+    const size_t materialOffset = dst.materials.size();
     dst.materials.insert(dst.materials.end(), src.materials.begin(), src.materials.end());
+    for (size_t i = materialOffset; i < dst.materials.size(); ++i) {
+        MaterialGpu& material = dst.materials[i];
+        if (material.albedoTex != 0u) {
+            material.albedoTex += textureIndexOffset;
+        }
+        if (material.roughnessTex != 0u) {
+            material.roughnessTex += textureIndexOffset;
+        }
+        if (material.metallicTex != 0u) {
+            material.metallicTex += textureIndexOffset;
+        }
+        if (material.transmissionTex != 0u) {
+            material.transmissionTex += textureIndexOffset;
+        }
+        if (material.thinTex != 0u) {
+            material.thinTex += textureIndexOffset;
+        }
+        if (material.iorTex != 0u) {
+            material.iorTex += textureIndexOffset;
+        }
+        if (material.subsurfaceTex != 0u) {
+            material.subsurfaceTex += textureIndexOffset;
+        }
+        if (material.emissionTex != 0u) {
+            material.emissionTex += textureIndexOffset;
+        }
+    }
 }

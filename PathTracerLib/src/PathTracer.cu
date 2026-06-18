@@ -508,6 +508,48 @@ __global__ void writeDisplayToPboKernel(
     pbo[y * outputWidth + x] = toneMapToUchar4(rgb);
 }
 
+__global__ void writeUvDebugToPboKernel(
+    const CameraGpu* camera,
+    const MeshAccelSceneGpu* scene,
+    uchar4* pbo,
+    int width,
+    int height,
+    const RenderParamsGpu* params)
+{
+    const int x = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
+    const int y = static_cast<int>(blockIdx.y * blockDim.y + threadIdx.y);
+    if (x >= width || y >= height || camera == nullptr || scene == nullptr || pbo == nullptr) {
+        return;
+    }
+
+    const float u = (static_cast<float>(x) + 0.5f) / static_cast<float>(width);
+    const float v = (static_cast<float>(y) + 0.5f) / static_cast<float>(height);
+
+    float3 roFloat{};
+    float3 rdFloat{};
+    cameraPrimaryRay(camera, u, v, roFloat, rdFloat);
+
+    float3 rgb{};
+    if (params != nullptr) {
+        rgb = make_float3(params->backgroundR, params->backgroundG, params->backgroundB);
+    }
+
+    const MeshHit hit = meshAccelTraceRay(
+        float3ToVec3(roFloat),
+        float3ToVec3(rdFloat),
+        scene,
+        0.001f,
+        1.0e30f);
+    if (hit.hit) {
+        rgb = make_float3(
+            hit.uv.x - floorf(hit.uv.x),
+            hit.uv.y - floorf(hit.uv.y),
+            0.0f);
+    }
+
+    pbo[y * width + x] = toneMapToUchar4(rgb);
+}
+
 dim3 grid2d(int width, int height, dim3 block)
 {
     return dim3(
@@ -867,5 +909,25 @@ bool pathTracerUpsamplePreviewToPbo(
         false,
         d_params,
         exposure);
+    return checkLaunch(cudaSuccess);
+}
+
+bool pathTracerWriteUvDebugToPbo(
+    const CameraGpu* d_camera,
+    const MeshAccelSceneGpu* d_scene,
+    uchar4* pbo,
+    int width,
+    int height,
+    const RenderParamsGpu* d_params,
+    cudaStream_t stream)
+{
+    if (d_camera == nullptr || d_scene == nullptr || pbo == nullptr || d_params == nullptr || width <= 0 ||
+        height <= 0) {
+        return false;
+    }
+
+    const dim3 block(16, 16);
+    const dim3 grid = grid2d(width, height, block);
+    writeUvDebugToPboKernel<<<grid, block, 0, stream>>>(d_camera, d_scene, pbo, width, height, d_params);
     return checkLaunch(cudaSuccess);
 }

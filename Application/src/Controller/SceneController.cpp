@@ -38,6 +38,8 @@ MeshAccelBoundsOverlayMode boundsOverlayModeFromComboIndex(int index)
         return MeshAccelBoundsOverlayMode::Bvh;
     case 2:
         return MeshAccelBoundsOverlayMode::AdaptiveSampling;
+    case 3:
+        return MeshAccelBoundsOverlayMode::Uv;
     case 0:
     default:
         return MeshAccelBoundsOverlayMode::Off;
@@ -51,6 +53,8 @@ int comboIndexFromBoundsOverlayMode(MeshAccelBoundsOverlayMode mode)
         return 1;
     case MeshAccelBoundsOverlayMode::AdaptiveSampling:
         return 2;
+    case MeshAccelBoundsOverlayMode::Uv:
+        return 3;
     case MeshAccelBoundsOverlayMode::Off:
     default:
         return 0;

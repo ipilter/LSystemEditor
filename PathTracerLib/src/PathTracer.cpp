@@ -1410,7 +1410,10 @@ bool PathTracer::publishDisplayFrame(int slot)
         return false;
     }
 
-    if (!m_impl->displayBuffersValid.load() || !hasDisplayableContent(*m_impl)) {
+    const int overlayMode = m_impl->debugOverlayMode.load();
+    const bool uvMode = overlayMode == static_cast<int>(MeshAccelBoundsOverlayMode::Uv);
+
+    if (!uvMode && (!m_impl->displayBuffersValid.load() || !hasDisplayableContent(*m_impl))) {
         return false;
     }
 
@@ -1434,12 +1437,14 @@ bool PathTracer::publishDisplayFrame(int slot)
 #endif
 
     QString error;
-    const cudaError_t waitError =
-        cudaStreamWaitEvent(m_impl->stream, m_impl->sampleCompleteEvent, 0);
-    if (waitError != cudaSuccess) {
-        AppLog::instance().error(
-            QStringLiteral("CUDA stream wait on sample event failed: %1").arg(cudaErrorString(waitError)));
-        return false;
+    if (!uvMode) {
+        const cudaError_t waitError =
+            cudaStreamWaitEvent(m_impl->stream, m_impl->sampleCompleteEvent, 0);
+        if (waitError != cudaSuccess) {
+            AppLog::instance().error(
+                QStringLiteral("CUDA stream wait on sample event failed: %1").arg(cudaErrorString(waitError)));
+            return false;
+        }
     }
 
     QString paramsError;
@@ -1447,6 +1452,12 @@ bool PathTracer::publishDisplayFrame(int slot)
     if (!syncRenderParamsToDevice(m_impl.get(), m_impl->stream, false, &paramsError, forceParamsSync)) {
         AppLog::instance().error(
             QStringLiteral("PathTracer render params upload failed during publish: %1").arg(paramsError));
+        return false;
+    }
+
+    if (!uploadCameraIfDirty(m_impl.get(), m_impl->stream, &error)) {
+        AppLog::instance().error(
+            QStringLiteral("PathTracer camera upload failed during publish: %1").arg(error));
         return false;
     }
 
@@ -1461,6 +1472,7 @@ bool PathTracer::publishDisplayFrame(int slot)
     const int finest = m_impl->finestCompletedPreview.load();
 
     const bool showPreview =
+        !uvMode &&
         !m_impl->regionEnabled.load() &&
         previewCount > 0 &&
         finest >= 0 &&
@@ -1474,7 +1486,16 @@ bool PathTracer::publishDisplayFrame(int slot)
     }
 
     bool copied = false;
-    if (showPreview) {
+    if (uvMode) {
+        copied = pathTracerWriteUvDebugToPbo(
+            m_impl->d_camera,
+            m_impl->meshScene.deviceScene(),
+            static_cast<uchar4*>(devicePointer),
+            m_impl->acc.width,
+            m_impl->acc.height,
+            m_impl->d_renderParams,
+            m_impl->stream);
+    } else if (showPreview) {
         const PreviewLevelData& level = m_impl->previewLevels[static_cast<std::size_t>(finest)];
         copied = pathTracerUpsamplePreviewToPbo(
             level.d_buffer,
@@ -1574,8 +1595,8 @@ void PathTracer::setDebugOverlayMode(int mode)
     if (mode < 0) {
         mode = 0;
     }
-    if (mode > 2) {
-        mode = 2;
+    if (mode > 3) {
+        mode = 3;
     }
     m_impl->debugOverlayMode.store(mode);
     m_impl->hostRenderParams.debugOverlayMode = mode;

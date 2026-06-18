@@ -480,6 +480,7 @@ MeshAccelBoundsOverlayMode SceneModel::clampBoundsOverlayMode(MeshAccelBoundsOve
     case MeshAccelBoundsOverlayMode::Off:
     case MeshAccelBoundsOverlayMode::Bvh:
     case MeshAccelBoundsOverlayMode::AdaptiveSampling:
+    case MeshAccelBoundsOverlayMode::Uv:
         return mode;
     default:
         return MeshAccelBoundsOverlayMode::Off;

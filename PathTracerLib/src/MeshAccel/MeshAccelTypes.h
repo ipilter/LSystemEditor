@@ -5,11 +5,40 @@
 #include <cstddef>
 #include <cstdint>
 
+#if defined(__CUDACC__)
+#include <cuda_runtime.h>
+#else
+#include <cuda_runtime.h>
+#endif
+
+enum class TextureKind : uint32_t
+{
+    ConstantScalar = 0,
+    ConstantRgb = 1,
+    Grid2D = 2,
+    Stripe1D = 3,
+};
+
+struct TextureDescGpu
+{
+    uint32_t kind = 0;
+    float4 p0 = make_float4(0.0f, 0.0f, 0.0f, 0.0f);
+    float4 p1 = make_float4(0.0f, 0.0f, 0.0f, 0.0f);
+    float4 p2 = make_float4(0.0f, 0.0f, 0.0f, 0.0f);
+};
+
+struct TextureEvalContext
+{
+    Vec2 uv{};
+    float u1d = 0.0f;
+};
+
 enum class MeshAccelBoundsOverlayMode : int
 {
     Off = 0,
     Bvh = 1,
     AdaptiveSampling = 2,
+    Uv = 3,
 };
 
 enum MeshBvhNodeFlags : uint32_t
@@ -32,6 +61,16 @@ struct alignas(16) MaterialGpu
     /** @brief Subsurface influence in [0, 1]. */
     float subsurface = 0.0f;
     float emission = 0.0f;
+
+    /** @brief 0 = use inline field; else index into scene texture bank. */
+    uint32_t albedoTex = 0;
+    uint32_t roughnessTex = 0;
+    uint32_t metallicTex = 0;
+    uint32_t transmissionTex = 0;
+    uint32_t thinTex = 0;
+    uint32_t iorTex = 0;
+    uint32_t subsurfaceTex = 0;
+    uint32_t emissionTex = 0;
 };
 
 static_assert(sizeof(MaterialGpu) % alignof(MaterialGpu) == 0);
@@ -44,13 +83,13 @@ struct alignas(16) TriangleGpu
     Vec3 n0{};
     Vec3 n1{};
     Vec3 n2{};
+    Vec2 uv0{};
+    Vec2 uv1{};
+    Vec2 uv2{};
     uint32_t materialIndex = 0;
-    uint32_t _pad0 = 0;
-    uint32_t _pad1 = 0;
-    uint32_t _pad2 = 0;
 };
 
-static_assert(sizeof(TriangleGpu) == 96);
+static_assert(sizeof(TriangleGpu) % alignof(TriangleGpu) == 0);
 
 struct alignas(16) MeshBvhNode
 {
@@ -77,19 +116,22 @@ struct alignas(16) MeshAccelSceneGpu
     const TriangleGpu* triangles = nullptr;
     const MaterialGpu* materials = nullptr;
     const uint32_t* emissiveTriangleIndices = nullptr;
+    const TextureDescGpu* textures = nullptr;
     uint32_t bvhNodeCount = 0;
     uint32_t triangleCount = 0;
     uint32_t bvhRootIndex = 0;
     uint32_t materialCount = 0;
     uint32_t emissiveTriangleCount = 0;
+    uint32_t textureCount = 0;
 };
 
-static_assert(sizeof(MeshAccelSceneGpu) == 64);
+static_assert(sizeof(MeshAccelSceneGpu) % alignof(MeshAccelSceneGpu) == 0);
 
 struct MeshHit
 {
     bool hit = false;
     float t = 0.0f;
     Vec3 normal{};
+    Vec2 uv{};
     uint32_t triangleIndex = 0;
 };

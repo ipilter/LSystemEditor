@@ -49,6 +49,38 @@ MESH_ACCEL_CORE_FN bool meshAccelRayAabb(
     return tExit >= tMin;
 }
 
+MESH_ACCEL_CORE_FN float interpolateSeamAwareComponent(
+    float c0,
+    float c1,
+    float c2,
+    float baryW,
+    float baryU,
+    float baryV)
+{
+    const float minC = fminf(fminf(c0, c1), c2);
+    const float maxC = fmaxf(fmaxf(c0, c1), c2);
+    if (maxC - minC <= 0.5f || maxC >= 0.99f) {
+        return c0 * baryW + c1 * baryU + c2 * baryV;
+    }
+
+    const float u1 = c1 < 0.5f ? c1 + 1.0f : c1;
+    const float u2 = c2 < 0.5f ? c2 + 1.0f : c2;
+    return c0 * baryW + u1 * baryU + u2 * baryV;
+}
+
+MESH_ACCEL_CORE_FN Vec2 interpolateTriangleUv(
+    Vec2 uv0,
+    Vec2 uv1,
+    Vec2 uv2,
+    float baryW,
+    float baryU,
+    float baryV)
+{
+    return Vec2{
+        interpolateSeamAwareComponent(uv0.x, uv1.x, uv2.x, baryW, baryU, baryV),
+        interpolateSeamAwareComponent(uv0.y, uv1.y, uv2.y, baryW, baryU, baryV)};
+}
+
 MESH_ACCEL_CORE_FN bool meshAccelRayTriangle(
     Vec3 ro,
     Vec3 rd,
@@ -56,7 +88,8 @@ MESH_ACCEL_CORE_FN bool meshAccelRayTriangle(
     float tMin,
     float tMax,
     float& outT,
-    Vec3& outNormal)
+    Vec3& outNormal,
+    Vec2& outUv)
 {
     const Vec3 e1 = vecSub3(tri.v1, tri.v0);
     const Vec3 e2 = vecSub3(tri.v2, tri.v0);
@@ -72,8 +105,8 @@ MESH_ACCEL_CORE_FN bool meshAccelRayTriangle(
 
     const float invDet = 1.0f / det;
     const Vec3 tvec = vecSub3(ro, tri.v0);
-    const float u = vecDot3(tvec, pvec) * invDet;
-    if (u < 0.0f || u > 1.0f) {
+    const float baryU = vecDot3(tvec, pvec) * invDet;
+    if (baryU < 0.0f || baryU > 1.0f) {
         return false;
     }
 
@@ -81,8 +114,8 @@ MESH_ACCEL_CORE_FN bool meshAccelRayTriangle(
         tvec.y * e1.z - tvec.z * e1.y,
         tvec.z * e1.x - tvec.x * e1.z,
         tvec.x * e1.y - tvec.y * e1.x);
-    const float v = vecDot3(rd, qvec) * invDet;
-    if (v < 0.0f || u + v > 1.0f) {
+    const float baryV = vecDot3(rd, qvec) * invDet;
+    if (baryV < 0.0f || baryU + baryV > 1.0f) {
         return false;
     }
 
@@ -91,14 +124,16 @@ MESH_ACCEL_CORE_FN bool meshAccelRayTriangle(
         return false;
     }
 
+    const float baryW = 1.0f - baryU - baryV;
     outT = t;
     Vec3 n = vecNormalize3(vecAdd3(
-        vecAdd3(vecScale3(tri.n0, 1.0f - u - v), vecScale3(tri.n1, u)),
-        vecScale3(tri.n2, v)));
+        vecAdd3(vecScale3(tri.n0, baryW), vecScale3(tri.n1, baryU)),
+        vecScale3(tri.n2, baryV)));
     if (vecDot3(n, rd) > 0.0f) {
         n = vecScale3(n, -1.0f);
     }
     outNormal = n;
+    outUv = interpolateTriangleUv(tri.uv0, tri.uv1, tri.uv2, baryW, baryU, baryV);
     return true;
 }
 
@@ -128,6 +163,7 @@ MESH_ACCEL_CORE_FN MeshHit meshAccelTraceRay(
 
     float closestT = tMax;
     Vec3 closestNormal{};
+    Vec2 closestUv{};
     uint32_t closestTriangleIndex = 0;
 
     while (stackSize > 0) {
@@ -152,9 +188,11 @@ MESH_ACCEL_CORE_FN MeshHit meshAccelTraceRay(
 
                 float tHit = 0.0f;
                 Vec3 normal{};
-                if (meshAccelRayTriangle(ro, rd, scene->triangles[triIndex], tMin, closestT, tHit, normal)) {
+                Vec2 uv{};
+                if (meshAccelRayTriangle(ro, rd, scene->triangles[triIndex], tMin, closestT, tHit, normal, uv)) {
                     closestT = tHit;
                     closestNormal = normal;
+                    closestUv = uv;
                     closestTriangleIndex = triIndex;
                 }
             }
@@ -205,6 +243,7 @@ MESH_ACCEL_CORE_FN MeshHit meshAccelTraceRay(
         result.hit = true;
         result.t = closestT;
         result.normal = vecNormalize3(closestNormal);
+        result.uv = closestUv;
         result.triangleIndex = closestTriangleIndex;
     }
 

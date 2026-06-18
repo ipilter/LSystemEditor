@@ -1,5 +1,6 @@
 #include "LSystem.h"
 #include "LSystemEvaluator.h"
+#include "LSystemMaterials.h"
 #include "LSystemModel.h"
 
 #include <gtest/gtest.h>
@@ -352,7 +353,7 @@ TEST(LSystemEvaluatorTest, EvaluateFromDefinition_ReturnsGenerationAndMaterials)
 
     ASSERT_EQ(result.materials.size(), 1u);
     EXPECT_EQ(result.materials[0].id, "0");
-    EXPECT_NEAR(result.materials[0].entry.r, 0.5f, 1e-5f);
+    EXPECT_NEAR(materialChannelR(result.materials[0].entry.albedo), 0.5f, 1e-5f);
     ASSERT_EQ(result.generation.size(), 2u);
     EXPECT_EQ(result.generation[0].name, "F");
     EXPECT_EQ(result.generation[1].name, "F");

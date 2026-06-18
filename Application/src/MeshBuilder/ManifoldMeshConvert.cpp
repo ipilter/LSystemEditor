@@ -2,6 +2,7 @@
 
 #include "Geometry/MathCore.h"
 
+#include <cmath>
 #include <manifold/manifold.h>
 
 namespace {
@@ -14,6 +15,18 @@ Vec3 faceNormalFromTriangle(Vec3 v0, Vec3 v1, Vec3 v2)
         e1.y * e2.z - e1.z * e2.y,
         e1.z * e2.x - e1.x * e2.z,
         e1.x * e2.y - e1.y * e2.x));
+}
+
+Vec2 sphericalUvFromPosition(Vec3 position)
+{
+    const float len = sqrtf(position.x * position.x + position.y * position.y + position.z * position.z);
+    if (len <= 1.0e-8f) {
+        return Vec2{0.0f, 0.0f};
+    }
+
+    const float u = atan2f(position.z, position.x) * (0.5f / 3.14159265f) + 0.5f;
+    const float v = asinf(position.y / len) * (1.0f / 3.14159265f) + 0.5f;
+    return Vec2{u, v};
 }
 
 } // namespace
@@ -29,6 +42,7 @@ HostMesh meshFromManifold(const manifold::Manifold& manifoldMesh)
     const size_t numTris = gl.triVerts.size() / 3;
     const uint64_t numProp = gl.numProp;
     const bool hasVertexNormals = numProp >= 6;
+    const bool hasUv = numProp >= 8 || numProp == 5;
     mesh.triangles.reserve(numTris);
 
     auto vertexAt = [&gl, numProp](uint32_t index) -> Vec3 {
@@ -47,6 +61,18 @@ HostMesh meshFromManifold(const manifold::Manifold& manifoldMesh)
             gl.vertProperties[base + 5]});
     };
 
+    auto uvAt = [&gl, numProp, &vertexAt, hasUv](uint32_t index) -> Vec2 {
+        if (!hasUv) {
+            return sphericalUvFromPosition(vertexAt(index));
+        }
+
+        const size_t base = static_cast<size_t>(index) * static_cast<size_t>(numProp);
+        if (numProp >= 8) {
+            return Vec2{gl.vertProperties[base + 6], gl.vertProperties[base + 7]};
+        }
+        return Vec2{gl.vertProperties[base + 3], gl.vertProperties[base + 4]};
+    };
+
     for (size_t tri = 0; tri < numTris; ++tri) {
         const uint32_t i0 = gl.triVerts[tri * 3 + 0];
         const uint32_t i1 = gl.triVerts[tri * 3 + 1];
@@ -60,6 +86,9 @@ HostMesh meshFromManifold(const manifold::Manifold& manifoldMesh)
         hostTri.v0 = v0;
         hostTri.v1 = v1;
         hostTri.v2 = v2;
+        hostTri.uv0 = uvAt(i0);
+        hostTri.uv1 = uvAt(i1);
+        hostTri.uv2 = uvAt(i2);
 
         if (hasVertexNormals) {
             hostTri.n0 = normalAt(i0);

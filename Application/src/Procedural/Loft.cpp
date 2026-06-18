@@ -23,6 +23,14 @@ Vec3 ringVertex(const PathFrame& frame, int segmentIndex, int circularSegments)
         vecAdd3(vecScale3(frame.normal, c * frame.radius), vecScale3(frame.binormal, s * frame.radius)));
 }
 
+Vec2 planarCapUv(int segmentIndex, int circularSegments)
+{
+    const float angle = static_cast<float>(segmentIndex) * 6.283185307f / static_cast<float>(circularSegments);
+    const float c = std::cos(angle);
+    const float s = std::sin(angle);
+    return Vec2{0.5f + 0.5f * s, 0.5f + 0.5f * c};
+}
+
 uint32_t ringIndex(int ring, int segment, int circularSegments)
 {
     return static_cast<uint32_t>(ring * circularSegments + segment);
@@ -35,11 +43,16 @@ void appendTriangle(std::vector<uint32_t>& triVerts, uint32_t i0, uint32_t i1, u
     triVerts.push_back(i2);
 }
 
-void appendVertex(std::vector<float>& vertProperties, Vec3 position)
+void appendVertex(std::vector<float>& vertProperties, Vec3 position, float u, float v)
 {
     vertProperties.push_back(position.x);
     vertProperties.push_back(position.y);
     vertProperties.push_back(position.z);
+    vertProperties.push_back(0.0f);
+    vertProperties.push_back(0.0f);
+    vertProperties.push_back(0.0f);
+    vertProperties.push_back(u);
+    vertProperties.push_back(v);
 }
 
 manifold::Manifold buildRingLoftMesh(const std::vector<PathFrame>& frames, int circularSegments)
@@ -50,22 +63,66 @@ manifold::Manifold buildRingLoftMesh(const std::vector<PathFrame>& frames, int c
 
     const int ringCount = static_cast<int>(frames.size());
     const int sideVertexCount = ringCount * circularSegments;
-    const uint32_t startCapCenter = static_cast<uint32_t>(sideVertexCount);
-    const uint32_t endCapCenter = static_cast<uint32_t>(sideVertexCount + 1);
+    const uint32_t startCapRimBase = static_cast<uint32_t>(sideVertexCount);
+    const uint32_t endCapRimBase = startCapRimBase + static_cast<uint32_t>(circularSegments);
+    const uint32_t startCapCenter = endCapRimBase + static_cast<uint32_t>(circularSegments);
+    const uint32_t endCapCenter = startCapCenter + 1u;
+    const int lastRing = ringCount - 1;
+    const float invRingSpan = ringCount > 1 ? 1.0f / static_cast<float>(ringCount - 1) : 0.0f;
 
+    const size_t totalVertices =
+        static_cast<size_t>(sideVertexCount + 2 * circularSegments + 2);
     std::vector<float> vertProperties;
-    vertProperties.reserve(static_cast<size_t>(sideVertexCount + 2) * 3);
+    vertProperties.reserve(totalVertices * 8);
     std::vector<uint32_t> triVerts;
     triVerts.reserve(static_cast<size_t>((ringCount - 1) * circularSegments * 6 + circularSegments * 6));
 
-    for (const PathFrame& frame : frames) {
+    for (int ring = 0; ring < ringCount; ++ring) {
+        const float vCoord = static_cast<float>(ring) * invRingSpan;
+        const PathFrame& frame = frames[static_cast<size_t>(ring)];
         for (int segment = 0; segment < circularSegments; ++segment) {
-            appendVertex(vertProperties, ringVertex(frame, segment, circularSegments));
+            const float uCoord = static_cast<float>(segment) / static_cast<float>(circularSegments);
+            appendVertex(
+                vertProperties,
+                ringVertex(frame, segment, circularSegments),
+                uCoord,
+                vCoord);
         }
     }
 
-    appendVertex(vertProperties, frames.front().position);
-    appendVertex(vertProperties, frames.back().position);
+    const PathFrame& startFrame = frames.front();
+    for (int segment = 0; segment < circularSegments; ++segment) {
+        const Vec2 capUv = planarCapUv(segment, circularSegments);
+        appendVertex(
+            vertProperties,
+            ringVertex(startFrame, segment, circularSegments),
+            capUv.x,
+            capUv.y);
+    }
+
+    const PathFrame& endFrame = frames.back();
+    for (int segment = 0; segment < circularSegments; ++segment) {
+        const Vec2 capUv = planarCapUv(segment, circularSegments);
+        appendVertex(
+            vertProperties,
+            ringVertex(endFrame, segment, circularSegments),
+            capUv.x,
+            capUv.y);
+    }
+
+    appendVertex(vertProperties, startFrame.position, 0.5f, 0.5f);
+    appendVertex(vertProperties, endFrame.position, 0.5f, 0.5f);
+
+    std::vector<uint32_t> mergeFromVert;
+    std::vector<uint32_t> mergeToVert;
+    mergeFromVert.reserve(static_cast<size_t>(circularSegments * 2));
+    mergeToVert.reserve(static_cast<size_t>(circularSegments * 2));
+    for (int segment = 0; segment < circularSegments; ++segment) {
+        mergeFromVert.push_back(startCapRimBase + static_cast<uint32_t>(segment));
+        mergeToVert.push_back(ringIndex(0, segment, circularSegments));
+        mergeFromVert.push_back(endCapRimBase + static_cast<uint32_t>(segment));
+        mergeToVert.push_back(ringIndex(lastRing, segment, circularSegments));
+    }
 
     for (int ring = 0; ring < ringCount - 1; ++ring) {
         for (int segment = 0; segment < circularSegments; ++segment) {
@@ -84,24 +141,25 @@ manifold::Manifold buildRingLoftMesh(const std::vector<PathFrame>& frames, int c
         appendTriangle(
             triVerts,
             startCapCenter,
-            ringIndex(0, nextSegment, circularSegments),
-            ringIndex(0, segment, circularSegments));
+            startCapRimBase + static_cast<uint32_t>(nextSegment),
+            startCapRimBase + static_cast<uint32_t>(segment));
     }
 
-    const int lastRing = ringCount - 1;
     for (int segment = 0; segment < circularSegments; ++segment) {
         const int nextSegment = (segment + 1) % circularSegments;
         appendTriangle(
             triVerts,
             endCapCenter,
-            ringIndex(lastRing, segment, circularSegments),
-            ringIndex(lastRing, nextSegment, circularSegments));
+            endCapRimBase + static_cast<uint32_t>(segment),
+            endCapRimBase + static_cast<uint32_t>(nextSegment));
     }
 
     manifold::MeshGL mesh{};
-    mesh.numProp = 3;
+    mesh.numProp = 8;
     mesh.vertProperties = std::move(vertProperties);
     mesh.triVerts = std::move(triVerts);
+    mesh.mergeFromVert = std::move(mergeFromVert);
+    mesh.mergeToVert = std::move(mergeToVert);
 
     manifold::Manifold result(mesh);
     return result;

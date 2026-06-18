@@ -36,7 +36,8 @@ target_include_directories(PathTracerLib PUBLIC
     "${PATHTRACER_LIB_INCLUDE_DIR}/MeshAccel"
     "${PATHTRACER_LIB_INCLUDE_DIR}/Brdf"
     "${PATHTRACER_LIB_INCLUDE_DIR}/Sampling"
-    "${PATHTRACER_LIB_INCLUDE_DIR}/Spectral")
+    "${PATHTRACER_LIB_INCLUDE_DIR}/Spectral"
+    "${PATHTRACER_LIB_INCLUDE_DIR}/Texture")
 target_compile_definitions(PathTracerLib PRIVATE
     "PATHTRACER_RGB2SPEC_COEFF_PATH=\"${PATHTRACER_LIB_DIR}/src/Spectral/srgb.coeff\"")
 target_include_directories(PathTracerLib PRIVATE
@@ -132,3 +133,24 @@ target_link_libraries(path_tracer_region_render_tests PRIVATE PathTracerLib)
 target_include_directories(path_tracer_region_render_tests PRIVATE "${PATHTRACER_LIB_INCLUDE_DIR}")
 set_target_properties(path_tracer_region_render_tests PROPERTIES FOLDER "PathTracerLib/tests")
 add_test(NAME PathTracerRegionRender COMMAND path_tracer_region_render_tests)
+
+add_executable(path_tracer_procedural_texture_tests tests/PathTracerProceduralTextureTests.cpp)
+target_link_libraries(path_tracer_procedural_texture_tests PRIVATE PathTracerLib)
+target_include_directories(path_tracer_procedural_texture_tests PRIVATE
+    "${PATHTRACER_LIB_INCLUDE_DIR}"
+    "${PATHTRACER_LIB_INCLUDE_DIR}/Texture"
+    "${PATHTRACER_LIB_INCLUDE_DIR}/Geometry"
+    "${PATHTRACER_LIB_INCLUDE_DIR}/MeshAccel")
+set_target_properties(path_tracer_procedural_texture_tests PROPERTIES FOLDER "PathTracerLib/tests")
+add_test(NAME PathTracerProceduralTexture COMMAND path_tracer_procedural_texture_tests)
+
+add_executable(path_tracer_mesh_uv_tests tests/PathTracerMeshUvTests.cpp)
+target_link_libraries(path_tracer_mesh_uv_tests PRIVATE PathTracerLib pathtracer_mesh_builder)
+target_include_directories(path_tracer_mesh_uv_tests PRIVATE
+    "${PATHTRACER_LIB_INCLUDE_DIR}"
+    "${PATHTRACER_LIB_INCLUDE_DIR}/MeshAccel"
+    "${CMAKE_SOURCE_DIR}/Application/src"
+    "${CMAKE_SOURCE_DIR}/Application/src/MeshBuilder"
+    "${CMAKE_SOURCE_DIR}/Application/src/Procedural")
+set_target_properties(path_tracer_mesh_uv_tests PROPERTIES FOLDER "PathTracerLib/tests")
+add_test(NAME PathTracerMeshUv COMMAND path_tracer_mesh_uv_tests)

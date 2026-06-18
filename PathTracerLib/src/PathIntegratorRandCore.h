@@ -8,6 +8,7 @@
 #include "Sampling/LightSamplingCore.h"
 #include "Sampling/MisCore.h"
 #include "Sampling/RandCore.h"
+#include "Texture/ProceduralTexture.h"
 
 #include <cmath>
 
@@ -35,6 +36,20 @@ constexpr int kUnlimitedPathDepth = 256;
 PATH_INTEGRATOR_RAND_FN Vec3 vecMul3(Vec3 a, Vec3 b)
 {
     return vecMake3(a.x * b.x, a.y * b.y, a.z * b.z);
+}
+
+PATH_INTEGRATOR_RAND_FN MaterialGpu pathIntegratorRandResolveMaterial(
+    const MaterialGpu& material,
+    Vec2 uv,
+    const MeshAccelSceneGpu* scene)
+{
+    const TextureEvalContext textureCtx{uv, uv.x};
+    const ResolvedMaterial resolved = resolveMaterial(
+        material,
+        textureCtx,
+        scene != nullptr ? scene->textures : nullptr,
+        scene != nullptr ? scene->textureCount : 0u);
+    return materialFromResolved(resolved);
 }
 
 PATH_INTEGRATOR_RAND_FN Vec3 pathIntegratorRandEmission(const MaterialGpu& material)
@@ -127,7 +142,8 @@ PATH_INTEGRATOR_RAND_FN Vec3 tracePathRandFromHit(
         const Vec3 position = vecEvalRay(currentOrigin, currentDir, currentHit.t);
         const Vec3 normal = currentHit.normal;
         const Vec3 wo = vecScale3(currentDir, -1.0f);
-        const MaterialGpu material = lightFetchMaterial(scene, currentHit.triangleIndex);
+        const MaterialGpu sourceMaterial = lightFetchMaterial(scene, currentHit.triangleIndex);
+        const MaterialGpu material = pathIntegratorRandResolveMaterial(sourceMaterial, currentHit.uv, scene);
 
         radiance = vecAdd3(radiance, vecMul3(throughput, pathIntegratorRandEmission(material)));
 

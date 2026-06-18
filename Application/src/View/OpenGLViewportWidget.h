@@ -84,6 +84,7 @@ private:
     void resetAccumulationForCamera();
     void onCameraChanged();
     void rebuildBoundsOverlay();
+    void refreshDisplayImage();
     void drawSceneOverlays();
     void drawImageSpaceLayers(int viewportX, int viewportY, int viewportW, int viewportH);
     void drawRegionOverlayLines(const glm::mat4& viewProj, const QRect& regionPx);

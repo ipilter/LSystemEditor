@@ -1,24 +1,43 @@
 #pragma once
 
 #include <string>
+#include <vector>
+
+/** @brief Parsed procedural texture from `{Kind, ...}` blocks. */
+struct TextureDef
+{
+    std::string kind;
+    std::vector<float> params;
+};
+
+/** @brief One material channel: inline constant or procedural texture. */
+struct MaterialChannel
+{
+    enum class Mode
+    {
+        Inline,
+        Texture,
+    };
+
+    Mode mode = Mode::Inline;
+    float scalar = 0.f;
+    float r = 0.f;
+    float g = 0.f;
+    float b = 0.f;
+    TextureDef texture;
+};
 
 /** @brief Parsed material properties from `Mat(id) = { ... }` lines. */
 struct MaterialEntry
 {
-    float r = 0.8f;
-    float g = 0.8f;
-    float b = 0.8f;
-    float roughness = 0.5f;
-    float metallic = 0.f;
-    /** @brief Emissive strength multiplier on base color (0 = non-emissive). */
-    float emission = 0.f;
-    float ior = 1.5f;
-    /** @brief Transmission in [0, 1]; 0 = opaque, 1 = fully transmissive. */
-    float transmission = 0.0f;
-    /** @brief Thin shell in [0, 1]; 0 = thick, 1 = thin translucency. */
-    float thin = 0.0f;
-    /** @brief Subsurface influence in [0, 1]. */
-    float subsurface = 0.0f;
+    MaterialChannel albedo;
+    MaterialChannel roughness;
+    MaterialChannel metallic;
+    MaterialChannel transmission;
+    MaterialChannel thin;
+    MaterialChannel ior;
+    MaterialChannel subsurface;
+    MaterialChannel emission;
 };
 
 /** @brief One material definition collected during L-system parse. */
@@ -28,3 +47,23 @@ struct MaterialDefinition
     std::string id;
     MaterialEntry entry;
 };
+
+inline float materialChannelScalar(const MaterialChannel& channel, float defaultValue = 0.f)
+{
+    return channel.mode == MaterialChannel::Mode::Inline ? channel.scalar : defaultValue;
+}
+
+inline float materialChannelR(const MaterialChannel& channel, float defaultValue = 0.8f)
+{
+    return channel.mode == MaterialChannel::Mode::Inline ? channel.r : defaultValue;
+}
+
+inline float materialChannelG(const MaterialChannel& channel, float defaultValue = 0.8f)
+{
+    return channel.mode == MaterialChannel::Mode::Inline ? channel.g : defaultValue;
+}
+
+inline float materialChannelB(const MaterialChannel& channel, float defaultValue = 0.8f)
+{
+    return channel.mode == MaterialChannel::Mode::Inline ? channel.b : defaultValue;
+}
