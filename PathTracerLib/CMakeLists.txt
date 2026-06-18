@@ -126,3 +126,9 @@ target_include_directories(path_tracer_glass_brdf_tests PRIVATE
     "${PATHTRACER_LIB_INCLUDE_DIR}/MeshAccel")
 set_target_properties(path_tracer_glass_brdf_tests PROPERTIES FOLDER "PathTracerLib/tests")
 add_test(NAME PathTracerGlassBrdf COMMAND path_tracer_glass_brdf_tests)
+
+add_executable(path_tracer_region_render_tests tests/PathTracerRegionRenderTests.cpp)
+target_link_libraries(path_tracer_region_render_tests PRIVATE PathTracerLib)
+target_include_directories(path_tracer_region_render_tests PRIVATE "${PATHTRACER_LIB_INCLUDE_DIR}")
+set_target_properties(path_tracer_region_render_tests PROPERTIES FOLDER "PathTracerLib/tests")
+add_test(NAME PathTracerRegionRender COMMAND path_tracer_region_render_tests)

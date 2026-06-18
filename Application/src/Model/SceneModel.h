@@ -4,7 +4,10 @@
 #include "Procedural/ProceduralTypes.h"
 
 #include <QColor>
+#include <QHash>
 #include <QObject>
+#include <QPoint>
+#include <QRect>
 #include <QSize>
 
 #include <QtGui/qopengl.h>
@@ -70,6 +73,15 @@ public:
     void addProceduralInstance(ProceduralInstance instance);
     void resetScene();
 
+    bool regionRenderEnabled() const;
+    void setRegionRenderEnabled(bool enabled);
+
+    QRect regionRect() const;
+    void setRegionRect(int minX, int minY, int maxX, int maxY);
+
+    QColor regionRenderColor() const;
+    void setRegionRenderColor(const QColor& color);
+
     GLuint pboId(int index) const;
     void setPboIds(GLuint pbo0, GLuint pbo1);
 
@@ -89,6 +101,9 @@ signals:
     void shutterSpeedSecondsChanged(float value);
     void isoChanged(float value);
     void sceneChanged();
+    void regionRenderEnabledChanged(bool enabled);
+    void regionRectChanged(const QRect& rect);
+    void regionRenderColorChanged(const QColor& color);
 
 private:
     static MeshAccelBoundsOverlayMode clampBoundsOverlayMode(MeshAccelBoundsOverlayMode mode);
@@ -103,6 +118,8 @@ private:
     static float clampShutterSpeedSeconds(float value);
     static float clampIso(float value);
     static float clampEnvironmentIntensity(float value);
+    static QRect normalizeRegionRect(int minX, int minY, int maxX, int maxY, int renderW, int renderH);
+    void clampRegionToRenderSize();
 
     QColor m_clearColor;
     QSize m_renderSize;
@@ -121,4 +138,7 @@ private:
     float m_iso = 0.0f;
     std::vector<ProceduralInstance> m_proceduralInstances;
     GLuint m_pboIds[bufferCount] = {0, 0};
+    bool m_regionRenderEnabled = false;
+    QRect m_regionRect;
+    QColor m_regionRenderColor = QColor(255, 255, 128);
 };

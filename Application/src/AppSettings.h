@@ -4,6 +4,7 @@
 #include <QColor>
 #include <QHash>
 #include <QObject>
+#include <QPoint>
 #include <QSize>
 #include <QString>
 
@@ -105,6 +106,18 @@ public:
     CameraDynamicsSettings cameraDynamicsSettings() const;
     void setCameraDynamicsSettings(const CameraDynamicsSettings& settings);
 
+    bool regionRenderEnabled() const;
+    void setRegionRenderEnabled(bool enabled);
+
+    QPoint regionBottomLeft() const;
+    void setRegionBottomLeft(int x, int y);
+
+    QPoint regionTopRight() const;
+    void setRegionTopRight(int x, int y);
+
+    QColor regionRenderColor() const;
+    void setRegionRenderColor(const QColor& color);
+
     void load();
     void save();
 
@@ -126,6 +139,7 @@ private:
     static float clampShutterSpeedSeconds(float value);
     static float clampIso(float value);
     static float clampEnvironmentIntensity(float value);
+    static int clampRegionCoordinate(int value, int maxInclusive);
     void seedDefaultDebounceValues();
 
     static AppSettings* s_instance;
@@ -150,4 +164,10 @@ private:
     QByteArray m_horizontalSplitterState;
     QByteArray m_verticalSplitterState;
     CameraDynamicsSettings m_cameraDynamicsSettings;
+    bool m_regionRenderEnabled = false;
+    int m_regionBottomLeftX = 0;
+    int m_regionBottomLeftY = 0;
+    int m_regionTopRightX = 0;
+    int m_regionTopRightY = 0;
+    QColor m_regionRenderColor = QColor(255, 255, 128);
 };

@@ -78,6 +78,18 @@ constexpr const char* kCameraMouseSensitivityKey = "mouseSensitivity";
 constexpr const char* kCameraTickIntervalMsKey = "tickIntervalMs";
 constexpr const char* kCameraMotionResetThrottleMsKey = "motionResetThrottleMs";
 constexpr const char* kCameraMotionStopDebounceMsKey = "motionStopDebounceMs";
+constexpr const char* kRegionRenderGroup = "regionRender";
+constexpr const char* kRegionRenderEnabledKey = "enabled";
+constexpr const char* kRegionBottomLeftXKey = "bottomLeftX";
+constexpr const char* kRegionBottomLeftYKey = "bottomLeftY";
+constexpr const char* kRegionTopRightXKey = "topRightX";
+constexpr const char* kRegionTopRightYKey = "topRightY";
+constexpr const char* kRegionRenderColorRedKey = "colorRed";
+constexpr const char* kRegionRenderColorGreenKey = "colorGreen";
+constexpr const char* kRegionRenderColorBlueKey = "colorBlue";
+constexpr int kDefaultRegionRenderColorRed = 255;
+constexpr int kDefaultRegionRenderColorGreen = 255;
+constexpr int kDefaultRegionRenderColorBlue = 128;
 constexpr float kMinCameraThrust = 0.1f;
 constexpr float kMaxCameraThrust = 20.0f;
 constexpr float kMinCameraDrag = 0.1f;
@@ -95,6 +107,41 @@ bool isKnownDebounceElementId(const QString& elementId)
         || elementId == DebounceElementIds::kMaxSamples
         || elementId == DebounceElementIds::kPreviewSteps
         || elementId == DebounceElementIds::kPhysicalCamera;
+}
+
+void clampRegionRectToRenderSize(
+    int renderW,
+    int renderH,
+    int& bottomLeftX,
+    int& bottomLeftY,
+    int& topRightX,
+    int& topRightY)
+{
+    const int maxX = std::max(0, renderW - 1);
+    const int maxY = std::max(0, renderH - 1);
+    auto clampCoord = [](int value, int maxInclusive) {
+        if (value < 0) {
+            return 0;
+        }
+        if (value > maxInclusive) {
+            return maxInclusive;
+        }
+        return value;
+    };
+    bottomLeftX = clampCoord(bottomLeftX, maxX);
+    bottomLeftY = clampCoord(bottomLeftY, maxY);
+    topRightX = clampCoord(topRightX, maxX);
+    topRightY = clampCoord(topRightY, maxY);
+}
+
+void defaultRegionRectForRenderSize(int renderW, int renderH, int& bottomLeftX, int& bottomLeftY, int& topRightX, int& topRightY)
+{
+    const int maxX = std::max(0, renderW - 1);
+    const int maxY = std::max(0, renderH - 1);
+    bottomLeftX = 0;
+    bottomLeftY = maxY;
+    topRightX = maxX;
+    topRightY = 0;
 }
 
 } // namespace
@@ -194,6 +241,13 @@ void AppSettings::setRenderSize(int width, int height)
     }
 
     m_renderSize = QSize(w, h);
+    clampRegionRectToRenderSize(
+        m_renderSize.width(),
+        m_renderSize.height(),
+        m_regionBottomLeftX,
+        m_regionBottomLeftY,
+        m_regionTopRightX,
+        m_regionTopRightY);
     save();
 }
 
@@ -479,6 +533,87 @@ void AppSettings::setCameraDynamicsSettings(const CameraDynamicsSettings& settin
     m_cameraDynamicsSettings = clamped;
     emit cameraDynamicsSettingsChanged(m_cameraDynamicsSettings);
     save();
+}
+
+bool AppSettings::regionRenderEnabled() const
+{
+    return m_regionRenderEnabled;
+}
+
+void AppSettings::setRegionRenderEnabled(bool enabled)
+{
+    if (m_regionRenderEnabled == enabled) {
+        return;
+    }
+
+    m_regionRenderEnabled = enabled;
+    save();
+}
+
+QPoint AppSettings::regionBottomLeft() const
+{
+    return QPoint(m_regionBottomLeftX, m_regionBottomLeftY);
+}
+
+void AppSettings::setRegionBottomLeft(int x, int y)
+{
+    const int maxX = std::max(0, m_renderSize.width() - 1);
+    const int maxY = std::max(0, m_renderSize.height() - 1);
+    const int clampedX = clampRegionCoordinate(x, maxX);
+    const int clampedY = clampRegionCoordinate(y, maxY);
+    if (m_regionBottomLeftX == clampedX && m_regionBottomLeftY == clampedY) {
+        return;
+    }
+
+    m_regionBottomLeftX = clampedX;
+    m_regionBottomLeftY = clampedY;
+    save();
+}
+
+QPoint AppSettings::regionTopRight() const
+{
+    return QPoint(m_regionTopRightX, m_regionTopRightY);
+}
+
+void AppSettings::setRegionTopRight(int x, int y)
+{
+    const int maxX = std::max(0, m_renderSize.width() - 1);
+    const int maxY = std::max(0, m_renderSize.height() - 1);
+    const int clampedX = clampRegionCoordinate(x, maxX);
+    const int clampedY = clampRegionCoordinate(y, maxY);
+    if (m_regionTopRightX == clampedX && m_regionTopRightY == clampedY) {
+        return;
+    }
+
+    m_regionTopRightX = clampedX;
+    m_regionTopRightY = clampedY;
+    save();
+}
+
+QColor AppSettings::regionRenderColor() const
+{
+    return m_regionRenderColor;
+}
+
+void AppSettings::setRegionRenderColor(const QColor& color)
+{
+    if (!color.isValid() || m_regionRenderColor == color) {
+        return;
+    }
+
+    m_regionRenderColor = color;
+    save();
+}
+
+int AppSettings::clampRegionCoordinate(int value, int maxInclusive)
+{
+    if (value < 0) {
+        return 0;
+    }
+    if (value > maxInclusive) {
+        return maxInclusive;
+    }
+    return value;
 }
 
 float AppSettings::clampFStop(float value)
@@ -843,6 +978,40 @@ void AppSettings::load()
         loadInt(kCameraMotionStopDebounceMsKey, loadedCameraSettings.motionStopDebounceMs);
     settings.endGroup();
     m_cameraDynamicsSettings = clampCameraDynamicsSettings(loadedCameraSettings);
+
+    settings.beginGroup(kRegionRenderGroup);
+    m_regionRenderEnabled = settings.value(kRegionRenderEnabledKey, false).toBool();
+    const bool hasRegionCoords = settings.contains(kRegionBottomLeftXKey)
+        && settings.contains(kRegionBottomLeftYKey)
+        && settings.contains(kRegionTopRightXKey)
+        && settings.contains(kRegionTopRightYKey);
+    if (hasRegionCoords) {
+        m_regionBottomLeftX = settings.value(kRegionBottomLeftXKey).toInt();
+        m_regionBottomLeftY = settings.value(kRegionBottomLeftYKey).toInt();
+        m_regionTopRightX = settings.value(kRegionTopRightXKey).toInt();
+        m_regionTopRightY = settings.value(kRegionTopRightYKey).toInt();
+    } else {
+        defaultRegionRectForRenderSize(
+            m_renderSize.width(),
+            m_renderSize.height(),
+            m_regionBottomLeftX,
+            m_regionBottomLeftY,
+            m_regionTopRightX,
+            m_regionTopRightY);
+    }
+    clampRegionRectToRenderSize(
+        m_renderSize.width(),
+        m_renderSize.height(),
+        m_regionBottomLeftX,
+        m_regionBottomLeftY,
+        m_regionTopRightX,
+        m_regionTopRightY);
+    m_regionRenderColor = loadColor(
+        kRegionRenderColorRedKey,
+        kRegionRenderColorGreenKey,
+        kRegionRenderColorBlueKey,
+        QColor(kDefaultRegionRenderColorRed, kDefaultRegionRenderColorGreen, kDefaultRegionRenderColorBlue));
+    settings.endGroup();
 }
 
 void AppSettings::save()
@@ -889,6 +1058,17 @@ void AppSettings::save()
     settings.setValue(kCameraTickIntervalMsKey, m_cameraDynamicsSettings.tickIntervalMs);
     settings.setValue(kCameraMotionResetThrottleMsKey, m_cameraDynamicsSettings.motionResetThrottleMs);
     settings.setValue(kCameraMotionStopDebounceMsKey, m_cameraDynamicsSettings.motionStopDebounceMs);
+    settings.endGroup();
+
+    settings.beginGroup(kRegionRenderGroup);
+    settings.setValue(kRegionRenderEnabledKey, m_regionRenderEnabled);
+    settings.setValue(kRegionBottomLeftXKey, m_regionBottomLeftX);
+    settings.setValue(kRegionBottomLeftYKey, m_regionBottomLeftY);
+    settings.setValue(kRegionTopRightXKey, m_regionTopRightX);
+    settings.setValue(kRegionTopRightYKey, m_regionTopRightY);
+    settings.setValue(kRegionRenderColorRedKey, m_regionRenderColor.red());
+    settings.setValue(kRegionRenderColorGreenKey, m_regionRenderColor.green());
+    settings.setValue(kRegionRenderColorBlueKey, m_regionRenderColor.blue());
     settings.endGroup();
 
     settings.sync();

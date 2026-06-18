@@ -9,6 +9,7 @@
 #include <QApplication>
 #include <QCloseEvent>
 #include <QComboBox>
+#include <QCheckBox>
 #include <QDoubleSpinBox>
 #include <QEvent>
 #include <QFileDialog>
@@ -196,6 +197,46 @@ MainView::MainView(QWidget* parent)
     renderLayout->addLayout(renderControlRow);
 
     controlLayout->addWidget(renderGroup);
+
+    auto* regionRenderGroup = new QGroupBox(QStringLiteral("Region Render"), controlPanel);
+    auto* regionRenderLayout = new QVBoxLayout(regionRenderGroup);
+
+    m_regionRenderCheckBox = new QCheckBox(QStringLiteral("Region Render"), regionRenderGroup);
+    m_regionRenderCheckBox->setToolTip(
+        QStringLiteral("When enabled, CUDA samples only the selected region. Pixels outside keep their last state."));
+    regionRenderLayout->addWidget(m_regionRenderCheckBox);
+
+    auto* bottomLeftRow = new QHBoxLayout();
+    bottomLeftRow->addWidget(new QLabel(QStringLiteral("Bottom-left:"), regionRenderGroup));
+    m_regionBottomLeftXSpinBox = new QSpinBox(regionRenderGroup);
+    m_regionBottomLeftXSpinBox->setRange(kMinRenderDimension - 1, kMaxRenderDimension - 1);
+    m_regionBottomLeftXSpinBox->setToolTip(QStringLiteral("Bottom-left corner X in image pixels."));
+    bottomLeftRow->addWidget(m_regionBottomLeftXSpinBox);
+    m_regionBottomLeftYSpinBox = new QSpinBox(regionRenderGroup);
+    m_regionBottomLeftYSpinBox->setRange(kMinRenderDimension - 1, kMaxRenderDimension - 1);
+    m_regionBottomLeftYSpinBox->setToolTip(QStringLiteral("Bottom-left corner Y in image pixels."));
+    bottomLeftRow->addWidget(m_regionBottomLeftYSpinBox);
+    regionRenderLayout->addLayout(bottomLeftRow);
+
+    auto* topRightRow = new QHBoxLayout();
+    topRightRow->addWidget(new QLabel(QStringLiteral("Top-right:"), regionRenderGroup));
+    m_regionTopRightXSpinBox = new QSpinBox(regionRenderGroup);
+    m_regionTopRightXSpinBox->setRange(kMinRenderDimension - 1, kMaxRenderDimension - 1);
+    m_regionTopRightXSpinBox->setToolTip(QStringLiteral("Top-right corner X in image pixels."));
+    topRightRow->addWidget(m_regionTopRightXSpinBox);
+    m_regionTopRightYSpinBox = new QSpinBox(regionRenderGroup);
+    m_regionTopRightYSpinBox->setRange(kMinRenderDimension - 1, kMaxRenderDimension - 1);
+    m_regionTopRightYSpinBox->setToolTip(QStringLiteral("Top-right corner Y in image pixels."));
+    topRightRow->addWidget(m_regionTopRightYSpinBox);
+    regionRenderLayout->addLayout(topRightRow);
+
+    m_defineRegionButton = new QPushButton(QStringLiteral("Define Region"), regionRenderGroup);
+    m_defineRegionButton->setCheckable(true);
+    m_defineRegionButton->setToolTip(
+        QStringLiteral("Click two corners on the image to define the region (bottom-left then top-right)."));
+    regionRenderLayout->addWidget(m_defineRegionButton);
+
+    controlLayout->addWidget(regionRenderGroup);
 
     auto* environmentGroup = new QGroupBox(QStringLiteral("Environment"), controlPanel);
     auto* environmentLayout = new QVBoxLayout(environmentGroup);
@@ -497,6 +538,36 @@ QSpinBox* MainView::russianRouletteMinDepthSpinBox() const
 QComboBox* MainView::boundsOverlayComboBox() const
 {
     return m_boundsOverlayComboBox;
+}
+
+QCheckBox* MainView::regionRenderCheckBox() const
+{
+    return m_regionRenderCheckBox;
+}
+
+QSpinBox* MainView::regionBottomLeftXSpinBox() const
+{
+    return m_regionBottomLeftXSpinBox;
+}
+
+QSpinBox* MainView::regionBottomLeftYSpinBox() const
+{
+    return m_regionBottomLeftYSpinBox;
+}
+
+QSpinBox* MainView::regionTopRightXSpinBox() const
+{
+    return m_regionTopRightXSpinBox;
+}
+
+QSpinBox* MainView::regionTopRightYSpinBox() const
+{
+    return m_regionTopRightYSpinBox;
+}
+
+QPushButton* MainView::defineRegionButton() const
+{
+    return m_defineRegionButton;
 }
 
 QPushButton* MainView::startButton() const

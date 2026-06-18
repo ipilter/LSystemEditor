@@ -299,6 +299,73 @@ __global__ void clearAccumulatorKernel(
     }
 }
 
+__global__ void clearRegionAccumulatorKernel(
+    float4* acc,
+    uint32_t* counts,
+    float* lumMean,
+    float* m2,
+    uint8_t* converged,
+    int* activeIndices,
+    int* activeCount,
+    int width,
+    int height,
+    int minX,
+    int minY,
+    int maxX,
+    int maxY)
+{
+    const int regionW = maxX - minX + 1;
+    const int regionH = maxY - minY + 1;
+    const int regionCount = regionW * regionH;
+    const int t = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
+    if (t >= regionCount) {
+        return;
+    }
+
+    const int localX = t % regionW;
+    const int localY = t / regionW;
+    const int x = minX + localX;
+    const int y = minY + localY;
+    const int idx = y * width + x;
+
+    acc[idx] = make_float4(0.0f, 0.0f, 0.0f, 1.0f);
+    counts[idx] = 0;
+    lumMean[idx] = 0.0f;
+    m2[idx] = 0.0f;
+    converged[idx] = 0;
+    activeIndices[t] = idx;
+
+    if (t == 0 && activeCount != nullptr) {
+        *activeCount = regionCount;
+    }
+}
+
+__global__ void rebuildActiveListKernel(
+    const uint8_t* converged,
+    const uint32_t* counts,
+    int* activeIndicesOut,
+    int* activeCount,
+    int width,
+    int height,
+    int maxSamplesPerPixel)
+{
+    const int idx = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
+    const int pixelCount = width * height;
+    if (idx >= pixelCount) {
+        return;
+    }
+
+    if (converged[idx] != 0) {
+        return;
+    }
+    if (maxSamplesPerPixel > 0 && counts[idx] >= static_cast<uint32_t>(maxSamplesPerPixel)) {
+        return;
+    }
+
+    const int slot = atomicAdd(activeCount, 1);
+    activeIndicesOut[slot] = idx;
+}
+
 __global__ void compactActiveListKernel(
     const int* activeIndicesIn,
     int* activeIndicesOut,
@@ -306,7 +373,14 @@ __global__ void compactActiveListKernel(
     const uint8_t* converged,
     const uint32_t* counts,
     int maxSamplesPerPixel,
-    int inCount)
+    int inCount,
+    int width,
+    int height,
+    bool useRegionFilter,
+    int regionMinX,
+    int regionMinY,
+    int regionMaxX,
+    int regionMaxY)
 {
     const int tid = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
     if (tid >= inCount) {
@@ -319,6 +393,14 @@ __global__ void compactActiveListKernel(
     }
     if (maxSamplesPerPixel > 0 && counts[pixelIdx] >= static_cast<uint32_t>(maxSamplesPerPixel)) {
         return;
+    }
+
+    if (useRegionFilter) {
+        const int x = pixelIdx % width;
+        const int y = pixelIdx / width;
+        if (x < regionMinX || x > regionMaxX || y < regionMinY || y > regionMaxY) {
+            return;
+        }
     }
 
     const int slot = atomicAdd(activeCount, 1);
@@ -519,6 +601,90 @@ bool pathTracerClearAccumulator(
     return checkLaunch(cudaSuccess);
 }
 
+bool pathTracerClearRegionAccumulator(
+    float4* d_buffer,
+    uint32_t* d_samples,
+    float* d_lumMean,
+    float* d_m2,
+    uint8_t* d_converged,
+    int* d_activeIndices,
+    int* d_activeCount,
+    int width,
+    int height,
+    int minX,
+    int minY,
+    int maxX,
+    int maxY,
+    cudaStream_t stream)
+{
+    if (d_buffer == nullptr || d_samples == nullptr || d_lumMean == nullptr || d_m2 == nullptr ||
+        d_converged == nullptr || d_activeIndices == nullptr || d_activeCount == nullptr || width <= 0 ||
+        height <= 0 || minX > maxX || minY > maxY) {
+        return false;
+    }
+
+    const int regionW = maxX - minX + 1;
+    const int regionH = maxY - minY + 1;
+    const int regionCount = regionW * regionH;
+    if (regionCount <= 0) {
+        return false;
+    }
+
+    constexpr int kBlockSize = 256;
+    const dim3 block(kBlockSize);
+    const dim3 grid = grid1d(regionCount, kBlockSize);
+    clearRegionAccumulatorKernel<<<grid, block, 0, stream>>>(
+        d_buffer,
+        d_samples,
+        d_lumMean,
+        d_m2,
+        d_converged,
+        d_activeIndices,
+        d_activeCount,
+        width,
+        height,
+        minX,
+        minY,
+        maxX,
+        maxY);
+    return checkLaunch(cudaSuccess);
+}
+
+bool pathTracerRebuildActiveList(
+    const uint8_t* d_converged,
+    const uint32_t* d_counts,
+    int* d_activeIndices,
+    int* d_activeCount,
+    int width,
+    int height,
+    int maxSamplesPerPixel,
+    cudaStream_t stream)
+{
+    if (d_converged == nullptr || d_counts == nullptr || d_activeIndices == nullptr || d_activeCount == nullptr ||
+        width <= 0 || height <= 0) {
+        return false;
+    }
+
+    const cudaError_t memsetError = cudaMemsetAsync(d_activeCount, 0, sizeof(int), stream);
+    if (memsetError != cudaSuccess) {
+        return false;
+    }
+
+    const int pixelCount = width * height;
+    constexpr int kBlockSize = 256;
+    const dim3 block(kBlockSize);
+    const dim3 grid = grid1d(pixelCount, kBlockSize);
+    rebuildActiveListKernel<<<grid, block, 0, stream>>>(
+        d_converged,
+        d_counts,
+        d_activeIndices,
+        d_activeCount,
+        width,
+        height,
+        maxSamplesPerPixel);
+    return checkLaunch(cudaSuccess);
+}
+
 bool pathTracerAdaptiveSample(
     float4* d_buffer,
     uint32_t* d_samples,
@@ -571,10 +737,17 @@ bool pathTracerCompactActiveList(
     const uint32_t* d_counts,
     int maxSamplesPerPixel,
     int inCount,
+    int width,
+    int height,
+    bool useRegionFilter,
+    int regionMinX,
+    int regionMinY,
+    int regionMaxX,
+    int regionMaxY,
     cudaStream_t stream)
 {
     if (d_activeIndicesIn == nullptr || d_activeIndicesOut == nullptr || d_activeCount == nullptr ||
-        d_converged == nullptr || d_counts == nullptr || inCount <= 0) {
+        d_converged == nullptr || d_counts == nullptr || inCount <= 0 || width <= 0 || height <= 0) {
         return false;
     }
 
@@ -593,7 +766,14 @@ bool pathTracerCompactActiveList(
         d_converged,
         d_counts,
         maxSamplesPerPixel,
-        inCount);
+        inCount,
+        width,
+        height,
+        useRegionFilter,
+        regionMinX,
+        regionMinY,
+        regionMaxX,
+        regionMaxY);
     return checkLaunch(cudaSuccess);
 }
 

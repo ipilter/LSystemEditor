@@ -34,6 +34,8 @@
 
 #include <QString>
 
+#include <QRect>
+
 struct AccumulatorData
 {
     float4* d_buffer = nullptr;
@@ -71,6 +73,7 @@ struct PathTracerDetail::PathTracerImpl
     std::thread worker;
     std::atomic<bool> running{false};
     std::atomic<bool> resetRequested{false};
+    std::atomic<bool> regionResetRequested{false};
     std::atomic<bool> configured{false};
 
     std::mutex workerMutex;
@@ -98,6 +101,11 @@ struct PathTracerDetail::PathTracerImpl
     PhysicalCamera suggestedPhysicalCamera{};
     QString environmentHdrPath;
     std::atomic<bool> environmentDirty{true};
+    std::atomic<bool> regionEnabled{false};
+    std::atomic<int> regionMinX{0};
+    std::atomic<int> regionMinY{0};
+    std::atomic<int> regionMaxX{0};
+    std::atomic<int> regionMaxY{0};
     std::atomic<bool> renderParamsDirty{true};
 
     CameraGpu lastSampleCamera{};
@@ -527,6 +535,96 @@ bool clearAccumulator(PathTracerDetail::PathTracerImpl* impl, QString* outError)
     return true;
 }
 
+bool clearRegionAccumulator(PathTracerDetail::PathTracerImpl* impl, QString* outError)
+{
+    if (impl == nullptr || impl->acc.d_buffer == nullptr || impl->acc.d_samples == nullptr ||
+        impl->acc.d_lumMean == nullptr || impl->acc.d_m2 == nullptr || impl->acc.d_converged == nullptr ||
+        impl->acc.d_activeIndices == nullptr || impl->acc.d_activeCount == nullptr || impl->acc.width <= 0 ||
+        impl->acc.height <= 0 || impl->stream == nullptr) {
+        return true;
+    }
+
+    const int minX = impl->regionMinX.load();
+    const int minY = impl->regionMinY.load();
+    const int maxX = impl->regionMaxX.load();
+    const int maxY = impl->regionMaxY.load();
+
+    if (!pathTracerClearRegionAccumulator(
+            impl->acc.d_buffer,
+            impl->acc.d_samples,
+            impl->acc.d_lumMean,
+            impl->acc.d_m2,
+            impl->acc.d_converged,
+            impl->acc.d_activeIndices,
+            impl->acc.d_activeCount,
+            impl->acc.width,
+            impl->acc.height,
+            minX,
+            minY,
+            maxX,
+            maxY,
+            impl->stream)) {
+        if (outError != nullptr) {
+            *outError = QStringLiteral("clear region accumulator kernel launch failed");
+        }
+        return false;
+    }
+
+    const int regionW = maxX - minX + 1;
+    const int regionH = maxY - minY + 1;
+    impl->activePixelCount.store(regionW * regionH);
+    return true;
+}
+
+bool rebuildFullActiveList(PathTracerDetail::PathTracerImpl* impl, QString* outError)
+{
+    if (impl == nullptr || impl->acc.d_converged == nullptr || impl->acc.d_samples == nullptr ||
+        impl->acc.d_activeIndices == nullptr || impl->acc.d_activeCount == nullptr || impl->acc.width <= 0 ||
+        impl->acc.height <= 0 || impl->stream == nullptr) {
+        return true;
+    }
+
+    if (!pathTracerRebuildActiveList(
+            impl->acc.d_converged,
+            impl->acc.d_samples,
+            impl->acc.d_activeIndices,
+            impl->acc.d_activeCount,
+            impl->acc.width,
+            impl->acc.height,
+            impl->maxSamplesPerPixel.load(),
+            impl->stream)) {
+        if (outError != nullptr) {
+            *outError = QStringLiteral("rebuild active list kernel launch failed");
+        }
+        return false;
+    }
+
+    int activeCount = 0;
+    const cudaError_t countError = cudaMemcpyAsync(
+        &activeCount,
+        impl->acc.d_activeCount,
+        sizeof(int),
+        cudaMemcpyDeviceToHost,
+        impl->stream);
+    if (countError != cudaSuccess) {
+        if (outError != nullptr) {
+            *outError = QStringLiteral("active count readback failed after rebuild");
+        }
+        return false;
+    }
+
+    const cudaError_t syncError = cudaStreamSynchronize(impl->stream);
+    if (syncError != cudaSuccess) {
+        if (outError != nullptr) {
+            *outError = QStringLiteral("stream sync failed after rebuild active list");
+        }
+        return false;
+    }
+
+    impl->activePixelCount.store(activeCount);
+    return true;
+}
+
 void freeCameraGpu(PathTracerDetail::PathTracerImpl* impl)
 {
     if (impl == nullptr || impl->d_camera == nullptr) {
@@ -918,6 +1016,7 @@ SampleWaitResult waitForSampleEvent(
     cudaEvent_t event,
     const std::atomic<bool>& running,
     const std::atomic<bool>& resetRequested,
+    const std::atomic<bool>& regionResetRequested,
     QString* outError)
 {
     bool resetSeen = false;
@@ -925,7 +1024,7 @@ SampleWaitResult waitForSampleEvent(
         if (!running.load()) {
             return SampleWaitResult::Stopped;
         }
-        if (resetRequested.load()) {
+        if (resetRequested.load() || regionResetRequested.load()) {
             resetSeen = true;
         }
 
@@ -1251,6 +1350,48 @@ void PathTracer::resetAccumulation()
     notifyWorker();
 }
 
+void PathTracer::resetRegionAccumulation()
+{
+    m_impl->regionResetRequested.store(true);
+    notifyWorker();
+}
+
+void PathTracer::setRegionRenderEnabled(bool enabled)
+{
+    m_impl->regionEnabled.store(enabled);
+    notifyWorker();
+}
+
+bool PathTracer::regionRenderEnabled() const
+{
+    return m_impl->regionEnabled.load();
+}
+
+void PathTracer::setRenderRegion(int minX, int minY, int maxX, int maxY)
+{
+    const int width = m_impl->acc.width;
+    const int height = m_impl->acc.height;
+    const int maxCoordX = (std::max)(0, width - 1);
+    const int maxCoordY = (std::max)(0, height - 1);
+
+    const int left = (std::max)(0, (std::min)(minX, maxX));
+    const int right = (std::min)(maxCoordX, (std::max)(minX, maxX));
+    const int top = (std::max)(0, (std::min)(minY, maxY));
+    const int bottom = (std::min)(maxCoordY, (std::max)(minY, maxY));
+
+    m_impl->regionMinX.store(left);
+    m_impl->regionMinY.store(top);
+    m_impl->regionMaxX.store(right);
+    m_impl->regionMaxY.store(bottom);
+}
+
+QRect PathTracer::renderRegion() const
+{
+    return QRect(
+        QPoint(m_impl->regionMinX.load(), m_impl->regionMinY.load()),
+        QPoint(m_impl->regionMaxX.load(), m_impl->regionMaxY.load()));
+}
+
 bool PathTracer::isRunning() const
 {
     return m_impl->running.load();
@@ -1320,6 +1461,7 @@ bool PathTracer::publishDisplayFrame(int slot)
     const int finest = m_impl->finestCompletedPreview.load();
 
     const bool showPreview =
+        !m_impl->regionEnabled.load() &&
         previewCount > 0 &&
         finest >= 0 &&
         finest < static_cast<int>(m_impl->previewLevels.size()) &&
@@ -1790,27 +1932,66 @@ void PathTracer::notifyWorker()
     m_impl->workerCv.notify_all();
 }
 
+void PathTracer::invokeFrameReadyCallback()
+{
+    FrameReadyCallback callback;
+    {
+        std::lock_guard<std::mutex> lock(m_callbackMutex);
+        callback = m_frameReadyCallback;
+    }
+    if (callback) {
+        callback();
+    }
+}
+
 void PathTracer::renderLoop()
 {
     cudaSetDevice(m_impl->cudaDeviceId);
 
     while (m_impl->running.load()) {
-        if (m_impl->resetRequested.exchange(false)) {
-            m_impl->displayBuffersValid.store(false);
+        const bool fullResetRequested = m_impl->resetRequested.exchange(false);
+        const bool regionOnlyResetRequested = m_impl->regionResetRequested.exchange(false);
+
+        if (fullResetRequested || regionOnlyResetRequested) {
+            bool invalidateDisplay = false;
 
             bool clearLaunched = false;
             {
                 std::lock_guard<std::mutex> streamLock(m_impl->streamMutex);
                 if (m_impl->acc.d_buffer != nullptr && m_impl->acc.d_samples != nullptr) {
                     QString clearError;
-                    if (!clearAccumulator(m_impl.get(), &clearError)) {
-                        AppLog::instance().error(
-                            QStringLiteral("PathTracer accumulator reset failed: %1").arg(clearError));
-                    } else if (!clearPreviewBuffers(m_impl.get(), &clearError)) {
-                        AppLog::instance().error(
-                            QStringLiteral("PathTracer preview buffer reset failed: %1").arg(clearError));
-                    } else {
-                        clearLaunched = true;
+                    if (fullResetRequested) {
+                        if (m_impl->regionEnabled.load()) {
+                            if (!clearRegionAccumulator(m_impl.get(), &clearError)) {
+                                AppLog::instance().error(
+                                    QStringLiteral("PathTracer region accumulator reset failed: %1").arg(clearError));
+                            } else {
+                                clearLaunched = true;
+                            }
+                        } else if (!clearAccumulator(m_impl.get(), &clearError)) {
+                            AppLog::instance().error(
+                                QStringLiteral("PathTracer accumulator reset failed: %1").arg(clearError));
+                        } else if (!clearPreviewBuffers(m_impl.get(), &clearError)) {
+                            AppLog::instance().error(
+                                QStringLiteral("PathTracer preview buffer reset failed: %1").arg(clearError));
+                        } else {
+                            clearLaunched = true;
+                            invalidateDisplay = true;
+                        }
+                    } else if (regionOnlyResetRequested) {
+                        if (m_impl->regionEnabled.load()) {
+                            if (!clearRegionAccumulator(m_impl.get(), &clearError)) {
+                                AppLog::instance().error(
+                                    QStringLiteral("PathTracer region accumulator reset failed: %1").arg(clearError));
+                            } else {
+                                clearLaunched = true;
+                            }
+                        } else if (!rebuildFullActiveList(m_impl.get(), &clearError)) {
+                            AppLog::instance().error(
+                                QStringLiteral("PathTracer active list rebuild failed: %1").arg(clearError));
+                        } else {
+                            clearLaunched = true;
+                        }
                     }
                 }
             }
@@ -1821,21 +2002,29 @@ void PathTracer::renderLoop()
                     AppLog::instance().error(
                         QStringLiteral("CUDA stream sync after accumulator reset failed: %1")
                             .arg(cudaErrorString(syncError)));
+                } else if (!invalidateDisplay && m_impl->sampleCount.load() > 0) {
+                    invokeFrameReadyCallback();
                 }
             }
 
-            m_impl->sampleCount.store(0);
-            m_impl->finestCompletedPreview.store(-1);
+            if (invalidateDisplay) {
+                m_impl->displayBuffersValid.store(false);
+            }
+
+            if (fullResetRequested) {
+                m_impl->sampleCount.store(0);
+                m_impl->finestCompletedPreview.store(-1);
 
 #ifdef PATHTRACER_PROFILE
-            if (g_renderPipelineTiming.resetTimingActive.exchange(false)) {
-                const auto resetDone = std::chrono::steady_clock::now();
-                const auto resetLatencyMs = std::chrono::duration_cast<std::chrono::milliseconds>(
-                    resetDone - g_renderPipelineTiming.resetRequestTime);
-                AppLog::instance().info(
-                    QStringLiteral("Render pipeline timing: reset latency %1 ms").arg(resetLatencyMs.count()));
-            }
+                if (g_renderPipelineTiming.resetTimingActive.exchange(false)) {
+                    const auto resetDone = std::chrono::steady_clock::now();
+                    const auto resetLatencyMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        resetDone - g_renderPipelineTiming.resetRequestTime);
+                    AppLog::instance().info(
+                        QStringLiteral("Render pipeline timing: reset latency %1 ms").arg(resetLatencyMs.count()));
+                }
 #endif
+            }
         }
 
         if (m_impl->acc.width <= 0 || m_impl->acc.height <= 0) {
@@ -1848,7 +2037,7 @@ void PathTracer::renderLoop()
                 if (!m_impl->running.load()) {
                     return true;
                 }
-                if (m_impl->resetRequested.load()) {
+                if (m_impl->resetRequested.load() || m_impl->regionResetRequested.load()) {
                     return true;
                 }
                 return canTakeSample(m_impl.get());
@@ -1864,7 +2053,7 @@ void PathTracer::renderLoop()
 
         const int previewCount = m_impl->previewStepsPerLevel.load();
         const int iter = m_impl->sampleCount.load();
-        const bool previewPass = previewCount > 0 && iter < previewCount &&
+        const bool previewPass = !m_impl->regionEnabled.load() && previewCount > 0 && iter < previewCount &&
             iter < static_cast<int>(m_impl->previewLevels.size());
 
         QString cameraError;
@@ -1950,6 +2139,7 @@ void PathTracer::renderLoop()
                         AppLog::instance().error(QStringLiteral("PathTracer adaptive sample kernel launch failed"));
                     } else if (runCompact) {
                         const int maxSamples = m_impl->maxSamplesPerPixel.load();
+                        const bool useRegionFilter = m_impl->regionEnabled.load();
                         if (!pathTracerCompactActiveList(
                                 m_impl->acc.d_activeIndices,
                                 m_impl->acc.d_activeScratch,
@@ -1958,6 +2148,13 @@ void PathTracer::renderLoop()
                                 m_impl->acc.d_samples,
                                 maxSamples,
                                 activeCount,
+                                m_impl->acc.width,
+                                m_impl->acc.height,
+                                useRegionFilter,
+                                m_impl->regionMinX.load(),
+                                m_impl->regionMinY.load(),
+                                m_impl->regionMaxX.load(),
+                                m_impl->regionMaxY.load(),
                                 m_impl->stream)) {
                             AppLog::instance().error(
                                 QStringLiteral("PathTracer compact active list kernel launch failed"));
@@ -2010,6 +2207,7 @@ void PathTracer::renderLoop()
             m_impl->sampleCompleteEvent,
             m_impl->running,
             m_impl->resetRequested,
+            m_impl->regionResetRequested,
             &waitError);
         const auto gpuWaitEnd = std::chrono::steady_clock::now();
         const auto gpuWaitUs = static_cast<uint64_t>(

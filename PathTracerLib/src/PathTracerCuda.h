@@ -22,6 +22,32 @@ bool pathTracerClearAccumulator(
     int height,
     cudaStream_t stream);
 
+bool pathTracerClearRegionAccumulator(
+    float4* d_buffer,
+    uint32_t* d_samples,
+    float* d_lumMean,
+    float* d_m2,
+    uint8_t* d_converged,
+    int* d_activeIndices,
+    int* d_activeCount,
+    int width,
+    int height,
+    int minX,
+    int minY,
+    int maxX,
+    int maxY,
+    cudaStream_t stream);
+
+bool pathTracerRebuildActiveList(
+    const uint8_t* d_converged,
+    const uint32_t* d_counts,
+    int* d_activeIndices,
+    int* d_activeCount,
+    int width,
+    int height,
+    int maxSamplesPerPixel,
+    cudaStream_t stream);
+
 bool pathTracerAdaptiveSample(
     float4* d_buffer,
     uint32_t* d_samples,
@@ -47,6 +73,13 @@ bool pathTracerCompactActiveList(
     const uint32_t* d_counts,
     int maxSamplesPerPixel,
     int inCount,
+    int width,
+    int height,
+    bool useRegionFilter,
+    int regionMinX,
+    int regionMinY,
+    int regionMaxX,
+    int regionMaxY,
     cudaStream_t stream);
 
 bool pathTracerPreviewSample(

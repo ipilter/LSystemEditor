@@ -8,6 +8,7 @@
 #include "RenderAccumulationState.h"
 #include "MeshAccelBoundsOverlay.h"
 #include "OriginGizmoOverlay.h"
+#include "RegionRenderOverlay.h"
 #include "ViewportInputState.h"
 
 #include <QColor>
@@ -15,10 +16,12 @@
 #include <QOpenGLFunctions_4_5_Core>
 #include <QOpenGLWidget>
 #include <QPoint>
+#include <QRect>
 #include <QTimer>
 #include <QtGui/qopengl.h>
 
 #include <atomic>
+#include <optional>
 
 #include <glm/glm.hpp>
 
@@ -40,13 +43,17 @@ public:
     PhysicalCamera suggestedPhysicalCamera() const;
     bool computeSuggestedPhysicalCameraFromAccumulator(PhysicalCamera* out) const;
 
-    void restartRender();
+    void restartRender(bool regionOnlyReset = false);
     void pauseRender();
+    void setRegionDefineMode(bool active);
+    bool regionDefineMode() const;
+    void applyRegionRenderSettings(bool resetActiveRegion);
     bool exportSceneWavefrontObj(const QString& objFilePath, QString* errorMessage = nullptr) const;
 
 signals:
     void iterationChanged(int sampleCount);
     void renderStateChanged(RenderAccumulationState state, int sampleCount, int budgetTotal, int activePixelCount);
+    void regionDefineModeChanged(bool active);
 
 protected:
     void initializeGL() override;
@@ -78,6 +85,12 @@ private:
     void onCameraChanged();
     void rebuildBoundsOverlay();
     void drawSceneOverlays();
+    void drawImageSpaceLayers(int viewportX, int viewportY, int viewportW, int viewportH);
+    void drawRegionOverlayLines(const glm::mat4& viewProj, const QRect& regionPx);
+    bool isWidgetPosInLetterbox(const QPoint& widgetPos, int* outViewportX, int* outViewportY, int* outViewportW, int* outViewportH) const;
+    std::optional<QPoint> widgetPosToImagePixel(const QPoint& widgetPos) const;
+    void finalizeRegionDefinition(const QPoint& imagePixel);
+    void cancelRegionDefinition();
     void ensureRenderWorkerRunning();
     void emitRenderState();
     GLuint compileShader(GLenum type, const char* source);
@@ -91,10 +104,15 @@ private:
     ViewportInputState m_inputState;
     MeshAccelBoundsOverlay m_boundsOverlay;
     OriginGizmoOverlay m_originGizmo;
+    RegionRenderOverlay m_regionOverlay;
 
     QColor m_clearColor;
     bool m_looking = false;
     bool m_quadPanning = false;
+    bool m_regionDefining = false;
+    bool m_regionDefineHasAnchor = false;
+    QPoint m_regionDefineAnchor;
+    QPoint m_regionDefinePreview;
     QPoint m_lastMousePos;
     glm::vec2 m_pendingMouseAngularInput{0.0f};
     float m_mouseSensitivity = 0.15f;

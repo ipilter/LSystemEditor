@@ -3,6 +3,8 @@
 #include "AppSettings.h"
 #include "PhysicalCamera.h"
 
+#include <algorithm>
+
 namespace {
 
 constexpr int kMinRenderDimension = 1;
@@ -39,7 +41,18 @@ SceneModel::SceneModel(QObject* parent)
     , m_fStop(AppSettings::instance().fStop())
     , m_shutterSpeedSeconds(AppSettings::instance().shutterSpeedSeconds())
     , m_iso(AppSettings::instance().iso())
+    , m_regionRenderEnabled(AppSettings::instance().regionRenderEnabled())
+    , m_regionRenderColor(AppSettings::instance().regionRenderColor())
 {
+    const QPoint bottomLeft = AppSettings::instance().regionBottomLeft();
+    const QPoint topRight = AppSettings::instance().regionTopRight();
+    m_regionRect = normalizeRegionRect(
+        bottomLeft.x(),
+        topRight.y(),
+        topRight.x(),
+        bottomLeft.y(),
+        m_renderSize.width(),
+        m_renderSize.height());
 }
 
 QColor SceneModel::clearColor() const
@@ -73,6 +86,7 @@ void SceneModel::setRenderSize(int width, int height)
 
     m_renderSize = QSize(w, h);
     AppSettings::instance().setRenderSize(w, h);
+    clampRegionToRenderSize();
     emit renderSizeChanged(m_renderSize);
 }
 
@@ -324,6 +338,62 @@ void SceneModel::resetScene()
     emit sceneChanged();
 }
 
+bool SceneModel::regionRenderEnabled() const
+{
+    return m_regionRenderEnabled;
+}
+
+void SceneModel::setRegionRenderEnabled(bool enabled)
+{
+    if (m_regionRenderEnabled == enabled) {
+        return;
+    }
+
+    m_regionRenderEnabled = enabled;
+    AppSettings::instance().setRegionRenderEnabled(enabled);
+    emit regionRenderEnabledChanged(m_regionRenderEnabled);
+}
+
+QRect SceneModel::regionRect() const
+{
+    return m_regionRect;
+}
+
+void SceneModel::setRegionRect(int minX, int minY, int maxX, int maxY)
+{
+    const QRect normalized = normalizeRegionRect(
+        minX,
+        minY,
+        maxX,
+        maxY,
+        m_renderSize.width(),
+        m_renderSize.height());
+    if (m_regionRect == normalized) {
+        return;
+    }
+
+    m_regionRect = normalized;
+    AppSettings::instance().setRegionBottomLeft(normalized.left(), normalized.bottom());
+    AppSettings::instance().setRegionTopRight(normalized.right(), normalized.top());
+    emit regionRectChanged(m_regionRect);
+}
+
+QColor SceneModel::regionRenderColor() const
+{
+    return m_regionRenderColor;
+}
+
+void SceneModel::setRegionRenderColor(const QColor& color)
+{
+    if (!color.isValid() || m_regionRenderColor == color) {
+        return;
+    }
+
+    m_regionRenderColor = color;
+    AppSettings::instance().setRegionRenderColor(color);
+    emit regionRenderColorChanged(m_regionRenderColor);
+}
+
 GLuint SceneModel::pboId(int index) const
 {
     if (index < 0 || index >= bufferCount) {
@@ -451,4 +521,34 @@ float SceneModel::clampEnvironmentIntensity(float value)
         return kMaxEnvironmentIntensity;
     }
     return value;
+}
+
+QRect SceneModel::normalizeRegionRect(int minX, int minY, int maxX, int maxY, int renderW, int renderH)
+{
+    const int maxCoordX = std::max(0, renderW - 1);
+    const int maxCoordY = std::max(0, renderH - 1);
+    const int left = std::max(0, std::min(minX, maxX));
+    const int right = std::min(maxCoordX, std::max(minX, maxX));
+    const int top = std::max(0, std::min(minY, maxY));
+    const int bottom = std::min(maxCoordY, std::max(minY, maxY));
+    return QRect(QPoint(left, top), QPoint(right, bottom));
+}
+
+void SceneModel::clampRegionToRenderSize()
+{
+    const QRect normalized = normalizeRegionRect(
+        m_regionRect.left(),
+        m_regionRect.top(),
+        m_regionRect.right(),
+        m_regionRect.bottom(),
+        m_renderSize.width(),
+        m_renderSize.height());
+    if (m_regionRect == normalized) {
+        return;
+    }
+
+    m_regionRect = normalized;
+    AppSettings::instance().setRegionBottomLeft(normalized.left(), normalized.bottom());
+    AppSettings::instance().setRegionTopRight(normalized.right(), normalized.top());
+    emit regionRectChanged(m_regionRect);
 }

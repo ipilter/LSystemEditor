@@ -8,6 +8,7 @@
 #include "Procedural/ProceduralTypes.h"
 
 #include <QColor>
+#include <QRect>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -112,11 +113,20 @@ public:
         const std::vector<ProceduralInstance>& proceduralInstances = {},
         const MeshSceneBuildParams& meshParams = {});
 
+    void setRegionRenderEnabled(bool enabled);
+    bool regionRenderEnabled() const;
+
+    void setRenderRegion(int minX, int minY, int maxX, int maxY);
+    QRect renderRegion() const;
+
+    void resetRegionAccumulation();
+
     bool exportMeshSceneWavefrontObj(const QString& objFilePath, QString* errorMessage = nullptr) const;
 
 private:
     void renderLoop();
     void notifyWorker();
+    void invokeFrameReadyCallback();
 
     std::unique_ptr<PathTracerDetail::PathTracerImpl> m_impl;
     std::mutex m_callbackMutex;

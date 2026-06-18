@@ -14,6 +14,7 @@ class QLineEdit;
 class QPlainTextEdit;
 class QPushButton;
 class QSpinBox;
+class QCheckBox;
 
 enum class RenderAccumulationState;
 
@@ -44,6 +45,12 @@ public:
     QSpinBox* previewStepsSpinBox() const;
     QSpinBox* russianRouletteMinDepthSpinBox() const;
     QComboBox* boundsOverlayComboBox() const;
+    QCheckBox* regionRenderCheckBox() const;
+    QSpinBox* regionBottomLeftXSpinBox() const;
+    QSpinBox* regionBottomLeftYSpinBox() const;
+    QSpinBox* regionTopRightXSpinBox() const;
+    QSpinBox* regionTopRightYSpinBox() const;
+    QPushButton* defineRegionButton() const;
     QPushButton* startButton() const;
     QPushButton* stopButton() const;
     QPushButton* settingsButton() const;
@@ -87,6 +94,12 @@ private:
     QSpinBox* m_previewStepsSpinBox = nullptr;
     QSpinBox* m_russianRouletteMinDepthSpinBox = nullptr;
     QComboBox* m_boundsOverlayComboBox = nullptr;
+    QCheckBox* m_regionRenderCheckBox = nullptr;
+    QSpinBox* m_regionBottomLeftXSpinBox = nullptr;
+    QSpinBox* m_regionBottomLeftYSpinBox = nullptr;
+    QSpinBox* m_regionTopRightXSpinBox = nullptr;
+    QSpinBox* m_regionTopRightYSpinBox = nullptr;
+    QPushButton* m_defineRegionButton = nullptr;
     QLabel* m_iterationLabel = nullptr;
     QLabel* m_renderStateLabel = nullptr;
     QPushButton* m_startButton = nullptr;

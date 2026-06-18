@@ -66,6 +66,21 @@ public:
         return {ndcX, ndcY};
     }
 
+    glm::vec2 worldFromNdc(float ndcX, float ndcY, float sx, float sy) const
+    {
+        const float halfW = sx / m_zoom;
+        const float halfH = sy / m_zoom;
+        return glm::vec2(m_center.x + ndcX * halfW, m_center.y + ndcY * halfH);
+    }
+
+    void clampCenterToImageBounds(float sx, float sy)
+    {
+        const float halfW = sx / m_zoom;
+        const float halfH = sy / m_zoom;
+        m_center.x = std::clamp(m_center.x, -1.0f - halfW, 1.0f + halfW);
+        m_center.y = std::clamp(m_center.y, -1.0f - halfH, 1.0f + halfH);
+    }
+
 private:
     static constexpr float kMinZoom = 0.1f;
     static constexpr float kMaxZoom = 32.0f;

@@ -9,6 +9,7 @@
 #include <QKeyEvent>
 #include <QMetaObject>
 #include <QMouseEvent>
+#include <QRect>
 #include <QSurfaceFormat>
 #include <QTimer>
 #include <QWheelEvent>
@@ -17,6 +18,7 @@
 
 #include <cmath>
 #include <algorithm>
+#include <optional>
 #include <utility>
 
 namespace {
@@ -108,6 +110,36 @@ std::pair<float, float> widgetToLetterboxNdc(
         y - static_cast<float>(viewportY),
         viewportW,
         viewportH);
+}
+
+std::optional<QPoint> worldToImagePixel(float worldX, float worldY, int renderW, int renderH)
+{
+    if (renderW <= 0 || renderH <= 0) {
+        return std::nullopt;
+    }
+
+    const float normalizedX = (worldX + 1.0f) * 0.5f;
+    const float normalizedY = (1.0f - worldY) * 0.5f;
+    if (normalizedX < 0.0f || normalizedX > 1.0f || normalizedY < 0.0f || normalizedY > 1.0f) {
+        return std::nullopt;
+    }
+
+    const int px = std::clamp(
+        static_cast<int>(std::floor(normalizedX * static_cast<float>(renderW))),
+        0,
+        renderW - 1);
+    const int py = std::clamp(
+        static_cast<int>(std::floor(normalizedY * static_cast<float>(renderH))),
+        0,
+        renderH - 1);
+    return QPoint(px, py);
+}
+
+QRect normalizedImageRect(const QPoint& a, const QPoint& b)
+{
+    return QRect(
+        QPoint(std::min(a.x(), b.x()), std::min(a.y(), b.y())),
+        QPoint(std::max(a.x(), b.x()), std::max(a.y(), b.y())));
 }
 
 MeshSceneBuildParams meshSceneBuildParamsForModel(const SceneModel* model)
@@ -233,7 +265,7 @@ void OpenGLViewportWidget::setSceneModel(SceneModel* model)
 
         const int previewSteps = m_model->previewStepsPerLevel();
         if (current >= previewSteps + max) {
-            restartRender();
+            restartRender(false);
             return;
         }
 
@@ -279,14 +311,19 @@ void OpenGLViewportWidget::setSceneModel(SceneModel* model)
             return;
         }
         rebuildBoundsOverlay();
-        restartRender();
+        restartRender(false);
         doneCurrent();
+        update();
+    });
+
+    connect(m_model, &SceneModel::regionRenderColorChanged, this, [this](const QColor&) {
         update();
     });
 
     if (m_glInitialized) {
         makeCurrent();
         recreateGpuBuffers();
+        applyRegionRenderSettings(false);
         doneCurrent();
         update();
     }
@@ -361,6 +398,7 @@ void OpenGLViewportWidget::initializeGL()
 
     m_boundsOverlay.initialize(this);
     m_originGizmo.initialize(this);
+    m_regionOverlay.initialize(this);
     m_glInitialized = true;
 
     if (m_model != nullptr) {
@@ -383,7 +421,8 @@ void OpenGLViewportWidget::paintGL()
     const float a = static_cast<float>(m_clearColor.alphaF());
 
     glClearColor(r, g, b, a);
-    glClear(GL_COLOR_BUFFER_BIT);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glDisable(GL_DEPTH_TEST);
 
     if (m_model == nullptr || m_program == 0) {
         return;
@@ -410,28 +449,89 @@ void OpenGLViewportWidget::paintGL()
             letterboxViewportRect(width(), height(), renderW, renderH, viewportX, viewportY, viewportW, viewportH);
         }
 
-        glViewport(viewportX, viewportY, viewportW, viewportH);
-        glEnable(GL_SCISSOR_TEST);
-        glScissor(viewportX, viewportY, viewportW, viewportH);
-
-        glUseProgram(m_program);
-
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, m_texture);
-        glUniform1i(glGetUniformLocation(m_program, "uTexture"), 0);
-
-        const glm::mat4 viewProj = m_quadView.viewProjMatrix(1.0f, 1.0f);
-        glUniformMatrix4fv(glGetUniformLocation(m_program, "uViewProj"), 1, GL_FALSE, glm::value_ptr(viewProj));
-
-        glBindVertexArray(m_vao);
-        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, nullptr);
-        glBindVertexArray(0);
-
-        glDisable(GL_SCISSOR_TEST);
-        glViewport(0, 0, width(), height());
+        drawImageSpaceLayers(viewportX, viewportY, viewportW, viewportH);
     }
 
     drawSceneOverlays();
+}
+
+void OpenGLViewportWidget::drawImageSpaceLayers(int viewportX, int viewportY, int viewportW, int viewportH)
+{
+    if (viewportW <= 0 || viewportH <= 0 || m_model == nullptr || m_texture == 0) {
+        return;
+    }
+
+    glDisable(GL_DEPTH_TEST);
+    glViewport(viewportX, viewportY, viewportW, viewportH);
+    glEnable(GL_SCISSOR_TEST);
+    glScissor(viewportX, viewportY, viewportW, viewportH);
+
+    const glm::mat4 viewProj = m_quadView.viewProjMatrix(1.0f, 1.0f);
+
+    glUseProgram(m_program);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, m_texture);
+    glUniform1i(glGetUniformLocation(m_program, "uTexture"), 0);
+    glUniformMatrix4fv(glGetUniformLocation(m_program, "uViewProj"), 1, GL_FALSE, glm::value_ptr(viewProj));
+    glBindVertexArray(m_vao);
+    glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, nullptr);
+    glBindVertexArray(0);
+
+    if (m_model->regionRenderEnabled()) {
+        drawRegionOverlayLines(viewProj, m_model->regionRect());
+    } else if (m_regionDefining && m_regionDefineHasAnchor) {
+        drawRegionOverlayLines(viewProj, normalizedImageRect(m_regionDefineAnchor, m_regionDefinePreview));
+    }
+
+    glDisable(GL_SCISSOR_TEST);
+    glViewport(0, 0, width(), height());
+}
+
+bool OpenGLViewportWidget::isWidgetPosInLetterbox(
+    const QPoint& widgetPos,
+    int* outViewportX,
+    int* outViewportY,
+    int* outViewportW,
+    int* outViewportH) const
+{
+    if (m_model == nullptr || width() <= 0 || height() <= 0) {
+        return false;
+    }
+
+    const int renderW = m_model->renderSize().width();
+    const int renderH = m_model->renderSize().height();
+    if (renderW <= 0 || renderH <= 0) {
+        return false;
+    }
+
+    int viewportX = 0;
+    int viewportY = 0;
+    int viewportW = width();
+    int viewportH = height();
+    letterboxViewportRect(width(), height(), renderW, renderH, viewportX, viewportY, viewportW, viewportH);
+    if (viewportW <= 0 || viewportH <= 0) {
+        return false;
+    }
+
+    if (outViewportX != nullptr) {
+        *outViewportX = viewportX;
+    }
+    if (outViewportY != nullptr) {
+        *outViewportY = viewportY;
+    }
+    if (outViewportW != nullptr) {
+        *outViewportW = viewportW;
+    }
+    if (outViewportH != nullptr) {
+        *outViewportH = viewportH;
+    }
+
+    const float x = static_cast<float>(widgetPos.x());
+    const float y = static_cast<float>(widgetPos.y());
+    return x >= static_cast<float>(viewportX)
+        && x < static_cast<float>(viewportX + viewportW)
+        && y >= static_cast<float>(viewportY)
+        && y < static_cast<float>(viewportY + viewportH);
 }
 
 void OpenGLViewportWidget::rebuildBoundsOverlay()
@@ -489,8 +589,40 @@ void OpenGLViewportWidget::drawSceneOverlays()
     glViewport(0, 0, width(), height());
 }
 
+void OpenGLViewportWidget::drawRegionOverlayLines(const glm::mat4& viewProj, const QRect& regionPx)
+{
+    if (m_model == nullptr || regionPx.isEmpty()) {
+        return;
+    }
+
+    const int renderW = m_model->renderSize().width();
+    const int renderH = m_model->renderSize().height();
+    if (renderW <= 0 || renderH <= 0) {
+        return;
+    }
+
+    const QColor color = m_regionDefining ? m_model->regionRenderColor().lighter(120)
+                                          : m_model->regionRenderColor();
+    m_regionOverlay.draw(this, viewProj, regionPx, renderW, renderH, color);
+}
+
 void OpenGLViewportWidget::mousePressEvent(QMouseEvent* event)
 {
+    if (m_regionDefining && event->button() == Qt::RightButton) {
+        cancelRegionDefinition();
+        event->accept();
+        return;
+    }
+
+    if (m_regionDefining && event->button() == Qt::LeftButton && !(event->modifiers() & Qt::ControlModifier)) {
+        const auto imagePixel = widgetPosToImagePixel(event->pos());
+        if (imagePixel.has_value()) {
+            finalizeRegionDefinition(*imagePixel);
+        }
+        event->accept();
+        return;
+    }
+
     if (event->button() != Qt::LeftButton) {
         return;
     }
@@ -499,7 +631,9 @@ void OpenGLViewportWidget::mousePressEvent(QMouseEvent* event)
     m_lastMousePos = event->pos();
 
     if (event->modifiers() & Qt::ControlModifier) {
-        m_quadPanning = true;
+        if (isWidgetPosInLetterbox(event->pos(), nullptr, nullptr, nullptr, nullptr)) {
+            m_quadPanning = true;
+        }
         event->accept();
         return;
     }
@@ -510,24 +644,28 @@ void OpenGLViewportWidget::mousePressEvent(QMouseEvent* event)
 
 void OpenGLViewportWidget::mouseMoveEvent(QMouseEvent* event)
 {
+    if (m_regionDefining && m_regionDefineHasAnchor) {
+        const auto imagePixel = widgetPosToImagePixel(event->pos());
+        if (imagePixel.has_value() && m_regionDefinePreview != *imagePixel) {
+            m_regionDefinePreview = *imagePixel;
+            update();
+        }
+        event->accept();
+        return;
+    }
+
     if (m_quadPanning) {
         const QPoint delta = event->pos() - m_lastMousePos;
         m_lastMousePos = event->pos();
 
-        if (m_model != nullptr && width() > 0 && height() > 0) {
-            const int renderW = m_model->renderSize().width();
-            const int renderH = m_model->renderSize().height();
-            int viewportX = 0;
-            int viewportY = 0;
-            int viewportW = width();
-            int viewportH = height();
-            letterboxViewportRect(width(), height(), renderW, renderH, viewportX, viewportY, viewportW, viewportH);
-            if (viewportW > 0 && viewportH > 0) {
-                const float ndcDeltaX = -2.0f * static_cast<float>(delta.x()) / static_cast<float>(viewportW);
-                const float ndcDeltaY = 2.0f * static_cast<float>(delta.y()) / static_cast<float>(viewportH);
-                m_quadView.pan(ndcDeltaX, ndcDeltaY);
-                update();
-            }
+        int viewportW = 0;
+        int viewportH = 0;
+        if (isWidgetPosInLetterbox(event->pos(), nullptr, nullptr, &viewportW, &viewportH)) {
+            const float ndcDeltaX = -2.0f * static_cast<float>(delta.x()) / static_cast<float>(viewportW);
+            const float ndcDeltaY = 2.0f * static_cast<float>(delta.y()) / static_cast<float>(viewportH);
+            m_quadView.pan(ndcDeltaX, ndcDeltaY);
+            m_quadView.clampCenterToImageBounds(1.0f, 1.0f);
+            update();
         }
         event->accept();
         return;
@@ -571,6 +709,11 @@ void OpenGLViewportWidget::wheelEvent(QWheelEvent* event)
         return;
     }
 
+    if (!isWidgetPosInLetterbox(event->position().toPoint(), nullptr, nullptr, nullptr, nullptr)) {
+        event->ignore();
+        return;
+    }
+
     const auto [cursorNdcX, cursorNdcY] = widgetToLetterboxNdc(
         static_cast<float>(event->position().x()),
         static_cast<float>(event->position().y()),
@@ -579,13 +722,25 @@ void OpenGLViewportWidget::wheelEvent(QWheelEvent* event)
         renderW,
         renderH);
     const float factor = std::pow(kWheelZoomBase, static_cast<float>(event->angleDelta().y()));
-    m_quadView.zoomAt(factor, cursorNdcX, cursorNdcY, 1.0f, 1.0f);
+    m_quadView.zoomAt(
+        factor,
+        std::clamp(cursorNdcX, -1.0f, 1.0f),
+        std::clamp(cursorNdcY, -1.0f, 1.0f),
+        1.0f,
+        1.0f);
+    m_quadView.clampCenterToImageBounds(1.0f, 1.0f);
     update();
     event->accept();
 }
 
 void OpenGLViewportWidget::keyPressEvent(QKeyEvent* event)
 {
+    if (m_regionDefining && event->key() == Qt::Key_Escape) {
+        cancelRegionDefinition();
+        event->accept();
+        return;
+    }
+
     if (m_inputState.handleKeyPress(event)) {
         event->accept();
         return;
@@ -726,12 +881,16 @@ void OpenGLViewportWidget::emitRenderState()
         activePixelCount);
 }
 
-void OpenGLViewportWidget::restartRender()
+void OpenGLViewportWidget::restartRender(bool regionOnlyReset)
 {
     m_renderPaused = false;
     m_hasNewFrame.store(false);
     m_frameCallbackQueued.store(false);
-    m_pathTracer.resetAccumulation();
+    if (regionOnlyReset && m_model != nullptr && m_model->regionRenderEnabled()) {
+        m_pathTracer.resetRegionAccumulation();
+    } else {
+        m_pathTracer.resetAccumulation();
+    }
     if (!m_pathTracer.isRunning()) {
         m_pathTracer.start();
     }
@@ -768,7 +927,11 @@ void OpenGLViewportWidget::resetAccumulationForCamera()
     m_renderPaused = false;
     m_hasNewFrame.store(false);
     m_frameCallbackQueued.store(false);
-    m_pathTracer.resetAccumulation();
+    if (m_model != nullptr && m_model->regionRenderEnabled()) {
+        m_pathTracer.resetRegionAccumulation();
+    } else {
+        m_pathTracer.resetAccumulation();
+    }
     ensureRenderWorkerRunning();
     emit iterationChanged(0);
     emitRenderState();
@@ -778,8 +941,102 @@ void OpenGLViewportWidget::resetAccumulationForCamera()
 void OpenGLViewportWidget::onCameraChanged()
 {
     syncCameraToPathTracer();
-    restartRender();
+    restartRender(m_model != nullptr && m_model->regionRenderEnabled());
     update();
+}
+
+void OpenGLViewportWidget::setRegionDefineMode(bool active)
+{
+    if (m_regionDefining == active) {
+        return;
+    }
+
+    m_regionDefining = active;
+    m_regionDefineHasAnchor = false;
+    m_looking = false;
+    emit regionDefineModeChanged(active);
+    update();
+}
+
+bool OpenGLViewportWidget::regionDefineMode() const
+{
+    return m_regionDefining;
+}
+
+void OpenGLViewportWidget::applyRegionRenderSettings(bool resetActiveRegion)
+{
+    if (m_model == nullptr) {
+        return;
+    }
+
+    m_pathTracer.setRegionRenderEnabled(m_model->regionRenderEnabled());
+    const QRect region = m_model->regionRect();
+    m_pathTracer.setRenderRegion(region.left(), region.top(), region.right(), region.bottom());
+
+    if (resetActiveRegion) {
+        m_pathTracer.resetRegionAccumulation();
+        ensureRenderWorkerRunning();
+        emitRenderState();
+    }
+
+    if (m_glInitialized && m_pathTracer.currentSampleCount() > 0) {
+        m_hasNewFrame.store(true);
+    }
+
+    update();
+}
+
+std::optional<QPoint> OpenGLViewportWidget::widgetPosToImagePixel(const QPoint& widgetPos) const
+{
+    if (m_model == nullptr || width() <= 0 || height() <= 0) {
+        return std::nullopt;
+    }
+
+    const int renderW = m_model->renderSize().width();
+    const int renderH = m_model->renderSize().height();
+    if (renderW <= 0 || renderH <= 0) {
+        return std::nullopt;
+    }
+
+    const auto [letterboxNdcX, letterboxNdcY] = widgetToLetterboxNdc(
+        static_cast<float>(widgetPos.x()),
+        static_cast<float>(widgetPos.y()),
+        width(),
+        height(),
+        renderW,
+        renderH);
+    const glm::vec2 world = m_quadView.worldFromNdc(letterboxNdcX, letterboxNdcY, 1.0f, 1.0f);
+    return worldToImagePixel(world.x, world.y, renderW, renderH);
+}
+
+void OpenGLViewportWidget::finalizeRegionDefinition(const QPoint& imagePixel)
+{
+    if (!m_regionDefineHasAnchor) {
+        m_regionDefineAnchor = imagePixel;
+        m_regionDefinePreview = imagePixel;
+        m_regionDefineHasAnchor = true;
+        update();
+        return;
+    }
+
+    if (m_model != nullptr) {
+        m_model->setRegionRect(
+            m_regionDefineAnchor.x(),
+            m_regionDefineAnchor.y(),
+            imagePixel.x(),
+            imagePixel.y());
+    }
+
+    setRegionDefineMode(false);
+}
+
+void OpenGLViewportWidget::cancelRegionDefinition()
+{
+    if (!m_regionDefining) {
+        return;
+    }
+
+    setRegionDefineMode(false);
 }
 
 void OpenGLViewportWidget::recreateGpuBuffers()
@@ -847,6 +1104,7 @@ void OpenGLViewportWidget::recreateGpuBuffers()
     m_pathTracer.setRussianRouletteMinDepth(m_model->russianRouletteMinDepth());
     m_pathTracer.setEnvironmentHdrPath(m_model->environmentHdrPath());
     m_pathTracer.setPhysicalCamera(m_model->fStop(), m_model->shutterSpeedSeconds(), m_model->iso());
+    applyRegionRenderSettings(false);
 
     m_model->setPboIds(m_pbos[0], m_pbos[1]);
 
@@ -903,6 +1161,7 @@ void OpenGLViewportWidget::releaseGlResources()
     m_pathTracer.releaseOutputSurfaces();
     m_boundsOverlay.release(this);
     m_originGizmo.release(this);
+    m_regionOverlay.release(this);
 
     if (m_texture != 0) {
         glDeleteTextures(1, &m_texture);

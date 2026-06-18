@@ -9,6 +9,7 @@
 #include "SceneModel.h"
 #include "SettingsDialog.h"
 #include <QColorDialog>
+#include <QCheckBox>
 #include <QDialog>
 #include <QFile>
 #include <QFileDialog>
@@ -118,6 +119,8 @@ SceneController::SceneController(SceneModel* model, MainView* view, QObject* par
     syncPreviewStepsSpinBox();
     syncRussianRouletteMinDepthSpinBox();
     syncBoundsOverlayComboBox();
+    syncRegionRenderUi();
+    updateRegionSpinBoxRanges();
     syncEnvironmentHdrPath();
     syncEnvironmentIntensitySpinBox();
     syncEnvironmentIntensityEnabled();
@@ -161,6 +164,25 @@ SceneController::SceneController(SceneModel* model, MainView* view, QObject* par
         QOverload<int>::of(&QComboBox::currentIndexChanged),
         this,
         &SceneController::onBoundsOverlayComboBoxChanged);
+    connect(m_view->regionRenderCheckBox(), &QCheckBox::toggled, this, &SceneController::onRegionRenderCheckBoxChanged);
+    connect(m_view->regionBottomLeftXSpinBox(), &QSpinBox::valueChanged, this, &SceneController::onRegionRectSpinBoxesChanged);
+    connect(m_view->regionBottomLeftYSpinBox(), &QSpinBox::valueChanged, this, &SceneController::onRegionRectSpinBoxesChanged);
+    connect(m_view->regionTopRightXSpinBox(), &QSpinBox::valueChanged, this, &SceneController::onRegionRectSpinBoxesChanged);
+    connect(m_view->regionTopRightYSpinBox(), &QSpinBox::valueChanged, this, &SceneController::onRegionRectSpinBoxesChanged);
+    connect(m_view->defineRegionButton(), &QPushButton::toggled, this, &SceneController::onDefineRegionButtonToggled);
+    connect(m_model, &SceneModel::regionRenderEnabledChanged, this, [this](bool) {
+        syncRegionRenderUi();
+        m_view->viewport()->applyRegionRenderSettings(true);
+    });
+    connect(m_model, &SceneModel::regionRectChanged, this, [this](const QRect&) {
+        syncRegionRenderUi();
+        m_view->viewport()->applyRegionRenderSettings(true);
+    });
+    connect(m_view->viewport(), &OpenGLViewportWidget::regionDefineModeChanged, this, [this](bool active) {
+        m_view->defineRegionButton()->blockSignals(true);
+        m_view->defineRegionButton()->setChecked(active);
+        m_view->defineRegionButton()->blockSignals(false);
+    });
     connect(&m_renderSizeDebounce, &DebounceTimer::triggered, this, &SceneController::applyRenderSizeFromSpinBoxes);
     connect(&m_maxSamplesDebounce, &DebounceTimer::triggered, this, &SceneController::applyMaxSamplesFromSpinBox);
     connect(&m_previewStepsDebounce, &DebounceTimer::triggered, this, &SceneController::applyPreviewStepsFromSpinBox);
@@ -266,6 +288,8 @@ void SceneController::onRenderSizeChanged(const QSize& size)
 {
     Q_UNUSED(size);
     syncRenderSpinBoxes();
+    updateRegionSpinBoxRanges();
+    syncRegionRenderUi();
 }
 
 void SceneController::onRenderSizeSpinBoxChanged()
@@ -320,10 +344,68 @@ void SceneController::onBoundsOverlayComboBoxChanged()
         boundsOverlayModeFromComboIndex(m_view->boundsOverlayComboBox()->currentIndex()));
 }
 
+void SceneController::onRegionRenderCheckBoxChanged()
+{
+    m_model->setRegionRenderEnabled(m_view->regionRenderCheckBox()->isChecked());
+    m_view->viewport()->applyRegionRenderSettings(true);
+}
+
+void SceneController::onRegionRectSpinBoxesChanged()
+{
+    applyRegionRectFromSpinBoxes();
+}
+
+void SceneController::onDefineRegionButtonToggled(bool checked)
+{
+    m_view->viewport()->setRegionDefineMode(checked);
+}
+
+void SceneController::syncRegionRenderUi()
+{
+    const QRect rect = m_model->regionRect();
+
+    m_view->regionRenderCheckBox()->blockSignals(true);
+    m_view->regionRenderCheckBox()->setChecked(m_model->regionRenderEnabled());
+    m_view->regionRenderCheckBox()->blockSignals(false);
+
+    m_view->regionBottomLeftXSpinBox()->blockSignals(true);
+    m_view->regionBottomLeftYSpinBox()->blockSignals(true);
+    m_view->regionTopRightXSpinBox()->blockSignals(true);
+    m_view->regionTopRightYSpinBox()->blockSignals(true);
+    m_view->regionBottomLeftXSpinBox()->setValue(rect.left());
+    m_view->regionBottomLeftYSpinBox()->setValue(rect.bottom());
+    m_view->regionTopRightXSpinBox()->setValue(rect.right());
+    m_view->regionTopRightYSpinBox()->setValue(rect.top());
+    m_view->regionBottomLeftXSpinBox()->blockSignals(false);
+    m_view->regionBottomLeftYSpinBox()->blockSignals(false);
+    m_view->regionTopRightXSpinBox()->blockSignals(false);
+    m_view->regionTopRightYSpinBox()->blockSignals(false);
+}
+
+void SceneController::updateRegionSpinBoxRanges()
+{
+    const int maxX = std::max(0, m_model->renderSize().width() - 1);
+    const int maxY = std::max(0, m_model->renderSize().height() - 1);
+
+    m_view->regionBottomLeftXSpinBox()->setRange(0, maxX);
+    m_view->regionBottomLeftYSpinBox()->setRange(0, maxY);
+    m_view->regionTopRightXSpinBox()->setRange(0, maxX);
+    m_view->regionTopRightYSpinBox()->setRange(0, maxY);
+}
+
+void SceneController::applyRegionRectFromSpinBoxes()
+{
+    m_model->setRegionRect(
+        m_view->regionBottomLeftXSpinBox()->value(),
+        m_view->regionTopRightYSpinBox()->value(),
+        m_view->regionTopRightXSpinBox()->value(),
+        m_view->regionBottomLeftYSpinBox()->value());
+}
+
 void SceneController::onStartButtonClicked()
 {
     m_view->setIteration(0);
-    m_view->viewport()->restartRender();
+    m_view->viewport()->restartRender(m_model->regionRenderEnabled());
 }
 
 void SceneController::onStopButtonClicked()

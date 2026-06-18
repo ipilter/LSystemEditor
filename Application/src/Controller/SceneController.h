@@ -58,6 +58,12 @@ private:
     void syncRelativeErrorThresholdSpinBox();
     void syncPreviewStepsSpinBox();
     void syncBoundsOverlayComboBox();
+    void onRegionRenderCheckBoxChanged();
+    void onRegionRectSpinBoxesChanged();
+    void onDefineRegionButtonToggled(bool checked);
+    void syncRegionRenderUi();
+    void updateRegionSpinBoxRanges();
+    void applyRegionRectFromSpinBoxes();
     bool loadLsystemFromFile(const QString& path);
     void restoreLsystemFromSettings();
 
