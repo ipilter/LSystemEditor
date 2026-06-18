@@ -28,7 +28,7 @@ if(DEFINED ENV{QTDIR})
     list(PREPEND CMAKE_PREFIX_PATH "$ENV{QTDIR}")
 endif()
 
-find_package(Qt6 REQUIRED COMPONENTS Gui Widgets OpenGL OpenGLWidgets)
+find_package(Qt6 REQUIRED COMPONENTS Gui Widgets OpenGL OpenGLWidgets Concurrent)
 find_package(CUDAToolkit REQUIRED)
 
 enable_language(CUDA)

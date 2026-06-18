@@ -1,12 +1,15 @@
 #pragma once
 
 #include "DebounceTimer.h"
+#include "PhysicalCamera.h"
 
 #include "RenderTypes.h"
 
 #include <QColor>
 #include <QObject>
 #include <QSize>
+
+#include <atomic>
 
 class MainView;
 class SceneModel;
@@ -46,6 +49,7 @@ private:
     void syncEnvironmentIntensitySpinBox();
     void syncEnvironmentIntensityEnabled();
     void onIterationChangedForAutoExposure(int sampleCount);
+    void applyAccumulatorExposureRefine(bool ok, PhysicalCamera suggested);
     void applyPhysicalCameraToViewport();
     void applySuggestedPhysicalCameraFromHdr();
     void syncEnvironmentHdrPath();
@@ -75,4 +79,5 @@ private:
     DebounceTimer m_physicalCameraDebounce;
     bool m_pendingFrameAutoExposure = false;
     bool m_pendingAccumulatorExposureRefine = false;
+    std::atomic<bool> m_autoExposureComputeRunning{false};
 };

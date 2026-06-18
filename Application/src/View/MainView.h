@@ -12,6 +12,7 @@ class QSplitter;
 class QLabel;
 class QLineEdit;
 class QPlainTextEdit;
+class ZoomablePlainTextEdit;
 class QPushButton;
 class QSpinBox;
 class QCheckBox;
@@ -109,8 +110,8 @@ private:
     QPushButton* m_lsystemLoadButton = nullptr;
     QPushButton* m_resetSceneButton = nullptr;
     QPushButton* m_exportSceneButton = nullptr;
-    QPlainTextEdit* m_lsystemEdit = nullptr;
+    ZoomablePlainTextEdit* m_lsystemEdit = nullptr;
     QSpinBox* m_lsystemIterationsSpinBox = nullptr;
-    QPlainTextEdit* m_logView = nullptr;
+    ZoomablePlainTextEdit* m_logView = nullptr;
     QSize m_pendingViewportSize;
 };

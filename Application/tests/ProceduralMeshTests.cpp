@@ -494,4 +494,14 @@ void runProceduralMeshTests()
         MeshAccelScene scene;
         expectTrue(meshSceneBuild(instances, scene), "meshSceneBuild with procedural instance");
     }
+
+    {
+        HostMesh mesh{};
+        ProceduralBuildParams buildParams{};
+        std::string error;
+        const bool ok = ProceduralMeshBuilder::buildHostMesh(
+            "A -> B\nnot a rule", 0, RootTransform{}, mesh, buildParams, &error);
+        expectTrue(!ok, "invalid L-system returns false");
+        expectTrue(!error.empty(), "invalid L-system sets error message");
+    }
 }

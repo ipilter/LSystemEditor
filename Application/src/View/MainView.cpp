@@ -5,6 +5,7 @@
 #include "OpenGLViewportWidget.h"
 #include "PhysicalCamera.h"
 #include "RenderAccumulationState.h"
+#include "ZoomablePlainTextEdit.h"
 
 #include <QApplication>
 #include <QCloseEvent>
@@ -161,13 +162,13 @@ MainView::MainView(QWidget* parent)
     auto* boundsOverlayRow = new QHBoxLayout();
     boundsOverlayRow->addWidget(new QLabel(QStringLiteral("View Mode:"), renderGroup));
     m_boundsOverlayComboBox = new QComboBox(renderGroup);
-    m_boundsOverlayComboBox->addItem(QStringLiteral("Off"));
+    m_boundsOverlayComboBox->addItem(QStringLiteral("Render"));
     m_boundsOverlayComboBox->addItem(QStringLiteral("BVH"));
     m_boundsOverlayComboBox->addItem(QStringLiteral("Adaptive"));
     m_boundsOverlayComboBox->addItem(QStringLiteral("UV"));
     m_boundsOverlayComboBox->setToolTip(
         QStringLiteral(
-            "View modes: Off (path-traced image), BVH wireframe overlay, "
+            "View modes: Render (path-traced image), BVH wireframe overlay, "
             "Adaptive sampling (red = active, dark green = converged), "
             "UV (U to red, V to green)."));
     boundsOverlayRow->addWidget(m_boundsOverlayComboBox, 1);
@@ -338,7 +339,10 @@ MainView::MainView(QWidget* parent)
     auto* lsystemGroup = new QGroupBox(QStringLiteral("LSystem"), controlPanel);
     auto* lsystemLayout = new QVBoxLayout(lsystemGroup);
 
-    m_lsystemEdit = new QPlainTextEdit(lsystemGroup);
+    m_lsystemEdit = new ZoomablePlainTextEdit(
+        []() { return AppSettings::instance().lsystemEditorFontSize(); },
+        [](int size) { AppSettings::instance().setLsystemEditorFontSize(size); },
+        lsystemGroup);
     m_lsystemEdit->setPlaceholderText(QStringLiteral("L-system definition (axiom and rules)"));
     m_lsystemEdit->setPlainText(QStringLiteral(
       "#{r, g, b, [roughness], [metallic], [transmission], [thin], [ior], [subsurface], [emission]}\n"
@@ -350,7 +354,7 @@ MainView::MainView(QWidget* parent)
       "Pitch(-90) f(-1) F(1, 10.0, 10.0)\n"
       "f(0.25)\n"
       "Mat(1)\n"
-      "F(0, 0.25)\n"));;
+      "F(0, 0.25)\n"));
 
     m_lsystemEdit->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     lsystemLayout->addWidget(m_lsystemEdit, 1);
@@ -405,7 +409,10 @@ MainView::MainView(QWidget* parent)
     m_horizontalSplitter->setStretchFactor(1, 0);
     m_horizontalSplitter->setSizes({580, kControlPanelInitialWidth});
 
-    m_logView = new QPlainTextEdit(this);
+    m_logView = new ZoomablePlainTextEdit(
+        []() { return AppSettings::instance().logFontSize(); },
+        [](int size) { AppSettings::instance().setLogFontSize(size); },
+        this);
     m_logView->setReadOnly(true);
     m_logView->setMinimumHeight(kLogPanelMinHeight);
     m_logView->setMaximumBlockCount(kLogMaxBlockCount);

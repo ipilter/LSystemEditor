@@ -45,8 +45,8 @@ public:
     int russianRouletteMinDepth() const;
     void setRussianRouletteMinDepth(int value);
 
-    MeshAccelBoundsOverlayMode boundsOverlayMode() const;
-    void setBoundsOverlayMode(MeshAccelBoundsOverlayMode mode);
+    RenderViewOverlayMode boundsOverlayMode() const;
+    void setBoundsOverlayMode(RenderViewOverlayMode mode);
 
     QColor accelBvhColor() const;
     void setAccelBvhColor(const QColor& color);
@@ -93,7 +93,7 @@ signals:
     void relativeErrorThresholdChanged(float value);
     void previewStepsPerLevelChanged(int value);
     void russianRouletteMinDepthChanged(int value);
-    void boundsOverlayModeChanged(MeshAccelBoundsOverlayMode mode);
+    void boundsOverlayModeChanged(RenderViewOverlayMode mode);
     void accelBvhColorChanged(const QColor& color);
     void environmentHdrPathChanged(const QString& path);
     void environmentIntensityChanged(float value);
@@ -106,7 +106,7 @@ signals:
     void regionRenderColorChanged(const QColor& color);
 
 private:
-    static MeshAccelBoundsOverlayMode clampBoundsOverlayMode(MeshAccelBoundsOverlayMode mode);
+    static RenderViewOverlayMode clampBoundsOverlayMode(RenderViewOverlayMode mode);
     static int clampDimension(int value);
     static int clampMaxSamples(int value);
     static int clampMinSamples(int value);
@@ -128,7 +128,7 @@ private:
     float m_relativeErrorThreshold = 0.02f;
     int m_previewStepsPerLevel = 2;
     int m_russianRouletteMinDepth = 3;
-    MeshAccelBoundsOverlayMode m_boundsOverlayMode = MeshAccelBoundsOverlayMode::Off;
+    RenderViewOverlayMode m_renderViewOverlayMode = RenderViewOverlayMode::Render;
     QColor m_accelBvhColor = QColor(230, 200, 0);
     float m_creaseAngleDeg = 50.0f;
     QString m_environmentHdrPath;

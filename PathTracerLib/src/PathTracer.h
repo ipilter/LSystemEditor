@@ -57,7 +57,14 @@ public:
     /// Call before deleting the OpenGL buffer objects on the host side.
     void releaseOutputSurfaces();
 
-    /// Requires an active OpenGL context. Maps pbo[slot], copies accumulator, unmaps.
+    /// Requires an active OpenGL context. Enqueues copy-to-PBO on the display stream (non-blocking).
+    bool beginDisplayPublish(int slot);
+    bool isDisplayPublishReady() const;
+    bool hasDisplayPublishInFlight() const;
+    /// Returns the PBO slot that finished publishing, or -1 if not ready.
+    int finishDisplayPublish();
+
+    /// Synchronous publish for one-off refresh (e.g. overlay toggle). Blocks until GPU copy completes.
     bool publishDisplayFrame(int slot);
 
     /// Full-resolution sample iterations only (0 = unlimited). Total kernel launches = preview + max.

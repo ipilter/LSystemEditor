@@ -19,6 +19,8 @@
 #include <QPushButton>
 #include <QSpinBox>
 
+#include <QtConcurrent>
+
 #include <cmath>
 
 namespace {
@@ -31,31 +33,31 @@ QString colorButtonStyleSheet(const QColor& color)
         .arg(color.name(QColor::HexRgb));
 }
 
-MeshAccelBoundsOverlayMode boundsOverlayModeFromComboIndex(int index)
+RenderViewOverlayMode renderViewOverlayModeFromComboIndex(int index)
 {
     switch (index) {
     case 1:
-        return MeshAccelBoundsOverlayMode::Bvh;
+        return RenderViewOverlayMode::Bvh;
     case 2:
-        return MeshAccelBoundsOverlayMode::AdaptiveSampling;
+        return RenderViewOverlayMode::AdaptiveSampling;
     case 3:
-        return MeshAccelBoundsOverlayMode::Uv;
+        return RenderViewOverlayMode::Uv;
     case 0:
     default:
-        return MeshAccelBoundsOverlayMode::Off;
+        return RenderViewOverlayMode::Render;
     }
 }
 
-int comboIndexFromBoundsOverlayMode(MeshAccelBoundsOverlayMode mode)
+int comboIndexFromBoundsOverlayMode(RenderViewOverlayMode mode)
 {
     switch (mode) {
-    case MeshAccelBoundsOverlayMode::Bvh:
+    case RenderViewOverlayMode::Bvh:
         return 1;
-    case MeshAccelBoundsOverlayMode::AdaptiveSampling:
+    case RenderViewOverlayMode::AdaptiveSampling:
         return 2;
-    case MeshAccelBoundsOverlayMode::Uv:
+    case RenderViewOverlayMode::Uv:
         return 3;
-    case MeshAccelBoundsOverlayMode::Off:
+    case RenderViewOverlayMode::Render:
     default:
         return 0;
     }
@@ -145,7 +147,7 @@ SceneController::SceneController(SceneModel* model, MainView* view, QObject* par
     connect(m_model, &SceneModel::russianRouletteMinDepthChanged, this, [this](int) {
         syncRussianRouletteMinDepthSpinBox();
     });
-    connect(m_model, &SceneModel::boundsOverlayModeChanged, this, [this](MeshAccelBoundsOverlayMode) {
+    connect(m_model, &SceneModel::boundsOverlayModeChanged, this, [this](RenderViewOverlayMode) {
         syncBoundsOverlayComboBox();
     });
     connect(m_view->renderWidthSpinBox(), &QSpinBox::valueChanged, this, &SceneController::onRenderSizeSpinBoxChanged);
@@ -345,7 +347,7 @@ void SceneController::onRussianRouletteMinDepthSpinBoxChanged()
 void SceneController::onBoundsOverlayComboBoxChanged()
 {
     m_model->setBoundsOverlayMode(
-        boundsOverlayModeFromComboIndex(m_view->boundsOverlayComboBox()->currentIndex()));
+        renderViewOverlayModeFromComboIndex(m_view->boundsOverlayComboBox()->currentIndex()));
 }
 
 void SceneController::onRegionRenderCheckBoxChanged()
@@ -628,20 +630,35 @@ void SceneController::onIterationChangedForAutoExposure(int sampleCount)
         m_pendingAccumulatorExposureRefine = true;
     }
 
-    if (!m_pendingAccumulatorExposureRefine || sampleCount < kFrameAutoExposureRefineSamples) {
+    if (!m_pendingAccumulatorExposureRefine || sampleCount < kFrameAutoExposureRefineSamples ||
+        m_autoExposureComputeRunning.load()) {
         return;
     }
 
-    PhysicalCamera suggested{};
-    if (m_view->viewport()->computeSuggestedPhysicalCameraFromAccumulator(&suggested)) {
+    m_pendingAccumulatorExposureRefine = false;
+    m_autoExposureComputeRunning.store(true);
+    OpenGLViewportWidget* viewport = m_view->viewport();
+    (void)QtConcurrent::run([this, viewport]() {
+        PhysicalCamera suggested{};
+        const bool ok = viewport->computeSuggestedPhysicalCameraFromAccumulator(&suggested);
+        QMetaObject::invokeMethod(
+            this,
+            [this, ok, suggested]() { applyAccumulatorExposureRefine(ok, suggested); },
+            Qt::QueuedConnection);
+    });
+}
+
+void SceneController::applyAccumulatorExposureRefine(bool ok, PhysicalCamera suggested)
+{
+    m_autoExposureComputeRunning.store(false);
+
+    if (ok) {
         m_model->setFStop(suggested.fStop);
         m_model->setShutterSpeedSeconds(suggested.shutterSpeedSeconds);
         m_model->setIso(suggested.iso);
         syncPhysicalCameraUi();
         applyPhysicalCameraToViewport();
     }
-
-    m_pendingAccumulatorExposureRefine = false;
 }
 
 void SceneController::applyPhysicalCameraToViewport()

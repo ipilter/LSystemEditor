@@ -64,6 +64,7 @@ function(application_add_pathtracer_executable)
         Qt6::Widgets
         Qt6::OpenGL
         Qt6::OpenGLWidgets
+        Qt6::Concurrent
         CUDA::cudart
         glm::glm)
     set_target_properties(pathtracer PROPERTIES

@@ -362,14 +362,24 @@ Symbol instantiate_successor_symbol(const Symbol& template_symbol, const Binding
     for (const ExprPtr& arg_expr : template_symbol.args)
     {
         double value = 0.0;
-        if (!eval_expr(arg_expr.get(), bindings, value))
+        if (eval_expr(arg_expr.get(), bindings, value))
         {
-            throw std::runtime_error("unable to evaluate successor argument expression");
+            auto numeric = std::make_unique<Expr>();
+            numeric->kind = Expr::Kind::Number;
+            numeric->number_value = value;
+            out.args.push_back(std::move(numeric));
+            continue;
         }
-        auto numeric = std::make_unique<Expr>();
-        numeric->kind = Expr::Kind::Number;
-        numeric->number_value = value;
-        out.args.push_back(std::move(numeric));
+
+        if (template_symbol.name == "Mat"
+            && arg_expr
+            && arg_expr->kind == Expr::Kind::Ident)
+        {
+            out.args.push_back(clone_expr(arg_expr));
+            continue;
+        }
+
+        throw std::runtime_error("unable to evaluate successor argument expression");
     }
     return out;
 }

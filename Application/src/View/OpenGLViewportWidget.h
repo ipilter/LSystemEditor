@@ -94,6 +94,8 @@ private:
     void cancelRegionDefinition();
     void ensureRenderWorkerRunning();
     void emitRenderState();
+    void scheduleDisplayPublishRepaint();
+    int effectiveDisplayRefreshIntervalMs() const;
     GLuint compileShader(GLenum type, const char* source);
     GLuint linkProgram(GLuint vertexShader, GLuint fragmentShader);
 
@@ -135,6 +137,7 @@ private:
     std::atomic<bool> m_hasNewFrame{false};
     std::atomic<bool> m_frameCallbackQueued{false};
     std::atomic<bool> m_iterationCallbackQueued{false};
+    std::atomic<bool> m_publishRepaintQueued{false};
     QElapsedTimer m_displayRefreshTimer;
 
     GLuint m_pbos[2] = {0, 0};

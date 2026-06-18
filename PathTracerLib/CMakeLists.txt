@@ -40,6 +40,10 @@ target_include_directories(PathTracerLib PUBLIC
     "${PATHTRACER_LIB_INCLUDE_DIR}/Texture")
 target_compile_definitions(PathTracerLib PRIVATE
     "PATHTRACER_RGB2SPEC_COEFF_PATH=\"${PATHTRACER_LIB_DIR}/src/Spectral/srgb.coeff\"")
+option(PATHTRACER_ENABLE_PROFILE "Enable render pipeline profiling logs" ON)
+if(PATHTRACER_ENABLE_PROFILE)
+    target_compile_definitions(PathTracerLib PRIVATE PATHTRACER_PROFILE)
+endif()
 target_include_directories(PathTracerLib PRIVATE
     "${CMAKE_SOURCE_DIR}/Application/src"
     "${CMAKE_SOURCE_DIR}/Application/src/MeshBuilder"

@@ -33,9 +33,9 @@ struct TextureEvalContext
     float u1d = 0.0f;
 };
 
-enum class MeshAccelBoundsOverlayMode : int
+enum class RenderViewOverlayMode : int
 {
-    Off = 0,
+    Render = 0,
     Bvh = 1,
     AdaptiveSampling = 2,
     Uv = 3,

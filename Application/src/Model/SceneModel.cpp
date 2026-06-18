@@ -180,20 +180,20 @@ void SceneModel::setRussianRouletteMinDepth(int value)
     emit russianRouletteMinDepthChanged(m_russianRouletteMinDepth);
 }
 
-MeshAccelBoundsOverlayMode SceneModel::boundsOverlayMode() const
+RenderViewOverlayMode SceneModel::boundsOverlayMode() const
 {
-    return m_boundsOverlayMode;
+    return m_renderViewOverlayMode;
 }
 
-void SceneModel::setBoundsOverlayMode(MeshAccelBoundsOverlayMode mode)
+void SceneModel::setBoundsOverlayMode(RenderViewOverlayMode mode)
 {
-    const MeshAccelBoundsOverlayMode clamped = clampBoundsOverlayMode(mode);
-    if (m_boundsOverlayMode == clamped) {
+    const RenderViewOverlayMode clamped = clampBoundsOverlayMode(mode);
+    if (m_renderViewOverlayMode == clamped) {
         return;
     }
 
-    m_boundsOverlayMode = clamped;
-    emit boundsOverlayModeChanged(m_boundsOverlayMode);
+    m_renderViewOverlayMode = clamped;
+    emit boundsOverlayModeChanged(m_renderViewOverlayMode);
 }
 
 QColor SceneModel::accelBvhColor() const
@@ -474,16 +474,16 @@ int SceneModel::clampRussianRouletteMinDepth(int value)
     return value;
 }
 
-MeshAccelBoundsOverlayMode SceneModel::clampBoundsOverlayMode(MeshAccelBoundsOverlayMode mode)
+RenderViewOverlayMode SceneModel::clampBoundsOverlayMode(RenderViewOverlayMode mode)
 {
     switch (mode) {
-    case MeshAccelBoundsOverlayMode::Off:
-    case MeshAccelBoundsOverlayMode::Bvh:
-    case MeshAccelBoundsOverlayMode::AdaptiveSampling:
-    case MeshAccelBoundsOverlayMode::Uv:
+    case RenderViewOverlayMode::Render:
+    case RenderViewOverlayMode::Bvh:
+    case RenderViewOverlayMode::AdaptiveSampling:
+    case RenderViewOverlayMode::Uv:
         return mode;
     default:
-        return MeshAccelBoundsOverlayMode::Off;
+        return RenderViewOverlayMode::Render;
     }
 }
 

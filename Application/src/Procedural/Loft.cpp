@@ -6,6 +6,13 @@
 #include <cstdint>
 #include <vector>
 
+struct LoftCorner
+{
+    Vec3 position{};
+    Vec3 normal{};
+    Vec2 uv{};
+};
+
 namespace {
 
 bool isValidManifold(const manifold::Manifold& mesh)
@@ -53,6 +60,98 @@ void appendVertex(std::vector<float>& vertProperties, Vec3 position, float u, fl
     vertProperties.push_back(0.0f);
     vertProperties.push_back(u);
     vertProperties.push_back(v);
+}
+
+LoftCorner sideWallCorner(
+    const PathFrame& frame,
+    int segment,
+    int sideColumns,
+    int circularSegments,
+    float vCoord)
+{
+    const int geomSegment = segment < circularSegments ? segment : 0;
+    const Vec3 position = ringVertex(frame, geomSegment, circularSegments);
+    const Vec3 normal = vecNormalize3(vecSub3(position, frame.position));
+    const float uCoord = static_cast<float>(segment) / static_cast<float>(circularSegments);
+    return LoftCorner{position, normal, Vec2{uCoord, vCoord}};
+}
+
+LoftCorner capRimCorner(const PathFrame& frame, int segment, int circularSegments, float normalSign)
+{
+    const Vec3 position = ringVertex(frame, segment, circularSegments);
+    const Vec2 uv = planarCapUv(segment, circularSegments);
+    const Vec3 normal = vecNormalize3(vecScale3(frame.tangent, normalSign));
+    return LoftCorner{position, normal, uv};
+}
+
+LoftCorner capCenterCorner(const PathFrame& frame, float normalSign)
+{
+    const Vec3 normal = vecNormalize3(vecScale3(frame.tangent, normalSign));
+    return LoftCorner{frame.position, normal, Vec2{0.5f, 0.5f}};
+}
+
+void appendHostTriangle(HostMesh& mesh, LoftCorner c0, LoftCorner c1, LoftCorner c2)
+{
+    HostTriangle tri{};
+    tri.v0 = c0.position;
+    tri.v1 = c1.position;
+    tri.v2 = c2.position;
+    tri.n0 = c0.normal;
+    tri.n1 = c1.normal;
+    tri.n2 = c2.normal;
+    tri.uv0 = c0.uv;
+    tri.uv1 = c1.uv;
+    tri.uv2 = c2.uv;
+    mesh.triangles.push_back(tri);
+}
+
+HostMesh buildLoftHostMeshFromFrames(const std::vector<PathFrame>& frames, int circularSegments)
+{
+    HostMesh mesh{};
+    if (frames.size() < 2 || circularSegments < 3) {
+        return mesh;
+    }
+
+    const int ringCount = static_cast<int>(frames.size());
+    const int sideColumns = circularSegments + 1;
+    const float invRingSpan = ringCount > 1 ? 1.0f / static_cast<float>(ringCount - 1) : 0.0f;
+
+    mesh.triangles.reserve(static_cast<size_t>((ringCount - 1) * circularSegments * 2 + circularSegments * 2));
+
+    for (int ring = 0; ring < ringCount - 1; ++ring) {
+        const float v0 = static_cast<float>(ring) * invRingSpan;
+        const float v1 = static_cast<float>(ring + 1) * invRingSpan;
+        const PathFrame& frame0 = frames[static_cast<size_t>(ring)];
+        const PathFrame& frame1 = frames[static_cast<size_t>(ring + 1)];
+
+        for (int segment = 0; segment < circularSegments; ++segment) {
+            const int nextSegment = segment + 1;
+            const LoftCorner v00 = sideWallCorner(frame0, segment, sideColumns, circularSegments, v0);
+            const LoftCorner v01 = sideWallCorner(frame0, nextSegment, sideColumns, circularSegments, v0);
+            const LoftCorner v10 = sideWallCorner(frame1, segment, sideColumns, circularSegments, v1);
+            const LoftCorner v11 = sideWallCorner(frame1, nextSegment, sideColumns, circularSegments, v1);
+            appendHostTriangle(mesh, v00, v01, v10);
+            appendHostTriangle(mesh, v01, v11, v10);
+        }
+    }
+
+    const PathFrame& startFrame = frames.front();
+    const PathFrame& endFrame = frames.back();
+    const LoftCorner startCenter = capCenterCorner(startFrame, -1.0f);
+    const LoftCorner endCenter = capCenterCorner(endFrame, 1.0f);
+
+    for (int segment = 0; segment < circularSegments; ++segment) {
+        const int nextSegment = (segment + 1) % circularSegments;
+        const LoftCorner startRim0 = capRimCorner(startFrame, segment, circularSegments, -1.0f);
+        const LoftCorner startRim1 = capRimCorner(startFrame, nextSegment, circularSegments, -1.0f);
+        appendHostTriangle(mesh, startCenter, startRim1, startRim0);
+
+        const LoftCorner endRim0 = capRimCorner(endFrame, segment, circularSegments, 1.0f);
+        const LoftCorner endRim1 = capRimCorner(endFrame, nextSegment, circularSegments, 1.0f);
+        appendHostTriangle(mesh, endCenter, endRim0, endRim1);
+    }
+
+    return mesh;
 }
 
 manifold::Manifold buildRingLoftMesh(const std::vector<PathFrame>& frames, int circularSegments)
@@ -220,4 +319,28 @@ manifold::Manifold loftSegment(const SplinePath& path, const ProceduralBuildPara
     }
 
     return result;
+}
+
+HostMesh buildLoftHostMesh(const SplinePath& path, const ProceduralBuildParams& params)
+{
+    const std::vector<PathFrame> frames = path.computeLoftFrames(params.samplesPerSpan);
+    if (frames.size() < 2) {
+        return HostMesh{};
+    }
+
+    return buildLoftHostMeshFromFrames(frames, params.circularSegments);
+}
+
+HostMesh loftHostMeshFromSegment(const TurtleSegment& segment, const ProceduralBuildParams& params)
+{
+    SplinePath path;
+    if (!path.buildFromSegment(segment, params.hermiteTension)) {
+        return HostMesh{};
+    }
+
+    if (path.totalArcLength() <= 1e-6f) {
+        return HostMesh{};
+    }
+
+    return buildLoftHostMesh(path, params);
 }

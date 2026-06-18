@@ -133,12 +133,12 @@ void MeshAccelBoundsOverlay::rebuild(QOpenGLFunctions_4_5_Core* gl, const MeshAc
 void MeshAccelBoundsOverlay::draw(
     QOpenGLFunctions_4_5_Core* gl,
     const glm::mat4& viewProj,
-    MeshAccelBoundsOverlayMode mode,
+    RenderViewOverlayMode mode,
     const QColor& boundsColor)
 {
     Q_UNUSED(boundsColor);
 
-    if (gl == nullptr || !m_initialized || m_program == 0 || mode != MeshAccelBoundsOverlayMode::Bvh) {
+    if (gl == nullptr || !m_initialized || m_program == 0 || mode != RenderViewOverlayMode::Bvh) {
         return;
     }
 

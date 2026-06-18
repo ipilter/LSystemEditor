@@ -358,3 +358,32 @@ TEST(LSystemEvaluatorTest, EvaluateFromDefinition_ReturnsGenerationAndMaterials)
     EXPECT_EQ(result.generation[0].name, "F");
     EXPECT_EQ(result.generation[1].name, "F");
 }
+
+TEST(LSystemEvaluatorTest, NamedMaterialInRuleSuccessor_PreservesIdent)
+{
+    const LSystemEvaluationResult result = LSystemEvaluator::evaluate(
+        "Mat(bark) = {0.72, 0.45, 0.20, 0.3}\n"
+        "Mat(leaf) = {0.95, 0.95, 0.95, 0.0}\n"
+        "F(5, 0.5, 0.45)\n"
+        "F(h, r1, r2) : r1 > 0.05 : 1.0 ->\n"
+        "    Mat(bark)\n"
+        "    F(h, r1, r2)\n"
+        "F(h, r1, r2) : r1 <= 0.05 : 1.0 ->\n"
+        "    Mat(leaf)\n"
+        "    F(0.1, 0.15, 0.15)\n",
+        1);
+
+    bool foundBark = false;
+    for (const Symbol& sym : result.generation)
+    {
+        if (sym.name == "Mat"
+            && !sym.args.empty()
+            && sym.args[0]
+            && sym.args[0]->kind == Expr::Kind::Ident
+            && sym.args[0]->ident == "bark")
+        {
+            foundBark = true;
+        }
+    }
+    EXPECT_TRUE(foundBark);
+}

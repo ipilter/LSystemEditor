@@ -3,6 +3,8 @@
 #include "MeshAccel/MeshAccelScene.h"
 #include "Procedural/ProceduralTypes.h"
 
+#include <QString>
+
 #include <vector>
 
 struct MeshSceneBuildParams
@@ -14,4 +16,5 @@ struct MeshSceneBuildParams
 bool meshSceneBuild(
     const std::vector<ProceduralInstance>& proceduralInstances,
     MeshAccelScene& scene,
-    const MeshSceneBuildParams& params = {});
+    const MeshSceneBuildParams& params = {},
+    QString* outError = nullptr);

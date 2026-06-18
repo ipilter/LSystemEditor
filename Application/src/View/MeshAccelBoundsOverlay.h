@@ -24,7 +24,7 @@ public:
     void draw(
         QOpenGLFunctions_4_5_Core* gl,
         const glm::mat4& viewProj,
-        MeshAccelBoundsOverlayMode mode,
+        RenderViewOverlayMode mode,
         const QColor& boundsColor);
 
 private:

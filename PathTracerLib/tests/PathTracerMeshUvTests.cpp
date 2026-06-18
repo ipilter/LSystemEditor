@@ -63,7 +63,7 @@ bool isCapFacingTriangle(const HostTriangle& triangle, const Vec3& axis)
     return std::fabs(vecDot3(normal, axis)) > 0.9f;
 }
 
-manifold::Manifold buildShortWideLoftMesh(const ProceduralBuildParams& params)
+TurtleSegment makeShortWideLoftSegment()
 {
     TurtleSegment segment{};
     TurtleState state{};
@@ -74,8 +74,12 @@ manifold::Manifold buildShortWideLoftMesh(const ProceduralBuildParams& params)
 
     state.position = Vec3{0.1f, 0.0f, 0.0f};
     segment.states.push_back(state);
+    return segment;
+}
 
-    return loftOrSphereFromSegment(segment, params);
+HostMesh buildShortWideLoftHostMesh(const ProceduralBuildParams& params)
+{
+    return loftHostMeshFromSegment(makeShortWideLoftSegment(), params);
 }
 
 void testLoftMeshPreservesNonZeroUvs()
@@ -95,10 +99,10 @@ void testLoftMeshPreservesNonZeroUvs()
     params.samplesPerSpan = 4;
 
     const manifold::Manifold loftMesh = loftOrSphereFromSegment(segment, params);
-    expectTrue(loftMesh.NumTri() > 0, "loft mesh has triangles");
+    expectTrue(loftMesh.NumTri() > 0, "loft validation mesh has triangles");
 
-    const HostMesh hostMesh = meshFromManifold(loftMesh);
-    expectTrue(!hostMesh.triangles.empty(), "host mesh has triangles");
+    const HostMesh hostMesh = loftHostMeshFromSegment(segment, params);
+    expectTrue(!hostMesh.triangles.empty(), "loft render mesh has triangles");
 
     bool foundNonZeroU = false;
     bool foundNonZeroV = false;
@@ -122,8 +126,7 @@ void testLoftCapDiscHasPlanarUvVariation()
     params.samplesPerSpan = 4;
     params.segmentRefineTolerance = 1.0f;
 
-    const manifold::Manifold loftMesh = buildShortWideLoftMesh(params);
-    const HostMesh hostMesh = meshFromManifold(loftMesh);
+    const HostMesh hostMesh = buildShortWideLoftHostMesh(params);
     expectTrue(!hostMesh.triangles.empty(), "short wide loft has triangles");
 
     const Vec3 axis{1.0f, 0.0f, 0.0f};
@@ -165,8 +168,7 @@ void testLoftSideWallHasCylindricalUvVariation()
     params.samplesPerSpan = 4;
     params.segmentRefineTolerance = 1.0f;
 
-    const manifold::Manifold loftMesh = buildShortWideLoftMesh(params);
-    const HostMesh hostMesh = meshFromManifold(loftMesh);
+    const HostMesh hostMesh = buildShortWideLoftHostMesh(params);
     const Vec3 axis{1.0f, 0.0f, 0.0f};
 
     bool foundSideTriangle = false;
@@ -191,6 +193,39 @@ void testLoftSideWallHasCylindricalUvVariation()
     expectTrue(foundSideTriangle, "short wide loft has side-wall triangles");
     expectTrue(foundSideVaryingU, "loft side wall varies in U");
     expectTrue(foundSideVaryingV, "loft side wall varies in V");
+}
+
+void testLoftSideWallUsesSeamColumn()
+{
+    ProceduralBuildParams params{};
+    params.circularSegments = 16;
+    params.samplesPerSpan = 4;
+
+    const HostMesh hostMesh = buildShortWideLoftHostMesh(params);
+    const Vec3 axis{1.0f, 0.0f, 0.0f};
+
+    bool foundSideTriangle = false;
+    bool foundUAtOne = false;
+    for (const HostTriangle& triangle : hostMesh.triangles) {
+        if (isCapFacingTriangle(triangle, axis)) {
+            continue;
+        }
+
+        foundSideTriangle = true;
+        const UvBounds bounds = triangleUvBounds(triangle);
+        const float maxU = std::max({triangle.uv0.x, triangle.uv1.x, triangle.uv2.x});
+        if (maxU > 0.99f) {
+            foundUAtOne = true;
+        }
+
+        const bool wrapAroundSeam =
+            bounds.minU < 0.05f && bounds.maxU > 0.85f && bounds.maxU < 0.99f;
+        expectTrue(!wrapAroundSeam, "no side triangle spans u=0 to u~15/16 without seam column");
+        expectTrue(bounds.maxU - bounds.minU <= 0.5f, "loft side triangle has bounded U span");
+    }
+
+    expectTrue(foundSideTriangle, "short wide loft has side-wall triangles for seam column test");
+    expectTrue(foundUAtOne, "side wall includes seam column at u=1");
 }
 
 void testSphereMeshUsesSphericalUvFallback()
@@ -251,37 +286,13 @@ void testInterpolatesUvAtHit()
     expectNear(uv.y, 0.25f, 1e-5f, "interpolated uv.y");
 }
 
-void testInterpolatesUvAcrossSeam()
-{
-    TriangleGpu triangle{};
-    triangle.v0 = Vec3{0.0f, 0.0f, 0.0f};
-    triangle.v1 = Vec3{1.0f, 0.0f, 0.0f};
-    triangle.v2 = Vec3{0.0f, 1.0f, 0.0f};
-    triangle.n0 = Vec3{0.0f, 0.0f, 1.0f};
-    triangle.n1 = Vec3{0.0f, 0.0f, 1.0f};
-    triangle.n2 = Vec3{0.0f, 0.0f, 1.0f};
-    triangle.uv0 = Vec2{15.0f / 16.0f, 0.0f};
-    triangle.uv1 = Vec2{0.0f, 0.0f};
-    triangle.uv2 = Vec2{15.0f / 16.0f, 1.0f};
-
-    float hitT = 0.0f;
-    Vec3 normal{};
-    Vec2 uv{};
-    const Vec3 origin{0.25f, 0.25f, 1.0f};
-    const Vec3 direction{0.0f, 0.0f, -1.0f};
-    expectTrue(
-        meshAccelRayTriangle(origin, direction, triangle, 0.0f, 10.0f, hitT, normal, uv),
-        "ray hits seam triangle");
-    expectTrue(uv.x > 0.85f, "seam-interpolated uv.x stays near wrap boundary");
-}
-
 void testUvOverlayModeEnumValue()
 {
     expectTrue(
-        static_cast<int>(MeshAccelBoundsOverlayMode::Uv) == 3,
+        static_cast<int>(RenderViewOverlayMode::Uv) == 3,
         "Uv view mode enum value is 3");
     expectTrue(
-        static_cast<int>(MeshAccelBoundsOverlayMode::AdaptiveSampling) < static_cast<int>(MeshAccelBoundsOverlayMode::Uv),
+        static_cast<int>(RenderViewOverlayMode::AdaptiveSampling) < static_cast<int>(RenderViewOverlayMode::Uv),
         "Uv follows AdaptiveSampling in view mode enum");
 }
 
@@ -292,9 +303,9 @@ int main()
     testLoftMeshPreservesNonZeroUvs();
     testLoftCapDiscHasPlanarUvVariation();
     testLoftSideWallHasCylindricalUvVariation();
+    testLoftSideWallUsesSeamColumn();
     testSphereMeshUsesSphericalUvFallback();
     testInterpolatesUvAtHit();
-    testInterpolatesUvAcrossSeam();
     testUvOverlayModeEnumValue();
 
     if (gFailures == 0) {

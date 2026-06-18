@@ -53,6 +53,8 @@ constexpr float kMaxEnvironmentIntensity = 100.0f;
 constexpr const char* kCreaseAngleDegKey = "creaseAngleDeg";
 constexpr const char* kEnvironmentHdrPathKey = "environmentHdrPath";
 constexpr const char* kLsystemFilePathKey = "lsystemFilePath";
+constexpr const char* kLsystemEditorFontSizeKey = "lsystemEditorFontSize";
+constexpr const char* kLogFontSizeKey = "logFontSize";
 constexpr const char* kEnvironmentIntensityKey = "environmentIntensity";
 constexpr const char* kFStopKey = "fStop";
 constexpr const char* kShutterSpeedSecondsKey = "shutterSpeedSeconds";
@@ -100,6 +102,9 @@ constexpr int kMinCameraTickIntervalMs = 8;
 constexpr int kMaxCameraTickIntervalMs = 100;
 constexpr int kMinCameraMotionTimingMs = 0;
 constexpr int kMaxCameraMotionTimingMs = 2000;
+constexpr int kDefaultEditorFontSize = 9;
+constexpr int kMinEditorFontSize = 6;
+constexpr int kMaxEditorFontSize = 48;
 
 bool isKnownDebounceElementId(const QString& elementId)
 {
@@ -409,6 +414,38 @@ void AppSettings::setLsystemFilePath(const QString& path)
     save();
 }
 
+int AppSettings::lsystemEditorFontSize() const
+{
+    return m_lsystemEditorFontSize;
+}
+
+void AppSettings::setLsystemEditorFontSize(int value)
+{
+    const int clamped = clampEditorFontSize(value);
+    if (m_lsystemEditorFontSize == clamped) {
+        return;
+    }
+
+    m_lsystemEditorFontSize = clamped;
+    save();
+}
+
+int AppSettings::logFontSize() const
+{
+    return m_logFontSize;
+}
+
+void AppSettings::setLogFontSize(int value)
+{
+    const int clamped = clampEditorFontSize(value);
+    if (m_logFontSize == clamped) {
+        return;
+    }
+
+    m_logFontSize = clamped;
+    save();
+}
+
 float AppSettings::environmentIntensity() const
 {
     return m_environmentIntensity;
@@ -612,6 +649,17 @@ int AppSettings::clampRegionCoordinate(int value, int maxInclusive)
     }
     if (value > maxInclusive) {
         return maxInclusive;
+    }
+    return value;
+}
+
+int AppSettings::clampEditorFontSize(int value)
+{
+    if (value < kMinEditorFontSize) {
+        return kMinEditorFontSize;
+    }
+    if (value > kMaxEditorFontSize) {
+        return kMaxEditorFontSize;
     }
     return value;
 }
@@ -905,6 +953,24 @@ void AppSettings::load()
         m_lsystemFilePath = lsystemFilePathValue.toString().trimmed();
     }
 
+    const QVariant lsystemEditorFontSizeValue = settings.value(kLsystemEditorFontSizeKey);
+    if (lsystemEditorFontSizeValue.isValid()) {
+        bool ok = false;
+        const int fontSize = lsystemEditorFontSizeValue.toInt(&ok);
+        if (ok) {
+            m_lsystemEditorFontSize = clampEditorFontSize(fontSize);
+        }
+    }
+
+    const QVariant logFontSizeValue = settings.value(kLogFontSizeKey);
+    if (logFontSizeValue.isValid()) {
+        bool ok = false;
+        const int fontSize = logFontSizeValue.toInt(&ok);
+        if (ok) {
+            m_logFontSize = clampEditorFontSize(fontSize);
+        }
+    }
+
     const QVariant environmentIntensityValue = settings.value(kEnvironmentIntensityKey);
     if (environmentIntensityValue.isValid()) {
         bool ok = false;
@@ -1041,6 +1107,8 @@ void AppSettings::save()
     settings.setValue(kCreaseAngleDegKey, static_cast<double>(m_creaseAngleDeg));
     settings.setValue(kEnvironmentHdrPathKey, m_environmentHdrPath);
     settings.setValue(kLsystemFilePathKey, m_lsystemFilePath);
+    settings.setValue(kLsystemEditorFontSizeKey, m_lsystemEditorFontSize);
+    settings.setValue(kLogFontSizeKey, m_logFontSize);
     settings.setValue(kEnvironmentIntensityKey, static_cast<double>(m_environmentIntensity));
     settings.setValue(kFStopKey, static_cast<double>(m_fStop));
     settings.setValue(kShutterSpeedSecondsKey, static_cast<double>(m_shutterSpeedSeconds));

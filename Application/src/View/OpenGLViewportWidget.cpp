@@ -65,6 +65,10 @@ constexpr unsigned int kQuadIndices[] = {
 
 constexpr int kMaxDisplayRefreshHz = 60;
 constexpr int kMinDisplayRefreshIntervalMs = 1000 / kMaxDisplayRefreshHz;
+constexpr int kHeavyLoadDisplayRefreshIntervalMs = 100;
+constexpr int kModerateLoadDisplayRefreshIntervalMs = 66;
+constexpr int kHeavyLoadActivePixelThreshold = 500'000;
+constexpr int kModerateLoadActivePixelThreshold = 100'000;
 constexpr float kWheelZoomBase = 1.001f;
 
 void letterboxViewportRect(int widgetW, int widgetH, int renderW, int renderH, int& outX, int& outY, int& outW, int& outH)
@@ -282,7 +286,7 @@ void OpenGLViewportWidget::setSceneModel(SceneModel* model)
         m_pathTracer.setRussianRouletteMinDepth(depth);
     });
 
-    connect(m_model, &SceneModel::boundsOverlayModeChanged, this, [this](MeshAccelBoundsOverlayMode mode) {
+    connect(m_model, &SceneModel::boundsOverlayModeChanged, this, [this](RenderViewOverlayMode mode) {
         m_pathTracer.setDebugOverlayMode(static_cast<int>(mode));
         rebuildBoundsOverlay();
         refreshDisplayImage();
@@ -429,12 +433,23 @@ void OpenGLViewportWidget::paintGL()
         return;
     }
 
-    if (m_hasNewFrame.exchange(false)) {
-        const int slot = m_displaySlot;
-        if (m_pathTracer.publishDisplayFrame(slot)) {
-            uploadDisplayTexture(slot, !m_textureAllocated);
+    if (m_pathTracer.isDisplayPublishReady()) {
+        const int readySlot = m_pathTracer.finishDisplayPublish();
+        if (readySlot >= 0) {
+            uploadDisplayTexture(readySlot, !m_textureAllocated);
             m_textureAllocated = true;
-            m_displaySlot = 1 - slot;
+            m_displaySlot = 1 - readySlot;
+        }
+    }
+
+    if (m_pathTracer.hasDisplayPublishInFlight()) {
+        scheduleDisplayPublishRepaint();
+    } else if (m_hasNewFrame.exchange(false)) {
+        const int slot = m_displaySlot;
+        if (m_pathTracer.beginDisplayPublish(slot)) {
+            scheduleDisplayPublishRepaint();
+        } else {
+            m_hasNewFrame.store(true);
         }
     }
 
@@ -594,7 +609,7 @@ void OpenGLViewportWidget::drawSceneOverlays()
 
     m_originGizmo.draw(this, viewProj);
 
-    if (m_model->boundsOverlayMode() != MeshAccelBoundsOverlayMode::Off) {
+    if (m_model->boundsOverlayMode() != RenderViewOverlayMode::Render) {
         m_boundsOverlay.draw(
             this,
             viewProj,
@@ -832,20 +847,58 @@ void OpenGLViewportWidget::onCameraMotionStopped()
     resetAccumulationForCamera();
 }
 
+void OpenGLViewportWidget::scheduleDisplayPublishRepaint()
+{
+    if (m_publishRepaintQueued.exchange(true)) {
+        return;
+    }
+
+    QTimer::singleShot(1, this, [this]() {
+        m_publishRepaintQueued.store(false);
+        update();
+    });
+}
+
+int OpenGLViewportWidget::effectiveDisplayRefreshIntervalMs() const
+{
+    if (m_model == nullptr) {
+        return kMinDisplayRefreshIntervalMs;
+    }
+
+    const int previewSteps = m_model->previewStepsPerLevel();
+    const int sampleCount = m_pathTracer.currentSampleCount();
+    if (sampleCount <= previewSteps) {
+        return kMinDisplayRefreshIntervalMs;
+    }
+
+    const int activePixelCount = m_pathTracer.currentActivePixelCount();
+    if (activePixelCount >= kHeavyLoadActivePixelThreshold) {
+        return kHeavyLoadDisplayRefreshIntervalMs;
+    }
+    if (activePixelCount >= kModerateLoadActivePixelThreshold) {
+        return kModerateLoadDisplayRefreshIntervalMs;
+    }
+
+    return kMinDisplayRefreshIntervalMs;
+}
+
 void OpenGLViewportWidget::dispatchFrameUpdate()
 {
     m_frameCallbackQueued.store(false);
 
     const bool prioritizeFirstFrame = m_pathTracer.currentSampleCount() <= 1;
+    const int refreshIntervalMs = effectiveDisplayRefreshIntervalMs();
 
     if (!prioritizeFirstFrame) {
         if (!m_displayRefreshTimer.isValid()) {
             m_displayRefreshTimer.start();
-        } else if (m_displayRefreshTimer.elapsed() < kMinDisplayRefreshIntervalMs) {
-            if (m_hasNewFrame.load() && !m_frameCallbackQueued.exchange(true)) {
-                const int delayMs =
-                    kMinDisplayRefreshIntervalMs - static_cast<int>(m_displayRefreshTimer.elapsed());
-                QTimer::singleShot(delayMs > 0 ? delayMs : 0, this, &OpenGLViewportWidget::dispatchFrameUpdate);
+        } else if (m_displayRefreshTimer.elapsed() < refreshIntervalMs) {
+            if (m_hasNewFrame.load() || m_pathTracer.hasDisplayPublishInFlight()) {
+                if (!m_frameCallbackQueued.exchange(true)) {
+                    const int delayMs =
+                        refreshIntervalMs - static_cast<int>(m_displayRefreshTimer.elapsed());
+                    QTimer::singleShot(delayMs > 0 ? delayMs : 0, this, &OpenGLViewportWidget::dispatchFrameUpdate);
+                }
             }
             return;
         }

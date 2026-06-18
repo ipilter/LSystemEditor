@@ -4,6 +4,7 @@
 #include "ProceduralTypes.h"
 
 #include <cstddef>
+#include <string>
 #include <string_view>
 
 class ProceduralMeshBuilder
@@ -14,5 +15,6 @@ public:
         std::size_t iterations,
         const RootTransform& root,
         HostMesh& outMesh,
-        const ProceduralBuildParams& params = ProceduralBuildParams{});
+        const ProceduralBuildParams& params = ProceduralBuildParams{},
+        std::string* outError = nullptr);
 };
