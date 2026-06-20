@@ -1,35 +1,33 @@
 #pragma once
 
-#include "MeshAccel/MeshAccelBoundsMesh.h"
-#include "MeshAccel/MeshAccelTypes.h"
-#include "OverlayLineClip.h"
-
-#include <QColor>
 #include <QOpenGLFunctions_4_5_Core>
 #include <QtGui/qopengl.h>
+
+#include "OverlayLineClip.h"
 
 #include <glm/glm.hpp>
 
 #include <vector>
 
-class MeshAccelBoundsOverlay
+class FocusGizmoOverlay
 {
 public:
-    MeshAccelBoundsOverlay() = default;
-    ~MeshAccelBoundsOverlay();
+    FocusGizmoOverlay() = default;
+    ~FocusGizmoOverlay();
 
-    MeshAccelBoundsOverlay(const MeshAccelBoundsOverlay&) = delete;
-    MeshAccelBoundsOverlay& operator=(const MeshAccelBoundsOverlay&) = delete;
+    FocusGizmoOverlay(const FocusGizmoOverlay&) = delete;
+    FocusGizmoOverlay& operator=(const FocusGizmoOverlay&) = delete;
 
     void initialize(QOpenGLFunctions_4_5_Core* gl);
     void release(QOpenGLFunctions_4_5_Core* gl);
-    void rebuild(QOpenGLFunctions_4_5_Core* gl, const MeshAccelBoundsMesh& mesh);
     void draw(
         QOpenGLFunctions_4_5_Core* gl,
         const glm::mat4& sceneMvp,
         const glm::mat4& quadViewProj,
-        RenderViewOverlayMode mode,
-        const QColor& boundsColor);
+        const glm::vec3& centerWorld,
+        const glm::vec3& cameraRight,
+        const glm::vec3& cameraUp,
+        float sizeMm);
 
 private:
     GLuint compileShader(QOpenGLFunctions_4_5_Core* gl, GLenum type, const char* source);
@@ -41,6 +39,5 @@ private:
     GLuint m_vbo = 0;
     int m_vertexCount = 0;
     bool m_initialized = false;
-    std::vector<MeshAccelBoundsLineVertex> m_sourceLines;
     std::vector<OverlayDrawVertex> m_clippedVertices;
 };

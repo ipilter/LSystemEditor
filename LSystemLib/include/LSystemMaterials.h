@@ -38,6 +38,11 @@ struct MaterialEntry
     MaterialChannel ior;
     MaterialChannel subsurface;
     MaterialChannel emission;
+    MaterialChannel diffuseRoughness;
+    MaterialChannel scatterRadiusR;
+    MaterialChannel scatterRadiusG;
+    MaterialChannel scatterRadiusB;
+    MaterialChannel specular;
 };
 
 /** @brief One material definition collected during L-system parse. */

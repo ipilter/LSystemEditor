@@ -128,6 +128,11 @@ struct ResolvedMaterial
     float ior = 1.5f;
     float subsurface = 0.0f;
     float emission = 0.0f;
+    float diffuseRoughness = 0.5f;
+    float scatterRadiusR = 0.0f;
+    float scatterRadiusG = 0.0f;
+    float scatterRadiusB = 0.0f;
+    float specular = 1.0f;
 };
 
 PROCEDURAL_TEXTURE_FN ResolvedMaterial resolveMaterial(
@@ -162,6 +167,21 @@ PROCEDURAL_TEXTURE_FN ResolvedMaterial resolveMaterial(
         material.subsurface, material.subsurfaceTex, bank, bankCount, ctx));
     resolved.emission = fmaxf(0.0f, resolveChannelScalar(
         material.emission, material.emissionTex, bank, bankCount, ctx));
+    resolved.diffuseRoughness = resolveChannelScalar(
+        material.diffuseRoughness,
+        0u,
+        bank,
+        bankCount,
+        ctx);
+    if (resolved.diffuseRoughness < 0.0f) {
+        resolved.diffuseRoughness = resolved.roughness;
+    } else {
+        resolved.diffuseRoughness = proceduralClamp01(resolved.diffuseRoughness);
+    }
+    resolved.scatterRadiusR = fmaxf(0.0f, material.scatterRadiusR);
+    resolved.scatterRadiusG = fmaxf(0.0f, material.scatterRadiusG);
+    resolved.scatterRadiusB = fmaxf(0.0f, material.scatterRadiusB);
+    resolved.specular = proceduralClamp01(material.specular);
     return resolved;
 }
 
@@ -178,6 +198,11 @@ PROCEDURAL_TEXTURE_FN MaterialGpu materialFromResolved(const ResolvedMaterial& r
     material.ior = resolved.ior;
     material.subsurface = resolved.subsurface;
     material.emission = resolved.emission;
+    material.diffuseRoughness = resolved.diffuseRoughness;
+    material.scatterRadiusR = resolved.scatterRadiusR;
+    material.scatterRadiusG = resolved.scatterRadiusG;
+    material.scatterRadiusB = resolved.scatterRadiusB;
+    material.specular = resolved.specular;
     return material;
 }
 

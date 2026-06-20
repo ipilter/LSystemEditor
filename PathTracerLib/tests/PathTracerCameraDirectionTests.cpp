@@ -2,12 +2,13 @@
 #include "PathTracer.h"
 #include "PhysicalCamera.h"
 
+#include <glm/glm.hpp>
 #include <glm/gtc/constants.hpp>
-#include <glm/gtc/quaternion.hpp>
 
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
+#include <vector>
 
 namespace {
 
@@ -40,6 +41,10 @@ CameraGpu cameraLookingPositiveX()
     camera.aspect = 1.0f;
     camera.nearPlane = 0.1f;
     camera.farPlane = 1000.0f;
+    camera.apertureRadius = 0.0f;
+    camera.focusDistance = 0.0f;
+    camera.focusPoint = make_float3(0.0f, 0.0f, 0.0f);
+    camera.focusValid = 0;
     return camera;
 }
 

@@ -19,10 +19,14 @@ constexpr int kMinDebounceMs = 0;
 constexpr int kMaxDebounceMs = 2000;
 constexpr float kMinCreaseAngleDeg = 0.0f;
 constexpr float kMaxCreaseAngleDeg = 180.0f;
-constexpr float kMinCameraThrust = 0.1f;
-constexpr float kMaxCameraThrust = 20.0f;
-constexpr float kMinCameraDrag = 0.1f;
-constexpr float kMaxCameraDrag = 30.0f;
+constexpr float kMinCameraLinearThrust = 10.0f;
+constexpr float kMaxCameraLinearThrust = 20000.0f;
+constexpr float kMinCameraLinearDrag = 0.1f;
+constexpr float kMaxCameraLinearDrag = 30.0f;
+constexpr float kMinCameraAngularThrust = 0.1f;
+constexpr float kMaxCameraAngularThrust = 20.0f;
+constexpr float kMinCameraAngularDrag = 0.1f;
+constexpr float kMaxCameraAngularDrag = 30.0f;
 constexpr float kMinCameraMouseSensitivity = 0.01f;
 constexpr float kMaxCameraMouseSensitivity = 2.0f;
 constexpr int kMinCameraTickIntervalMs = 8;
@@ -84,25 +88,26 @@ SettingsDialog::SettingsDialog(QWidget* parent)
     auto* cameraLayout = new QFormLayout(cameraGroup);
 
     m_cameraThrustLinearSpinBox = new QDoubleSpinBox(cameraGroup);
-    m_cameraThrustLinearSpinBox->setRange(kMinCameraThrust, kMaxCameraThrust);
-    m_cameraThrustLinearSpinBox->setDecimals(2);
-    m_cameraThrustLinearSpinBox->setSingleStep(0.1);
+    m_cameraThrustLinearSpinBox->setRange(kMinCameraLinearThrust, kMaxCameraLinearThrust);
+    m_cameraThrustLinearSpinBox->setDecimals(0);
+    m_cameraThrustLinearSpinBox->setSingleStep(100.0);
+    m_cameraThrustLinearSpinBox->setSuffix(QStringLiteral(" mm/s²"));
     m_cameraThrustLinearSpinBox->setToolTip(
-        QStringLiteral("Linear acceleration when movement keys are held"));
+        QStringLiteral("Linear acceleration in mm/s² when movement keys are held"));
     m_cameraThrustLinearSpinBox->setValue(cameraSettings.thrustLinear);
     cameraLayout->addRow(QStringLiteral("Linear thrust:"), m_cameraThrustLinearSpinBox);
 
     m_cameraDragLinearSpinBox = new QDoubleSpinBox(cameraGroup);
-    m_cameraDragLinearSpinBox->setRange(kMinCameraDrag, kMaxCameraDrag);
+    m_cameraDragLinearSpinBox->setRange(kMinCameraLinearDrag, kMaxCameraLinearDrag);
     m_cameraDragLinearSpinBox->setDecimals(2);
     m_cameraDragLinearSpinBox->setSingleStep(0.1);
     m_cameraDragLinearSpinBox->setToolTip(
-        QStringLiteral("How quickly linear movement slows after keys are released"));
+        QStringLiteral("Velocity damping (1/s). Higher values slow movement faster after keys are released."));
     m_cameraDragLinearSpinBox->setValue(cameraSettings.dragLinear);
     cameraLayout->addRow(QStringLiteral("Linear drag:"), m_cameraDragLinearSpinBox);
 
     m_cameraThrustAngularSpinBox = new QDoubleSpinBox(cameraGroup);
-    m_cameraThrustAngularSpinBox->setRange(kMinCameraThrust, kMaxCameraThrust);
+    m_cameraThrustAngularSpinBox->setRange(kMinCameraAngularThrust, kMaxCameraAngularThrust);
     m_cameraThrustAngularSpinBox->setDecimals(2);
     m_cameraThrustAngularSpinBox->setSingleStep(0.1);
     m_cameraThrustAngularSpinBox->setToolTip(
@@ -111,7 +116,7 @@ SettingsDialog::SettingsDialog(QWidget* parent)
     cameraLayout->addRow(QStringLiteral("Angular thrust:"), m_cameraThrustAngularSpinBox);
 
     m_cameraDragAngularSpinBox = new QDoubleSpinBox(cameraGroup);
-    m_cameraDragAngularSpinBox->setRange(kMinCameraDrag, kMaxCameraDrag);
+    m_cameraDragAngularSpinBox->setRange(kMinCameraAngularDrag, kMaxCameraAngularDrag);
     m_cameraDragAngularSpinBox->setDecimals(2);
     m_cameraDragAngularSpinBox->setSingleStep(0.1);
     m_cameraDragAngularSpinBox->setToolTip(

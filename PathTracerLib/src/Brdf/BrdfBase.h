@@ -28,6 +28,12 @@ struct BrdfSampleResult
     bool transmitted = false;
     /** @brief IOR of the medium the ray travels in after this bounce. */
     float nextMediumEta = 1.0f;
+    /** @brief True when the subsurface lobe was sampled (Burley exit reconnect). */
+    bool subsurfaceScatter = false;
+    /** @brief Tangent-plane offset from hit point toward subsurface exit (world space). */
+    Vec3 subsurfaceExitOffset{};
+    /** @brief Number of internal volume scatters performed before Burley exit (Tier B). */
+    int subsurfaceInternalSteps = 0;
 };
 
 struct BrdfContext
@@ -39,6 +45,8 @@ struct BrdfContext
     float etaMedium = 1.0f;
     /** @brief Hero wavelength for this path in nanometers. */
     float wavelengthNm = 550.0f;
+    /** @brief BrdfDebugFlags bit mask; 0 = normal behavior. */
+    int debugFlags = 0;
 };
 
 template<typename Derived>
@@ -192,6 +200,83 @@ BRDF_BASE_FN bool brdfRefractRelative(Vec3 wo, Vec3 normal, float etaI, float et
 BRDF_BASE_FN bool brdfRefract3(Vec3 wo, Vec3 normal, float eta, Vec3& outWi)
 {
     return brdfRefractRelative(wo, normal, 1.0f, eta, outWi);
+}
+
+BRDF_BASE_FN float brdfDiffuseRoughness(const MaterialGpu& material)
+{
+    const float value = material.diffuseRoughness < 0.0f ? material.roughness : material.diffuseRoughness;
+    return vecMax2(0.0f, vecMin2(1.0f, value));
+}
+
+BRDF_BASE_FN float brdfOrenNayarSigma(float diffuseRoughness)
+{
+    return diffuseRoughness * 0.5f * BrdfDetail::kPi;
+}
+
+/** @brief Oren-Nayar directional diffuse factor (multiplies baseColor/pi). Returns 1 for sigma=0. */
+BRDF_BASE_FN float brdfOrenNayarFactor(
+    float sigma,
+    float cosThetaI,
+    float cosThetaO,
+    float dotWoWi)
+{
+    if (sigma <= 1.0e-4f) {
+        return 1.0f;
+    }
+
+    const float sigma2 = sigma * sigma;
+    const float A = 1.0f - 0.5f * sigma2 / (sigma2 + 0.33f);
+    const float B = 0.45f * sigma2 / (sigma2 + 0.09f);
+
+    const float sinThetaI = sqrtf(vecMax2(0.0f, 1.0f - cosThetaI * cosThetaI));
+    const float sinThetaO = sqrtf(vecMax2(0.0f, 1.0f - cosThetaO * cosThetaO));
+
+    float sinAlpha = 0.0f;
+    float sinBeta = 0.0f;
+    if (cosThetaI > cosThetaO) {
+        sinAlpha = sinThetaI;
+        sinBeta = sinThetaO;
+    } else {
+        sinAlpha = sinThetaO;
+        sinBeta = sinThetaI;
+    }
+
+    float cosPhi = 1.0f;
+    const float d = dotWoWi - cosThetaI * cosThetaO;
+    if (d <= 0.0f) {
+        const float denom = vecMax2(sinAlpha * sinBeta, 1.0e-8f);
+        cosPhi = vecMax2(-1.0f, vecMin2(1.0f, d / denom));
+    } else {
+        sinAlpha = 0.0f;
+        sinBeta = 0.0f;
+    }
+
+    const float tanBeta = sinBeta / vecMax2(cosThetaI, cosThetaO);
+    return A + B * vecMax2(0.0f, cosPhi) * sinAlpha * tanBeta;
+}
+
+/** @brief GGX multi-scatter energy compensation scale (Turquin-style approximation). */
+BRDF_BASE_FN float brdfGgxEnergyCompensation(float roughness, float cosTheta)
+{
+    const float alpha = brdfAlphaFromRoughness(roughness);
+    const float cosClamped = vecMax2(cosTheta, 1.0e-4f);
+    const float Ess = 1.0f - alpha * (0.3316f + 0.3237f * alpha);
+    const float Ems = (1.0f - Ess) * (1.0f - cosClamped);
+    return 1.0f + Ems / vecMax2(Ess, 1.0e-4f);
+}
+
+BRDF_BASE_FN Vec3 brdfScatterRadius(const MaterialGpu& material)
+{
+    return vecMake3(
+        vecMax2(0.0f, material.scatterRadiusR),
+        vecMax2(0.0f, material.scatterRadiusG),
+        vecMax2(0.0f, material.scatterRadiusB));
+}
+
+BRDF_BASE_FN float brdfMaxScatterRadius(const MaterialGpu& material)
+{
+    const Vec3 radius = brdfScatterRadius(material);
+    return vecMax2(vecMax2(radius.x, radius.y), radius.z);
 }
 
 #undef BRDF_BASE_FN

@@ -98,6 +98,12 @@ set_target_properties(path_tracer_camera_direction_tests PROPERTIES
     FOLDER "PathTracerLib/tests")
 add_test(NAME PathTracerCameraDirection COMMAND path_tracer_camera_direction_tests)
 
+add_executable(path_tracer_camera_sampling_tests tests/CameraSamplingTests.cpp)
+target_link_libraries(path_tracer_camera_sampling_tests PRIVATE PathTracerLib glm::glm)
+target_include_directories(path_tracer_camera_sampling_tests PRIVATE "${PATHTRACER_LIB_INCLUDE_DIR}")
+set_target_properties(path_tracer_camera_sampling_tests PROPERTIES FOLDER "PathTracerLib/tests")
+add_test(NAME PathTracerCameraSampling COMMAND path_tracer_camera_sampling_tests)
+
 add_executable(path_tracer_spectral_tests tests/PathTracerSpectralTests.cpp)
 target_link_libraries(path_tracer_spectral_tests PRIVATE PathTracerLib)
 target_compile_definitions(path_tracer_spectral_tests PRIVATE
@@ -118,19 +124,6 @@ target_include_directories(path_tracer_principled_brdf_tests PRIVATE
     "${PATHTRACER_LIB_INCLUDE_DIR}/MeshAccel")
 set_target_properties(path_tracer_principled_brdf_tests PROPERTIES FOLDER "PathTracerLib/tests")
 add_test(NAME PathTracerPrincipledBrdf COMMAND path_tracer_principled_brdf_tests)
-
-add_executable(path_tracer_glass_brdf_tests tests/PathTracerGlassBrdfTests.cpp)
-target_link_libraries(path_tracer_glass_brdf_tests PRIVATE PathTracerLib)
-target_compile_definitions(path_tracer_glass_brdf_tests PRIVATE
-    "PATHTRACER_RGB2SPEC_COEFF_PATH=\"${PATHTRACER_LIB_DIR}/src/Spectral/srgb.coeff\"")
-target_include_directories(path_tracer_glass_brdf_tests PRIVATE
-    "${PATHTRACER_LIB_INCLUDE_DIR}"
-    "${PATHTRACER_LIB_INCLUDE_DIR}/Brdf"
-    "${PATHTRACER_LIB_INCLUDE_DIR}/Spectral"
-    "${PATHTRACER_LIB_INCLUDE_DIR}/Geometry"
-    "${PATHTRACER_LIB_INCLUDE_DIR}/MeshAccel")
-set_target_properties(path_tracer_glass_brdf_tests PROPERTIES FOLDER "PathTracerLib/tests")
-add_test(NAME PathTracerGlassBrdf COMMAND path_tracer_glass_brdf_tests)
 
 add_executable(path_tracer_region_render_tests tests/PathTracerRegionRenderTests.cpp)
 target_link_libraries(path_tracer_region_render_tests PRIVATE PathTracerLib)

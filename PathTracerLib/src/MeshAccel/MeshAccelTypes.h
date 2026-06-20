@@ -60,7 +60,19 @@ struct alignas(16) MaterialGpu
     float ior = 1.5f;
     /** @brief Subsurface influence in [0, 1]. */
     float subsurface = 0.0f;
+    /**
+     * @brief Emission intensity multiplier; radiance = base_color * emission.
+     * Scene-unit radiance scale (1.0 ≈ moderate area light).
+     */
     float emission = 0.0f;
+    /** @brief Oren-Nayar diffuse roughness in [0, 1]; negative = use roughness. */
+    float diffuseRoughness = -1.0f;
+    /** @brief Burley diffusion radius per channel in world/scene units. */
+    float scatterRadiusR = 0.0f;
+    float scatterRadiusG = 0.0f;
+    float scatterRadiusB = 0.0f;
+    /** @brief Dielectric F0 multiplier in [0, 1]; 1 = physical IOR-derived F0. */
+    float specular = 1.0f;
 
     /** @brief 0 = use inline field; else index into scene texture bank. */
     uint32_t albedoTex = 0;
@@ -116,6 +128,8 @@ struct alignas(16) MeshAccelSceneGpu
     const TriangleGpu* triangles = nullptr;
     const MaterialGpu* materials = nullptr;
     const uint32_t* emissiveTriangleIndices = nullptr;
+    /** @brief Prefix CDF over emissive triangles (length = emissiveTriangleCount + 1). */
+    const float* emissiveTriangleCdf = nullptr;
     const TextureDescGpu* textures = nullptr;
     uint32_t bvhNodeCount = 0;
     uint32_t triangleCount = 0;

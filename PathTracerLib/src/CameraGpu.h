@@ -10,4 +10,8 @@ struct CameraGpu
     float aspect;
     float nearPlane;
     float farPlane;
+    float apertureRadius = 0.0f;
+    float focusDistance = 0.0f;
+    float3 focusPoint{};
+    int focusValid = 0;
 };

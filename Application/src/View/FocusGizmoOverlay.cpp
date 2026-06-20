@@ -1,7 +1,6 @@
-#include "MeshAccelBoundsOverlay.h"
+#include "FocusGizmoOverlay.h"
 
 #include "AppLog.h"
-#include "OverlayLineClip.h"
 
 #include <QByteArray>
 #include <QString>
@@ -34,16 +33,18 @@ void main()
 }
 )";
 
+constexpr glm::vec3 kWhite{1.0f, 1.0f, 1.0f};
+
 } // namespace
 
-MeshAccelBoundsOverlay::~MeshAccelBoundsOverlay()
+FocusGizmoOverlay::~FocusGizmoOverlay()
 {
     if (m_gl != nullptr) {
         release(m_gl);
     }
 }
 
-void MeshAccelBoundsOverlay::initialize(QOpenGLFunctions_4_5_Core* gl)
+void FocusGizmoOverlay::initialize(QOpenGLFunctions_4_5_Core* gl)
 {
     if (gl == nullptr || m_initialized) {
         return;
@@ -58,7 +59,7 @@ void MeshAccelBoundsOverlay::initialize(QOpenGLFunctions_4_5_Core* gl)
     gl->glDeleteShader(fragmentShader);
 
     if (m_program == 0) {
-        AppLog::instance().error(QStringLiteral("MeshAccelBoundsOverlay: shader program failed to link"));
+        AppLog::instance().error(QStringLiteral("FocusGizmoOverlay: shader program failed to link"));
         return;
     }
 
@@ -88,7 +89,7 @@ void MeshAccelBoundsOverlay::initialize(QOpenGLFunctions_4_5_Core* gl)
     m_initialized = true;
 }
 
-void MeshAccelBoundsOverlay::release(QOpenGLFunctions_4_5_Core* gl)
+void FocusGizmoOverlay::release(QOpenGLFunctions_4_5_Core* gl)
 {
     if (gl == nullptr) {
         return;
@@ -108,50 +109,43 @@ void MeshAccelBoundsOverlay::release(QOpenGLFunctions_4_5_Core* gl)
     }
 
     m_vertexCount = 0;
-    m_sourceLines.clear();
-    m_clippedVertices.clear();
     m_initialized = false;
     m_gl = nullptr;
 }
 
-void MeshAccelBoundsOverlay::rebuild(QOpenGLFunctions_4_5_Core* gl, const MeshAccelBoundsMesh& mesh)
-{
-    if (gl == nullptr || !m_initialized) {
-        return;
-    }
-
-    m_sourceLines = mesh.bvhLines;
-    m_vertexCount = 0;
-    m_clippedVertices.clear();
-}
-
-void MeshAccelBoundsOverlay::draw(
+void FocusGizmoOverlay::draw(
     QOpenGLFunctions_4_5_Core* gl,
     const glm::mat4& sceneMvp,
     const glm::mat4& quadViewProj,
-    RenderViewOverlayMode mode,
-    const QColor& boundsColor)
+    const glm::vec3& centerWorld,
+    const glm::vec3& cameraRight,
+    const glm::vec3& cameraUp,
+    float sizeMm)
 {
-    Q_UNUSED(boundsColor);
-
-    if (gl == nullptr || !m_initialized || m_program == 0 || mode != RenderViewOverlayMode::Bvh) {
+    if (gl == nullptr || !m_initialized || m_program == 0 || sizeMm <= 0.0f) {
         return;
     }
 
-    if (m_sourceLines.size() < 2) {
-        return;
-    }
+    const glm::vec3 right = glm::normalize(cameraRight);
+    const glm::vec3 up = glm::normalize(cameraUp);
+    const float halfSize = sizeMm * 0.5f;
+
+    const glm::vec3 corners[4] = {
+        centerWorld - right * halfSize - up * halfSize,
+        centerWorld + right * halfSize - up * halfSize,
+        centerWorld + right * halfSize + up * halfSize,
+        centerWorld - right * halfSize + up * halfSize,
+    };
 
     m_clippedVertices.clear();
-    m_clippedVertices.reserve(m_sourceLines.size());
+    m_clippedVertices.reserve(8);
 
-    for (std::size_t i = 0; i + 1 < m_sourceLines.size(); i += 2) {
-        const MeshAccelBoundsLineVertex& a = m_sourceLines[i];
-        const MeshAccelBoundsLineVertex& b = m_sourceLines[i + 1];
+    for (int i = 0; i < 4; ++i) {
+        const int next = (i + 1) % 4;
         OverlayLineClip::appendClippedWorldLine(
-            glm::vec3(a.px, a.py, a.pz),
-            glm::vec3(b.px, b.py, b.pz),
-            glm::vec3(a.r, a.g, a.b),
+            corners[i],
+            corners[next],
+            kWhite,
             sceneMvp,
             quadViewProj,
             m_clippedVertices);
@@ -170,12 +164,12 @@ void MeshAccelBoundsOverlay::draw(
         static_cast<GLsizeiptr>(m_clippedVertices.size() * sizeof(OverlayDrawVertex)),
         m_clippedVertices.data(),
         GL_STREAM_DRAW);
-    gl->glLineWidth(1.0f);
+    gl->glLineWidth(2.0f);
     gl->glDrawArrays(GL_LINES, 0, m_vertexCount);
     gl->glBindVertexArray(0);
 }
 
-GLuint MeshAccelBoundsOverlay::compileShader(QOpenGLFunctions_4_5_Core* gl, GLenum type, const char* source)
+GLuint FocusGizmoOverlay::compileShader(QOpenGLFunctions_4_5_Core* gl, GLenum type, const char* source)
 {
     const GLuint shader = gl->glCreateShader(type);
     gl->glShaderSource(shader, 1, &source, nullptr);
@@ -193,7 +187,7 @@ GLuint MeshAccelBoundsOverlay::compileShader(QOpenGLFunctions_4_5_Core* gl, GLen
         const QString typeName =
             type == GL_VERTEX_SHADER ? QStringLiteral("vertex") : QStringLiteral("fragment");
         AppLog::instance().error(
-            QStringLiteral("MeshAccelBoundsOverlay shader compile failed (%1): %2")
+            QStringLiteral("FocusGizmoOverlay shader compile failed (%1): %2")
                 .arg(typeName, QString::fromUtf8(log)));
         gl->glDeleteShader(shader);
         return 0;
@@ -202,7 +196,7 @@ GLuint MeshAccelBoundsOverlay::compileShader(QOpenGLFunctions_4_5_Core* gl, GLen
     return shader;
 }
 
-GLuint MeshAccelBoundsOverlay::linkProgram(QOpenGLFunctions_4_5_Core* gl, GLuint vertexShader, GLuint fragmentShader)
+GLuint FocusGizmoOverlay::linkProgram(QOpenGLFunctions_4_5_Core* gl, GLuint vertexShader, GLuint fragmentShader)
 {
     if (vertexShader == 0 || fragmentShader == 0) {
         return 0;
@@ -223,7 +217,7 @@ GLuint MeshAccelBoundsOverlay::linkProgram(QOpenGLFunctions_4_5_Core* gl, GLuint
         gl->glGetProgramInfoLog(program, logLength, nullptr, log.data());
 
         AppLog::instance().error(
-            QStringLiteral("MeshAccelBoundsOverlay shader link failed: %1").arg(QString::fromUtf8(log)));
+            QStringLiteral("FocusGizmoOverlay shader link failed: %1").arg(QString::fromUtf8(log)));
         gl->glDeleteProgram(program);
         return 0;
     }

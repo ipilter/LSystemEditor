@@ -1,23 +1,25 @@
 #include "OriginGizmoOverlay.h"
 
 #include "AppLog.h"
+#include "OverlayLineClip.h"
+#include "SceneUnits.h"
 
 #include <QByteArray>
 #include <QString>
 
+#include <cstddef>
+
 namespace {
 
 constexpr const char* kVertexShader = R"(#version 460 core
-layout(location = 0) in vec3 aPos;
+layout(location = 0) in vec4 aClipPos;
 layout(location = 1) in vec3 aColor;
-
-uniform mat4 uMvp;
 
 out vec3 vColor;
 
 void main()
 {
-    gl_Position = uMvp * vec4(aPos, 1.0);
+    gl_Position = aClipPos;
     vColor = aColor;
 }
 )";
@@ -43,15 +45,13 @@ struct GizmoVertex
     float cb;
 };
 
-constexpr float kAxisLength = 1.0f;
-
 constexpr GizmoVertex kGizmoVertices[] = {
     {0.0f, 0.0f, 0.0f, 0.86f, 0.31f, 0.31f},
-    {kAxisLength, 0.0f, 0.0f, 0.86f, 0.31f, 0.31f},
+    {SceneUnits::kOriginGizmoAxisLengthMm, 0.0f, 0.0f, 0.86f, 0.31f, 0.31f},
     {0.0f, 0.0f, 0.0f, 0.31f, 0.78f, 0.31f},
-    {0.0f, kAxisLength, 0.0f, 0.31f, 0.78f, 0.31f},
+    {0.0f, SceneUnits::kOriginGizmoAxisLengthMm, 0.0f, 0.31f, 0.78f, 0.31f},
     {0.0f, 0.0f, 0.0f, 0.31f, 0.47f, 0.86f},
-    {0.0f, 0.0f, kAxisLength, 0.31f, 0.47f, 0.86f},
+    {0.0f, 0.0f, SceneUnits::kOriginGizmoAxisLengthMm, 0.31f, 0.47f, 0.86f},
 };
 
 } // namespace
@@ -85,23 +85,15 @@ void OriginGizmoOverlay::initialize(QOpenGLFunctions_4_5_Core* gl)
     gl->glGenVertexArrays(1, &m_vao);
     gl->glGenBuffers(1, &m_vbo);
 
-    m_vertexCount = static_cast<int>(sizeof(kGizmoVertices) / sizeof(kGizmoVertices[0]));
-
     gl->glBindVertexArray(m_vao);
     gl->glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
-    gl->glBufferData(
-        GL_ARRAY_BUFFER,
-        static_cast<GLsizeiptr>(sizeof(kGizmoVertices)),
-        kGizmoVertices,
-        GL_STATIC_DRAW);
-
     gl->glEnableVertexAttribArray(0);
     gl->glVertexAttribPointer(
         0,
-        3,
+        4,
         GL_FLOAT,
         GL_FALSE,
-        static_cast<GLsizei>(sizeof(GizmoVertex)),
+        static_cast<GLsizei>(sizeof(OverlayDrawVertex)),
         nullptr);
     gl->glEnableVertexAttribArray(1);
     gl->glVertexAttribPointer(
@@ -109,8 +101,8 @@ void OriginGizmoOverlay::initialize(QOpenGLFunctions_4_5_Core* gl)
         3,
         GL_FLOAT,
         GL_FALSE,
-        static_cast<GLsizei>(sizeof(GizmoVertex)),
-        reinterpret_cast<const void*>(3 * sizeof(float)));
+        static_cast<GLsizei>(sizeof(OverlayDrawVertex)),
+        reinterpret_cast<const void*>(offsetof(OverlayDrawVertex, color)));
 
     gl->glBindVertexArray(0);
     m_initialized = true;
@@ -140,15 +132,43 @@ void OriginGizmoOverlay::release(QOpenGLFunctions_4_5_Core* gl)
     m_gl = nullptr;
 }
 
-void OriginGizmoOverlay::draw(QOpenGLFunctions_4_5_Core* gl, const glm::mat4& viewProj)
+void OriginGizmoOverlay::draw(
+    QOpenGLFunctions_4_5_Core* gl,
+    const glm::mat4& sceneMvp,
+    const glm::mat4& quadViewProj)
 {
-    if (gl == nullptr || !m_initialized || m_program == 0 || m_vertexCount <= 0) {
+    if (gl == nullptr || !m_initialized || m_program == 0) {
+        return;
+    }
+
+    m_clippedVertices.clear();
+    m_clippedVertices.reserve(sizeof(kGizmoVertices) / sizeof(kGizmoVertices[0]));
+
+    for (std::size_t i = 0; i + 1 < sizeof(kGizmoVertices) / sizeof(kGizmoVertices[0]); i += 2) {
+        const GizmoVertex& a = kGizmoVertices[i];
+        const GizmoVertex& b = kGizmoVertices[i + 1];
+        OverlayLineClip::appendClippedWorldLine(
+            glm::vec3(a.px, a.py, a.pz),
+            glm::vec3(b.px, b.py, b.pz),
+            glm::vec3(a.cr, a.cg, a.cb),
+            sceneMvp,
+            quadViewProj,
+            m_clippedVertices);
+    }
+
+    m_vertexCount = static_cast<int>(m_clippedVertices.size());
+    if (m_vertexCount <= 0) {
         return;
     }
 
     gl->glUseProgram(m_program);
-    gl->glUniformMatrix4fv(gl->glGetUniformLocation(m_program, "uMvp"), 1, GL_FALSE, &viewProj[0][0]);
     gl->glBindVertexArray(m_vao);
+    gl->glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
+    gl->glBufferData(
+        GL_ARRAY_BUFFER,
+        static_cast<GLsizeiptr>(m_clippedVertices.size() * sizeof(OverlayDrawVertex)),
+        m_clippedVertices.data(),
+        GL_STREAM_DRAW);
     gl->glLineWidth(2.0f);
     gl->glDrawArrays(GL_LINES, 0, m_vertexCount);
     gl->glBindVertexArray(0);

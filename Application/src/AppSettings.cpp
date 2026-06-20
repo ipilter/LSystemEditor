@@ -1,6 +1,7 @@
 #include "AppSettings.h"
 
 #include "PhysicalCamera.h"
+#include "SceneUnits.h"
 
 #include <QSettings>
 
@@ -57,6 +58,7 @@ constexpr const char* kLsystemEditorFontSizeKey = "lsystemEditorFontSize";
 constexpr const char* kLogFontSizeKey = "logFontSize";
 constexpr const char* kEnvironmentIntensityKey = "environmentIntensity";
 constexpr const char* kFStopKey = "fStop";
+constexpr const char* kFocalLengthMmKey = "focalLengthMm";
 constexpr const char* kShutterSpeedSecondsKey = "shutterSpeedSeconds";
 constexpr const char* kIsoKey = "iso";
 constexpr const char* kWindowGeometryKey = "windowGeometry";
@@ -92,10 +94,14 @@ constexpr const char* kRegionRenderColorBlueKey = "colorBlue";
 constexpr int kDefaultRegionRenderColorRed = 255;
 constexpr int kDefaultRegionRenderColorGreen = 255;
 constexpr int kDefaultRegionRenderColorBlue = 128;
-constexpr float kMinCameraThrust = 0.1f;
-constexpr float kMaxCameraThrust = 20.0f;
-constexpr float kMinCameraDrag = 0.1f;
-constexpr float kMaxCameraDrag = 30.0f;
+constexpr float kMinCameraLinearThrust = 10.0f;
+constexpr float kMaxCameraLinearThrust = 20000.0f;
+constexpr float kMinCameraLinearDrag = 0.1f;
+constexpr float kMaxCameraLinearDrag = 30.0f;
+constexpr float kMinCameraAngularThrust = 0.1f;
+constexpr float kMaxCameraAngularThrust = 20.0f;
+constexpr float kMinCameraAngularDrag = 0.1f;
+constexpr float kMaxCameraAngularDrag = 30.0f;
 constexpr float kMinCameraMouseSensitivity = 0.01f;
 constexpr float kMaxCameraMouseSensitivity = 2.0f;
 constexpr int kMinCameraTickIntervalMs = 8;
@@ -181,6 +187,7 @@ AppSettings::AppSettings(QObject* parent)
     , m_clearColor(kDefaultClearColorComponent, kDefaultClearColorComponent, kDefaultClearColorComponent)
     , m_maxSamplesPerPixel(kDefaultMaxSamplesPerPixel)
     , m_fStop(PhysicalCamera::kDefaultFStop)
+    , m_focalLengthMm(PhysicalCamera::kDefaultFocalLengthMm)
     , m_shutterSpeedSeconds(PhysicalCamera::kDefaultShutterSpeedSeconds)
     , m_iso(PhysicalCamera::kDefaultIso)
 {
@@ -478,6 +485,22 @@ void AppSettings::setFStop(float value)
     save();
 }
 
+float AppSettings::focalLengthMm() const
+{
+    return m_focalLengthMm;
+}
+
+void AppSettings::setFocalLengthMm(float value)
+{
+    const float clamped = clampFocalLengthMm(value);
+    if (m_focalLengthMm == clamped) {
+        return;
+    }
+
+    m_focalLengthMm = clamped;
+    save();
+}
+
 float AppSettings::shutterSpeedSeconds() const
 {
     return m_shutterSpeedSeconds;
@@ -669,6 +692,11 @@ float AppSettings::clampFStop(float value)
     return PhysicalCamera::clampFStop(value);
 }
 
+float AppSettings::clampFocalLengthMm(float value)
+{
+    return PhysicalCamera::clampFocalLengthMm(value);
+}
+
 float AppSettings::clampShutterSpeedSeconds(float value)
 {
     return PhysicalCamera::clampShutterSpeedSeconds(value);
@@ -781,10 +809,13 @@ int AppSettings::clampRussianRouletteMinDepth(int value)
 CameraDynamicsSettings AppSettings::clampCameraDynamicsSettings(const CameraDynamicsSettings& settings)
 {
     CameraDynamicsSettings clamped = settings;
-    clamped.thrustLinear = std::max(kMinCameraThrust, std::min(settings.thrustLinear, kMaxCameraThrust));
-    clamped.dragLinear = std::max(kMinCameraDrag, std::min(settings.dragLinear, kMaxCameraDrag));
-    clamped.thrustAngular = std::max(kMinCameraThrust, std::min(settings.thrustAngular, kMaxCameraThrust));
-    clamped.dragAngular = std::max(kMinCameraDrag, std::min(settings.dragAngular, kMaxCameraDrag));
+    clamped.thrustLinear =
+        std::max(kMinCameraLinearThrust, std::min(settings.thrustLinear, kMaxCameraLinearThrust));
+    clamped.dragLinear = std::max(kMinCameraLinearDrag, std::min(settings.dragLinear, kMaxCameraLinearDrag));
+    clamped.thrustAngular =
+        std::max(kMinCameraAngularThrust, std::min(settings.thrustAngular, kMaxCameraAngularThrust));
+    clamped.dragAngular =
+        std::max(kMinCameraAngularDrag, std::min(settings.dragAngular, kMaxCameraAngularDrag));
     clamped.mouseSensitivity =
         std::max(kMinCameraMouseSensitivity, std::min(settings.mouseSensitivity, kMaxCameraMouseSensitivity));
     clamped.tickIntervalMs =
@@ -989,6 +1020,15 @@ void AppSettings::load()
         }
     }
 
+    const QVariant focalLengthValue = settings.value(kFocalLengthMmKey);
+    if (focalLengthValue.isValid()) {
+        bool ok = false;
+        const float focalLengthMm = static_cast<float>(focalLengthValue.toDouble(&ok));
+        if (ok) {
+            m_focalLengthMm = clampFocalLengthMm(focalLengthMm);
+        }
+    }
+
     const QVariant shutterSpeedValue = settings.value(kShutterSpeedSecondsKey);
     if (shutterSpeedValue.isValid()) {
         bool ok = false;
@@ -1043,6 +1083,12 @@ void AppSettings::load()
     loadedCameraSettings.motionStopDebounceMs =
         loadInt(kCameraMotionStopDebounceMsKey, loadedCameraSettings.motionStopDebounceMs);
     settings.endGroup();
+    if (loadedCameraSettings.thrustLinear < SceneUnits::kLegacyLinearThrustScaleThreshold) {
+        loadedCameraSettings.thrustLinear *= 1000.0f;
+    }
+    if (loadedCameraSettings.dragLinear >= SceneUnits::kLegacyMisscaledLinearDragThreshold) {
+        loadedCameraSettings.dragLinear /= 1000.0f;
+    }
     m_cameraDynamicsSettings = clampCameraDynamicsSettings(loadedCameraSettings);
 
     settings.beginGroup(kRegionRenderGroup);
@@ -1111,6 +1157,7 @@ void AppSettings::save()
     settings.setValue(kLogFontSizeKey, m_logFontSize);
     settings.setValue(kEnvironmentIntensityKey, static_cast<double>(m_environmentIntensity));
     settings.setValue(kFStopKey, static_cast<double>(m_fStop));
+    settings.setValue(kFocalLengthMmKey, static_cast<double>(m_focalLengthMm));
     settings.setValue(kShutterSpeedSecondsKey, static_cast<double>(m_shutterSpeedSeconds));
     settings.setValue(kIsoKey, static_cast<double>(m_iso));
     settings.setValue(kWindowGeometryKey, m_windowGeometry);

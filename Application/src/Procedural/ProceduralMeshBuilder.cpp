@@ -119,6 +119,11 @@ MaterialGpu toMaterialGpu(const MaterialEntry& entry, std::vector<TextureDescGpu
     material.transmission = materialChannelScalar(entry.transmission);
     material.thin = materialChannelScalar(entry.thin);
     material.subsurface = materialChannelScalar(entry.subsurface);
+    material.diffuseRoughness = materialChannelScalar(entry.diffuseRoughness, -1.0f);
+    material.scatterRadiusR = materialChannelScalar(entry.scatterRadiusR);
+    material.scatterRadiusG = materialChannelScalar(entry.scatterRadiusG);
+    material.scatterRadiusB = materialChannelScalar(entry.scatterRadiusB);
+    material.specular = materialChannelScalar(entry.specular, 1.0f);
 
     material.albedoTex = channelTextureIndex(entry.albedo, bank);
     material.roughnessTex = channelTextureIndex(entry.roughness, bank);
@@ -144,6 +149,11 @@ MaterialGpu defaultMaterialGpu()
     material.transmission = 0.0f;
     material.thin = 0.0f;
     material.subsurface = 0.0f;
+    material.diffuseRoughness = -1.0f;
+    material.scatterRadiusR = 0.0f;
+    material.scatterRadiusG = 0.0f;
+    material.scatterRadiusB = 0.0f;
+    material.specular = 1.0f;
     return material;
 }
 

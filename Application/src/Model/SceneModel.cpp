@@ -1,6 +1,7 @@
 #include "SceneModel.h"
 
 #include "AppSettings.h"
+#include "Brdf/BrdfDebug.h"
 #include "PhysicalCamera.h"
 
 #include <algorithm>
@@ -23,6 +24,8 @@ constexpr int kMinMinSamples = 1;
 constexpr int kMaxMinSamples = 10'000;
 constexpr float kMinRelativeErrorThreshold = 0.001f;
 constexpr float kMaxRelativeErrorThreshold = 1.0f;
+constexpr float kMinFocusDistanceMm = PhysicalCamera::kMinFocalLengthMm;
+constexpr float kMaxFocusDistanceMm = 500'000.0f;
 } // namespace
 
 SceneModel::SceneModel(QObject* parent)
@@ -39,6 +42,7 @@ SceneModel::SceneModel(QObject* parent)
     , m_environmentHdrPath(AppSettings::instance().environmentHdrPath())
     , m_environmentIntensity(AppSettings::instance().environmentIntensity())
     , m_fStop(AppSettings::instance().fStop())
+    , m_focalLengthMm(AppSettings::instance().focalLengthMm())
     , m_shutterSpeedSeconds(AppSettings::instance().shutterSpeedSeconds())
     , m_iso(AppSettings::instance().iso())
     , m_regionRenderEnabled(AppSettings::instance().regionRenderEnabled())
@@ -196,6 +200,37 @@ void SceneModel::setBoundsOverlayMode(RenderViewOverlayMode mode)
     emit boundsOverlayModeChanged(m_renderViewOverlayMode);
 }
 
+int SceneModel::brdfDebugFlags() const
+{
+    return m_brdfDebugFlags;
+}
+
+void SceneModel::setBrdfDebugFlags(int flags)
+{
+    const int clamped = clampBrdfDebugFlags(flags);
+    if (m_brdfDebugFlags == clamped) {
+        return;
+    }
+
+    m_brdfDebugFlags = clamped;
+    emit brdfDebugFlagsChanged(m_brdfDebugFlags);
+}
+
+bool SceneModel::sceneOverlayVisible() const
+{
+    return m_sceneOverlayVisible;
+}
+
+void SceneModel::setSceneOverlayVisible(bool visible)
+{
+    if (m_sceneOverlayVisible == visible) {
+        return;
+    }
+
+    m_sceneOverlayVisible = visible;
+    emit sceneOverlayVisibleChanged(m_sceneOverlayVisible);
+}
+
 QColor SceneModel::accelBvhColor() const
 {
     return m_accelBvhColor;
@@ -280,6 +315,23 @@ void SceneModel::setFStop(float value)
     emit fStopChanged(m_fStop);
 }
 
+float SceneModel::focalLengthMm() const
+{
+    return m_focalLengthMm;
+}
+
+void SceneModel::setFocalLengthMm(float value)
+{
+    const float clamped = clampFocalLengthMm(value);
+    if (m_focalLengthMm == clamped) {
+        return;
+    }
+
+    m_focalLengthMm = clamped;
+    AppSettings::instance().setFocalLengthMm(clamped);
+    emit focalLengthMmChanged(m_focalLengthMm);
+}
+
 float SceneModel::shutterSpeedSeconds() const
 {
     return m_shutterSpeedSeconds;
@@ -312,6 +364,80 @@ void SceneModel::setIso(float value)
     m_iso = clamped;
     AppSettings::instance().setIso(clamped);
     emit isoChanged(m_iso);
+}
+
+glm::vec3 SceneModel::focusPoint() const
+{
+    return m_focusPoint;
+}
+
+bool SceneModel::focusValid() const
+{
+    return m_focusValid;
+}
+
+bool SceneModel::focusPointPinned() const
+{
+    return m_focusPointPinned;
+}
+
+float SceneModel::focusDistanceMm() const
+{
+    return m_focusDistanceMm;
+}
+
+void SceneModel::pinFocusPoint(const glm::vec3& point)
+{
+    const bool pinnedChanged = !m_focusPointPinned;
+
+    m_focusPoint = point;
+    m_focusValid = true;
+    m_focusPointPinned = true;
+
+    if (pinnedChanged) {
+        emit focusPointPinnedChanged(true);
+    }
+}
+
+void SceneModel::setFocusDistanceMm(float distanceMm)
+{
+    const float clamped = clampFocusDistanceMm(distanceMm);
+    const bool distanceChanged = m_focusDistanceMm != clamped;
+    const bool pinnedChanged = m_focusPointPinned;
+
+    m_focusDistanceMm = clamped;
+    m_focusPointPinned = false;
+
+    if (distanceChanged) {
+        emit focusDistanceMmChanged(m_focusDistanceMm);
+    }
+    if (pinnedChanged) {
+        emit focusPointPinnedChanged(false);
+    }
+}
+
+void SceneModel::syncFocusDistanceMm(float distanceMm)
+{
+    const float clamped = clampFocusDistanceMm(distanceMm);
+    if (m_focusDistanceMm == clamped) {
+        return;
+    }
+
+    m_focusDistanceMm = clamped;
+    emit focusDistanceMmChanged(m_focusDistanceMm);
+}
+
+void SceneModel::clearFocusPoint()
+{
+    if (!m_focusValid && !m_focusPointPinned) {
+        return;
+    }
+
+    m_focusValid = false;
+    if (m_focusPointPinned) {
+        m_focusPointPinned = false;
+        emit focusPointPinnedChanged(false);
+    }
 }
 
 const std::vector<ProceduralInstance>& SceneModel::proceduralInstances() const
@@ -487,6 +613,16 @@ RenderViewOverlayMode SceneModel::clampBoundsOverlayMode(RenderViewOverlayMode m
     }
 }
 
+int SceneModel::clampBrdfDebugFlags(int flags)
+{
+    constexpr int kAllowedMask = BrdfDebugFlags::kForceTransmitLobeOnly
+        | BrdfDebugFlags::kDisableRefract
+        | BrdfDebugFlags::kDisableReflect
+        | BrdfDebugFlags::kDisableTirFallback
+        | BrdfDebugFlags::kTintGlassPaths;
+    return flags & kAllowedMask;
+}
+
 float SceneModel::clampCreaseAngleDeg(float value)
 {
     if (value < kMinCreaseAngleDeg) {
@@ -503,6 +639,11 @@ float SceneModel::clampFStop(float value)
     return PhysicalCamera::clampFStop(value);
 }
 
+float SceneModel::clampFocalLengthMm(float value)
+{
+    return PhysicalCamera::clampFocalLengthMm(value);
+}
+
 float SceneModel::clampShutterSpeedSeconds(float value)
 {
     return PhysicalCamera::clampShutterSpeedSeconds(value);
@@ -511,6 +652,17 @@ float SceneModel::clampShutterSpeedSeconds(float value)
 float SceneModel::clampIso(float value)
 {
     return PhysicalCamera::snapIsoToNearestPreset(value);
+}
+
+float SceneModel::clampFocusDistanceMm(float value)
+{
+    if (value < kMinFocusDistanceMm) {
+        return kMinFocusDistanceMm;
+    }
+    if (value > kMaxFocusDistanceMm) {
+        return kMaxFocusDistanceMm;
+    }
+    return value;
 }
 
 float SceneModel::clampEnvironmentIntensity(float value)

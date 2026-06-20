@@ -6,6 +6,7 @@
 #include "QuadViewCamera2D.h"
 #include "PathTracer.h"
 #include "RenderAccumulationState.h"
+#include "FocusGizmoOverlay.h"
 #include "MeshAccelBoundsOverlay.h"
 #include "OriginGizmoOverlay.h"
 #include "RegionRenderOverlay.h"
@@ -40,6 +41,8 @@ public:
     void setEnvironmentHdrPath(const QString& path);
     void setEnvironmentIntensity(float intensity);
     void setPhysicalCamera(float fStop, float shutterSpeedSeconds, float iso);
+    void setFocalLengthMm(float focalLengthMm);
+    void setFocusDistanceMm(float distanceMm);
     PhysicalCamera suggestedPhysicalCamera() const;
     bool computeSuggestedPhysicalCameraFromAccumulator(PhysicalCamera* out) const;
 
@@ -81,6 +84,9 @@ private:
     void releaseGlResources();
     void syncCameraToPathTracer();
     void syncCameraLive();
+    void trySetFocusFromClick(const QPoint& widgetPos);
+    void applyFocusFromModel();
+    void refreshPinnedFocusFromModel();
     void resetAccumulationForCamera();
     void onCameraChanged();
     void rebuildBoundsOverlay();
@@ -107,6 +113,7 @@ private:
     ViewportInputState m_inputState;
     MeshAccelBoundsOverlay m_boundsOverlay;
     OriginGizmoOverlay m_originGizmo;
+    FocusGizmoOverlay m_focusGizmo;
     RegionRenderOverlay m_regionOverlay;
 
     QColor m_clearColor;

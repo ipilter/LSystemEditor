@@ -25,6 +25,7 @@
 #include <QSizePolicy>
 #include <QSpinBox>
 #include <QSplitter>
+#include <QTabWidget>
 #include <QVBoxLayout>
 
 namespace {
@@ -83,7 +84,16 @@ MainView::MainView(QWidget* parent)
     auto* controlLayout = new QVBoxLayout(controlPanel);
     controlLayout->setContentsMargins(8, 8, 8, 8);
 
-    auto* renderGroup = new QGroupBox(QStringLiteral("Render"), controlPanel);
+    m_controlTabWidget = new QTabWidget(controlPanel);
+    auto* lsystemTab = new QWidget(m_controlTabWidget);
+    auto* lsystemTabLayout = new QVBoxLayout(lsystemTab);
+    lsystemTabLayout->setContentsMargins(0, 0, 0, 0);
+
+    auto* controlsTab = new QWidget(m_controlTabWidget);
+    auto* controlsTabLayout = new QVBoxLayout(controlsTab);
+    controlsTabLayout->setContentsMargins(0, 0, 0, 0);
+
+    auto* renderGroup = new QGroupBox(QStringLiteral("Render"), controlsTab);
     auto* renderLayout = new QVBoxLayout(renderGroup);
 
     auto* widthRow = new QHBoxLayout();
@@ -161,18 +171,41 @@ MainView::MainView(QWidget* parent)
 
     auto* boundsOverlayRow = new QHBoxLayout();
     boundsOverlayRow->addWidget(new QLabel(QStringLiteral("View Mode:"), renderGroup));
-    m_boundsOverlayComboBox = new QComboBox(renderGroup);
-    m_boundsOverlayComboBox->addItem(QStringLiteral("Render"));
-    m_boundsOverlayComboBox->addItem(QStringLiteral("BVH"));
-    m_boundsOverlayComboBox->addItem(QStringLiteral("Adaptive"));
-    m_boundsOverlayComboBox->addItem(QStringLiteral("UV"));
-    m_boundsOverlayComboBox->setToolTip(
+    m_renderViewOverlayComboBox = new QComboBox(renderGroup);
+    m_renderViewOverlayComboBox->addItem(QStringLiteral("Render"));
+    m_renderViewOverlayComboBox->addItem(QStringLiteral("BVH"));
+    m_renderViewOverlayComboBox->addItem(QStringLiteral("Adaptive"));
+    m_renderViewOverlayComboBox->addItem(QStringLiteral("UV"));
+    m_renderViewOverlayComboBox->setToolTip(
         QStringLiteral(
             "View modes: Render (path-traced image), BVH wireframe overlay, "
             "Adaptive sampling (red = active, dark green = converged), "
             "UV (U to red, V to green)."));
-    boundsOverlayRow->addWidget(m_boundsOverlayComboBox, 1);
+    boundsOverlayRow->addWidget(m_renderViewOverlayComboBox, 1);
     renderLayout->addLayout(boundsOverlayRow);
+
+    auto* brdfDebugRow = new QHBoxLayout();
+    brdfDebugRow->addWidget(new QLabel(QStringLiteral("Glass debug:"), renderGroup));
+    m_brdfDebugComboBox = new QComboBox(renderGroup);
+    m_brdfDebugComboBox->addItem(QStringLiteral("Normal"));
+    m_brdfDebugComboBox->addItem(QStringLiteral("Transmit lobe only"));
+    m_brdfDebugComboBox->addItem(QStringLiteral("Reflection only"));
+    m_brdfDebugComboBox->addItem(QStringLiteral("Refraction only"));
+    m_brdfDebugComboBox->addItem(QStringLiteral("Glass path tint"));
+    m_brdfDebugComboBox->addItem(QStringLiteral("No TIR fallback"));
+    m_brdfDebugComboBox->setToolTip(
+        QStringLiteral(
+            "Debug glass/transmission paths in the path tracer. "
+            "Normal uses standard BRDF sampling. Other modes isolate refracted rays, "
+            "reflected rays, or tint transmitted paths green and reflected paths red."));
+    brdfDebugRow->addWidget(m_brdfDebugComboBox, 1);
+    renderLayout->addLayout(brdfDebugRow);
+
+    m_sceneOverlayCheckBox = new QCheckBox(QStringLiteral("Show overlay"), renderGroup);
+    m_sceneOverlayCheckBox->setChecked(true);
+    m_sceneOverlayCheckBox->setToolTip(
+        QStringLiteral("Show the origin gizmo and BVH wireframe overlay on the rendered image."));
+    renderLayout->addWidget(m_sceneOverlayCheckBox);
 
     auto* iterationRow = new QHBoxLayout();
     iterationRow->addWidget(new QLabel(QStringLiteral("Iteration:"), renderGroup));
@@ -200,9 +233,9 @@ MainView::MainView(QWidget* parent)
     renderControlRow->addWidget(m_stopButton);
     renderLayout->addLayout(renderControlRow);
 
-    controlLayout->addWidget(renderGroup);
+    controlsTabLayout->addWidget(renderGroup);
 
-    auto* regionRenderGroup = new QGroupBox(QStringLiteral("Region Render"), controlPanel);
+    auto* regionRenderGroup = new QGroupBox(QStringLiteral("Region Render"), controlsTab);
     auto* regionRenderLayout = new QVBoxLayout(regionRenderGroup);
 
     m_regionRenderCheckBox = new QCheckBox(QStringLiteral("Region Render"), regionRenderGroup);
@@ -240,9 +273,9 @@ MainView::MainView(QWidget* parent)
         QStringLiteral("Click two corners on the image to define the region (bottom-left then top-right)."));
     regionRenderLayout->addWidget(m_defineRegionButton);
 
-    controlLayout->addWidget(regionRenderGroup);
+    controlsTabLayout->addWidget(regionRenderGroup);
 
-    auto* environmentGroup = new QGroupBox(QStringLiteral("Environment"), controlPanel);
+    auto* environmentGroup = new QGroupBox(QStringLiteral("Environment"), controlsTab);
     auto* environmentLayout = new QVBoxLayout(environmentGroup);
 
     auto* backgroundRow = new QHBoxLayout();
@@ -282,10 +315,40 @@ MainView::MainView(QWidget* parent)
     hdriRow->addWidget(m_environmentHdrClearButton);
     environmentLayout->addLayout(hdriRow);
 
-    controlLayout->addWidget(environmentGroup);
+    controlsTabLayout->addWidget(environmentGroup);
 
-    auto* physicalCameraGroup = new QGroupBox(QStringLiteral("Physical Camera"), controlPanel);
+    auto* physicalCameraGroup = new QGroupBox(QStringLiteral("Physical Camera"), controlsTab);
+    physicalCameraGroup->setToolTip(
+        QStringLiteral("Shift+click the render view to set depth-of-field focus on a surface."));
     auto* physicalCameraLayout = new QVBoxLayout(physicalCameraGroup);
+
+    auto* focalLengthRow = new QHBoxLayout();
+    focalLengthRow->addWidget(new QLabel(QStringLiteral("Focal length:"), physicalCameraGroup));
+    m_focalLengthSpinBox = new QDoubleSpinBox(physicalCameraGroup);
+    m_focalLengthSpinBox->setRange(PhysicalCamera::kMinFocalLengthMm, PhysicalCamera::kMaxFocalLengthMm);
+    m_focalLengthSpinBox->setDecimals(0);
+    m_focalLengthSpinBox->setSingleStep(1.0);
+    m_focalLengthSpinBox->setSuffix(QStringLiteral(" mm"));
+    m_focalLengthSpinBox->setValue(PhysicalCamera::kDefaultFocalLengthMm);
+    m_focalLengthSpinBox->setToolTip(
+        QStringLiteral("Lens focal length for a Nikon Z7 full-frame sensor (14–1000 mm). "
+                       "Controls field of view and depth-of-field aperture."));
+    focalLengthRow->addWidget(m_focalLengthSpinBox, 1);
+    physicalCameraLayout->addLayout(focalLengthRow);
+
+    auto* focusDistanceRow = new QHBoxLayout();
+    focusDistanceRow->addWidget(new QLabel(QStringLiteral("Focus distance:"), physicalCameraGroup));
+    m_focusDistanceSpinBox = new QDoubleSpinBox(physicalCameraGroup);
+    m_focusDistanceSpinBox->setRange(PhysicalCamera::kMinFocalLengthMm, 500'000.0);
+    m_focusDistanceSpinBox->setDecimals(0);
+    m_focusDistanceSpinBox->setSingleStep(10.0);
+    m_focusDistanceSpinBox->setSuffix(QStringLiteral(" mm"));
+    m_focusDistanceSpinBox->setValue(PhysicalCamera::kDefaultFocusDistance);
+    m_focusDistanceSpinBox->setToolTip(
+        QStringLiteral("Distance from the camera to the depth-of-field focus plane along the view axis. "
+                       "Shift+click the render view to pin focus to a surface; editing this value returns to manual focus."));
+    focusDistanceRow->addWidget(m_focusDistanceSpinBox, 1);
+    physicalCameraLayout->addLayout(focusDistanceRow);
 
     auto* fStopRow = new QHBoxLayout();
     fStopRow->addWidget(new QLabel(QStringLiteral("F-number:"), physicalCameraGroup));
@@ -334,60 +397,77 @@ MainView::MainView(QWidget* parent)
     exposureRow->addWidget(m_exposureValueLabel, 1);
     physicalCameraLayout->addLayout(exposureRow);
 
-    controlLayout->addWidget(physicalCameraGroup);
-
-    auto* lsystemGroup = new QGroupBox(QStringLiteral("LSystem"), controlPanel);
-    auto* lsystemLayout = new QVBoxLayout(lsystemGroup);
+    controlsTabLayout->addWidget(physicalCameraGroup);
 
     m_lsystemEdit = new ZoomablePlainTextEdit(
         []() { return AppSettings::instance().lsystemEditorFontSize(); },
         [](int size) { AppSettings::instance().setLsystemEditorFontSize(size); },
-        lsystemGroup);
-    m_lsystemEdit->setPlaceholderText(QStringLiteral("L-system definition (axiom and rules)"));
+        lsystemTab);
+    m_lsystemEdit->setPlaceholderText(
+        QStringLiteral("L-system definition (axiom and rules)\n# Distances and radii are in millimeters (mm)."));
     m_lsystemEdit->setPlainText(QStringLiteral(
-      "#{r, g, b, [roughness], [metallic], [transmission], [thin], [ior], [subsurface], [emission]}\n"
+      "# Distances and radii are in millimeters (mm).\n"
+      "#{r, g, b, [roughness], [metallic], [transmission], [thin], [ior], [subsurface], [emission], "
+      "[diffuseRoughness], [scatterR], [scatterG], [scatterB], [specular]}\n"
+      "# emission scales radiance as base_color * emission (1.0 ~ moderate area light)\n"
       "#{{Grid, br, bg, bb, fr, fg, fb, [freq or freqU], [freqV], [thickness]}, [roughness], ..}\n"
       "#{r, g, b, [roughness], [metallic], [transmission], [thin], [ior], [subsurface], {Stripe, frequency, lineThickness, [onValue], [offValue]}}\n\n"
-      "Mat(0) = { {Grid, 0.85, 0.85, 0.85,  0.05, 0.05, 0.05, 200, 200, 0.05}, 0.8 }\n"
-      "Mat(1) = { 0.9, 0.85, 0.7,   0.7, 1, 0, 0, 1.5, 0.8, {Stripe, 10, 0.1, 10, 0} }\n"
-      "Mat(0)\n"
-      "Pitch(-90) f(-1) F(1, 10.0, 10.0)\n"
-      "f(0.25)\n"
-      "Mat(1)\n"
-      "F(0, 0.25)\n"));
+      "Mat(Wax) = { 0.9, 0.85, 0.7, 0.9, 0, 0, 0, 1.5, 0.8, 0, 0.7, 0.05, 0.04, 0.02, 1.0 }\n"
+      "Mat(Leaf) = { 0.2, 0.8, 0.1, 0.5, 0, 1, 1, 1.5, 0.2, 0, 0.5, 0.01, 0.02, 0.005, 1.0 }\n"
+      "Mat(Grid) = { {Grid, 0.95, 0.95, 0.95,  0.1, 0.1, 0.1, 100, 100, 25}, 0.7 }\n"
+      "Mat(Light) = { 0.9, 0.8, 0.7,    0.65, 1,   0, 0, 1.45,    0.0, {Stripe, 8, 0.05, 10, 0} }\n"
+      "Mat(Metal) = { 0.9, 0.5, 0.2,    0.15, 1,   0, 0, 1.45,    0.0, 0.0 }\n"
+      "Mat(Glass) = { 0.810, 0.929, 0.78,    0.1,  0,   1, 0, 1.45,    0.0, 0.0 }\n"
+      "Mat(Diffuse) = { 0.9, 0.9, 0.9, 1.0 }\n"
+      "Mat(Plastic) = { 0.99, 0.7, 0.94, 0.1, 0, 0, 0, 1.5, 1, 0 }\n\n"
+      "Mat(Grid)\n"
+      "Pitch(-90) f(-1) F(100, 1000, 1000)\n\n"
+      "f(200)\n\n"
+      "Mat(Diffuse)\n"
+      "F(0, 200)\n\n"
+      "Pitch(-90) f(200) Pitch(90)\n"
+      "Mat(Light)\n"
+      "F(0, 200)\n\n"
+      "Pitch(-90) f(200) Pitch(90)\n"
+      "Mat(Glass)\n"
+      "F(0, 200)\n\n"
+      "Pitch(-90) f(200) Pitch(90)\n"
+      "Mat(Metal)\n"
+      "F(0, 200)\n\n"
+      "Pitch(-90) f(200) Pitch(90)\n"
+      "Mat(Plastic)\n"
+      "F(0, 200)\n"
+      ));
 
     m_lsystemEdit->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    lsystemLayout->addWidget(m_lsystemEdit, 1);
+    lsystemTabLayout->addWidget(m_lsystemEdit, 1);
 
     auto* lsystemIterationsRow = new QHBoxLayout();
-    auto* lsystemIterationsLabel = new QLabel(QStringLiteral("Iterations:"), lsystemGroup);
-    m_lsystemIterationsSpinBox = new QSpinBox(lsystemGroup);
+    auto* lsystemIterationsLabel = new QLabel(QStringLiteral("Iterations:"), lsystemTab);
+    m_lsystemIterationsSpinBox = new QSpinBox(lsystemTab);
     m_lsystemIterationsSpinBox->setRange(0, 32);
     m_lsystemIterationsSpinBox->setValue(0);
     m_lsystemIterationsSpinBox->setToolTip(
         QStringLiteral("0 = axiom only; N = apply rewrite rules N times"));
     lsystemIterationsRow->addWidget(lsystemIterationsLabel);
     lsystemIterationsRow->addWidget(m_lsystemIterationsSpinBox, 1);
-    lsystemLayout->addLayout(lsystemIterationsRow);
+    lsystemTabLayout->addLayout(lsystemIterationsRow);
 
     auto* lsystemActionsRow = new QHBoxLayout();
-    m_lsystemLoadButton = new QPushButton(QStringLiteral("Load"), lsystemGroup);
+    m_lsystemLoadButton = new QPushButton(QStringLiteral("Load"), lsystemTab);
     m_lsystemLoadButton->setToolTip(QStringLiteral("Load an L-system definition from a .lsystem file"));
     lsystemActionsRow->addWidget(m_lsystemLoadButton);
-    m_addPrimitiveButton = new QPushButton(QStringLiteral("Add"), lsystemGroup);
+    m_addPrimitiveButton = new QPushButton(QStringLiteral("Add"), lsystemTab);
     m_addPrimitiveButton->setToolTip(QStringLiteral("Build procedural mesh from L-system and add to scene"));
     lsystemActionsRow->addWidget(m_addPrimitiveButton);
-    lsystemLayout->addLayout(lsystemActionsRow);
-
-    controlLayout->addWidget(lsystemGroup, 1);
-
-    auto* applicationGroup = new QGroupBox(QStringLiteral("Application"), controlPanel);
-    auto* applicationLayout = new QVBoxLayout(applicationGroup);
-
-    m_resetSceneButton = new QPushButton(QStringLiteral("Reset Scene"), applicationGroup);
+    m_resetSceneButton = new QPushButton(QStringLiteral("Reset Scene"), lsystemTab);
     m_resetSceneButton->setToolTip(
         QStringLiteral("Remove all procedural meshes from the scene. The camera position is unchanged."));
-    applicationLayout->addWidget(m_resetSceneButton);
+    lsystemActionsRow->addWidget(m_resetSceneButton);
+    lsystemTabLayout->addLayout(lsystemActionsRow);
+
+    auto* applicationGroup = new QGroupBox(QStringLiteral("Application"), controlsTab);
+    auto* applicationLayout = new QVBoxLayout(applicationGroup);
 
     m_exportSceneButton = new QPushButton(QStringLiteral("Export Scene"), applicationGroup);
     m_exportSceneButton->setToolTip(
@@ -401,7 +481,12 @@ MainView::MainView(QWidget* parent)
     connect(closeButton, &QPushButton::clicked, this, &QWidget::close);
     applicationLayout->addWidget(closeButton);
 
-    controlLayout->addWidget(applicationGroup);
+    controlsTabLayout->addWidget(applicationGroup);
+
+    m_controlTabWidget->addTab(lsystemTab, QStringLiteral("L-System"));
+    m_controlTabWidget->addTab(controlsTab, QStringLiteral("Controls"));
+    m_controlTabWidget->setCurrentIndex(0);
+    controlLayout->addWidget(m_controlTabWidget, 1);
 
     m_horizontalSplitter->addWidget(m_viewportHost);
     m_horizontalSplitter->addWidget(controlPanel);
@@ -485,6 +570,16 @@ QDoubleSpinBox* MainView::fStopSpinBox() const
     return m_fStopSpinBox;
 }
 
+QDoubleSpinBox* MainView::focalLengthSpinBox() const
+{
+    return m_focalLengthSpinBox;
+}
+
+QDoubleSpinBox* MainView::focusDistanceSpinBox() const
+{
+    return m_focusDistanceSpinBox;
+}
+
 QComboBox* MainView::shutterSpeedComboBox() const
 {
     return m_shutterSpeedComboBox;
@@ -542,9 +637,19 @@ QSpinBox* MainView::russianRouletteMinDepthSpinBox() const
     return m_russianRouletteMinDepthSpinBox;
 }
 
-QComboBox* MainView::boundsOverlayComboBox() const
+QComboBox* MainView::renderViewOverlayComboBox() const
 {
-    return m_boundsOverlayComboBox;
+    return m_renderViewOverlayComboBox;
+}
+
+QComboBox* MainView::brdfDebugComboBox() const
+{
+    return m_brdfDebugComboBox;
+}
+
+QCheckBox* MainView::sceneOverlayCheckBox() const
+{
+    return m_sceneOverlayCheckBox;
 }
 
 QCheckBox* MainView::regionRenderCheckBox() const

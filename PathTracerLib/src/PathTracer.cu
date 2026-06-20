@@ -84,13 +84,16 @@ __device__ void tracePixelRadiance(
     curandState rng{};
     randInitState(&rng, idx, sampleIndex, globalSeed);
 
-    const float pixelOffset = jitterSubpixel ? rand01(&rng) : 0.5f;
-    const float u = (static_cast<float>(x) + pixelOffset) / static_cast<float>(width);
-    const float v = (static_cast<float>(y) + pixelOffset) / static_cast<float>(height);
+    const float jitterU = jitterSubpixel ? rand01(&rng) : 0.5f;
+    const float jitterV = jitterSubpixel ? rand01(&rng) : 0.5f;
+    const float u = (static_cast<float>(x) + jitterU) / static_cast<float>(width);
+    const float v = (static_cast<float>(y) + jitterV) / static_cast<float>(height);
 
     float3 roFloat{};
     float3 rdFloat{};
-    cameraPrimaryRay(camera, u, v, roFloat, rdFloat);
+    const float lensU1 = rand01(&rng);
+    const float lensU2 = rand01(&rng);
+    cameraPrimaryRaySampled(camera, u, v, lensU1, lensU2, roFloat, rdFloat);
 
     outRadiance = clampSampleFirefly(tracePathRand(
         float3ToVec3(roFloat),

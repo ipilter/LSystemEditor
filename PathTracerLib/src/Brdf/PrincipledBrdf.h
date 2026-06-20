@@ -1,6 +1,8 @@
 #pragma once
 
 #include "BrdfBase.h"
+#include "BrdfDebug.h"
+#include "SubsurfaceCore.h"
 #include "Spectral/SpectralCore.h"
 
 #if defined(__CUDACC__)
@@ -33,10 +35,10 @@ PRINCIPLED_BRDF_FN Vec3 mirrorReflectOutgoing(Vec3 wo, Vec3 normal)
         wo));
 }
 
-PRINCIPLED_BRDF_FN Vec3 dielectricF0(float ior)
+PRINCIPLED_BRDF_FN Vec3 dielectricF0(float ior, float specularScale)
 {
     const float f0 = (ior - 1.0f) / (ior + 1.0f);
-    const float v = f0 * f0;
+    const float v = f0 * f0 * clamp01(specularScale);
     return vecMake3(v, v, v);
 }
 
@@ -44,11 +46,22 @@ PRINCIPLED_BRDF_FN Vec3 specularF0(const BrdfContext& ctx)
 {
     const Vec3 base = baseColor(ctx);
     const float metallic = clamp01(ctx.material.metallic);
-    const Vec3 f0Dielectric = dielectricF0(materialIor(ctx));
+    const Vec3 f0Dielectric = dielectricF0(materialIor(ctx), clamp01(ctx.material.specular));
     return vecMake3(
         f0Dielectric.x + (base.x - f0Dielectric.x) * metallic,
         f0Dielectric.y + (base.y - f0Dielectric.y) * metallic,
         f0Dielectric.z + (base.z - f0Dielectric.z) * metallic);
+}
+
+PRINCIPLED_BRDF_FN float diffuseOrenNayarFactor(const BrdfContext& ctx, Vec3 wi)
+{
+    const float cosWi = vecMax2(0.0f, vecDot3(ctx.normal, wi));
+    const float cosWo = vecMax2(0.0f, vecDot3(ctx.normal, ctx.wo));
+    if (cosWi <= 0.0f || cosWo <= 0.0f) {
+        return 0.0f;
+    }
+    const float sigma = brdfOrenNayarSigma(brdfDiffuseRoughness(ctx.material));
+    return brdfOrenNayarFactor(sigma, cosWi, cosWo, vecDot3(wi, ctx.wo));
 }
 
 struct LobeWeights
@@ -127,7 +140,8 @@ PRINCIPLED_BRDF_FN Vec3 evalDiffuse(const BrdfContext& ctx, Vec3 wi)
 
     const LobeWeights weights = computeLobeWeights(ctx);
     const Vec3 base = baseColor(ctx);
-    return vecScale3(base, weights.diffuse * BrdfDetail::kInvPi);
+    const float orenNayar = diffuseOrenNayarFactor(ctx, wi);
+    return vecScale3(base, weights.diffuse * orenNayar * BrdfDetail::kInvPi);
 }
 
 PRINCIPLED_BRDF_FN Vec3 evalSubsurface(const BrdfContext& ctx, Vec3 wi)
@@ -140,7 +154,24 @@ PRINCIPLED_BRDF_FN Vec3 evalSubsurface(const BrdfContext& ctx, Vec3 wi)
 
     const LobeWeights weights = computeLobeWeights(ctx);
     const Vec3 base = baseColor(ctx);
-    return vecScale3(base, weights.subsurface * BrdfDetail::kInvPi);
+    const float maxRadius = brdfMaxScatterRadius(ctx.material);
+    if (maxRadius <= SubsurfaceDetail::kMinRadius) {
+        const float orenNayar = diffuseOrenNayarFactor(ctx, wi);
+        return vecScale3(base, weights.subsurface * orenNayar * BrdfDetail::kInvPi);
+    }
+
+    Vec3 tangent{};
+    Vec3 bitangent{};
+    brdfBuildBasis(ctx.normal, tangent, bitangent);
+    const Vec3 wiTangent = vecAdd3(
+        vecScale3(tangent, vecDot3(wi, tangent)),
+        vecScale3(bitangent, vecDot3(wi, bitangent)));
+    const float diskDistance = sqrtf(vecDot3(wiTangent, wiTangent));
+    const Vec3 burley = subsurfaceEvalBurley(ctx.material, diskDistance, cosWi, cosWo);
+    return vecMake3(
+        base.x * weights.subsurface * burley.x,
+        base.y * weights.subsurface * burley.y,
+        base.z * weights.subsurface * burley.z);
 }
 
 PRINCIPLED_BRDF_FN Vec3 evalSpecular(const BrdfContext& ctx, Vec3 wi)
@@ -163,8 +194,9 @@ PRINCIPLED_BRDF_FN Vec3 evalSpecular(const BrdfContext& ctx, Vec3 wi)
     const float D = brdfGGXD(cosThetaH, alpha);
     const float G = brdfSmithG1(cosWo, alpha) * brdfSmithG1(cosWi, alpha);
     const Vec3 F = brdfSchlickF(cosThetaHo, specularF0(ctx));
+    const float energyComp = brdfGgxEnergyCompensation(ctx.material.roughness, cosWo);
     const float denom = vecMax2(4.0f * cosWo * cosWi, 1.0e-8f);
-    const float scale = weights.specular * (D * G) / denom;
+    const float scale = weights.specular * energyComp * (D * G) / denom;
     return vecMake3(F.x * scale, F.y * scale, F.z * scale);
 }
 
@@ -188,10 +220,18 @@ PRINCIPLED_BRDF_FN bool refractDirection(
     return brdfRefractRelative(ctx.wo, ctx.normal, etaI, etaT, outWi);
 }
 
+PRINCIPLED_BRDF_FN bool transmitContextValid(const BrdfContext& ctx, float cosWoSigned)
+{
+    if (vecAbs(cosWoSigned) <= BrdfDetail::kMinPdf) {
+        return false;
+    }
+    return cosWoSigned > 0.0f || ctx.etaMedium > 1.0f + 1.0e-4f;
+}
+
 PRINCIPLED_BRDF_FN Vec3 evalTransmit(const BrdfContext& ctx, Vec3 wi)
 {
-    const float cosWo = vecMax2(0.0f, vecDot3(ctx.normal, ctx.wo));
-    if (cosWo <= 0.0f) {
+    const float cosWoSigned = vecDot3(ctx.normal, ctx.wo);
+    if (!transmitContextValid(ctx, cosWoSigned)) {
         return vecMake3(0.0f, 0.0f, 0.0f);
     }
 
@@ -200,7 +240,6 @@ PRINCIPLED_BRDF_FN Vec3 evalTransmit(const BrdfContext& ctx, Vec3 wi)
     const Vec3 base = baseColor(ctx);
     const float etaI = ctx.etaMedium;
     const float ior = materialIor(ctx);
-    const float cosWoSigned = vecDot3(ctx.normal, ctx.wo);
     const float etaT = cosWoSigned > 0.0f ? ior : 1.0f;
     const float fresnel = brdfDielectricFresnel(cosWoSigned, etaI, etaT);
     const float reflectance = thin > 0.5f ? fresnel : fresnel;
@@ -208,7 +247,7 @@ PRINCIPLED_BRDF_FN Vec3 evalTransmit(const BrdfContext& ctx, Vec3 wi)
 
     const Vec3 reflected = mirrorReflectOutgoing(ctx.wo, ctx.normal);
     if (vecDot3(wi, reflected) > 0.999f) {
-        const float cosWi = vecMax2(0.0f, vecDot3(ctx.normal, wi));
+        const float cosWi = vecAbs(vecDot3(ctx.normal, wi));
         return vecScale3(base, weights.transmit * reflectance / vecMax2(cosWi, 1.0e-8f));
     }
 
@@ -225,7 +264,24 @@ PRINCIPLED_BRDF_FN Vec3 evalTransmit(const BrdfContext& ctx, Vec3 wi)
     (void)nextMediumEta;
     if (vecDot3(wi, transmitted) > 0.999f) {
         const float cosWi = vecAbs(vecDot3(ctx.normal, transmitted));
-        return vecScale3(base, weights.transmit * transmittance / vecMax2(cosWi, 1.0e-8f));
+        Vec3 tint = thin > 0.5f ? base : vecMake3(1.0f, 1.0f, 1.0f);
+        return vecMake3(
+            tint.x * weights.transmit * transmittance / vecMax2(cosWi, 1.0e-8f),
+            tint.y * weights.transmit * transmittance / vecMax2(cosWi, 1.0e-8f),
+            tint.z * weights.transmit * transmittance / vecMax2(cosWi, 1.0e-8f));
+    }
+
+    const float alpha = brdfAlphaFromRoughness(ctx.material.roughness);
+    if (alpha > 0.04f) {
+        const Vec3 h = vecNormalize3(vecAdd3(wi, ctx.wo));
+        const float cosThetaH = vecMax2(0.0f, vecAbs(vecDot3(ctx.normal, h)));
+        const float D = brdfGGXD(cosThetaH, alpha);
+        const float roughPdf = D * cosThetaH;
+        if (roughPdf > BrdfDetail::kMinPdf) {
+            Vec3 roughTint = thin > 0.5f ? base : vecMake3(1.0f, 1.0f, 1.0f);
+            const float scale = weights.transmit * transmittance * roughPdf;
+            return vecMake3(roughTint.x * scale, roughTint.y * scale, roughTint.z * scale);
+        }
     }
 
     return vecMake3(0.0f, 0.0f, 0.0f);
@@ -240,7 +296,22 @@ PRINCIPLED_BRDF_FN float pdfDiffuse(const BrdfContext& ctx, Vec3 wi)
 PRINCIPLED_BRDF_FN float pdfSubsurface(const BrdfContext& ctx, Vec3 wi)
 {
     const LobeWeights weights = computeLobeWeights(ctx);
-    return weights.subsurface * brdfCosineHemispherePdf(vecMax2(0.0f, vecDot3(ctx.normal, wi)));
+    const float cosPdf = brdfCosineHemispherePdf(vecMax2(0.0f, vecDot3(ctx.normal, wi)));
+    const float maxRadius = brdfMaxScatterRadius(ctx.material);
+    if (maxRadius <= SubsurfaceDetail::kMinRadius) {
+        return weights.subsurface * cosPdf;
+    }
+
+    Vec3 tangent{};
+    Vec3 bitangent{};
+    brdfBuildBasis(ctx.normal, tangent, bitangent);
+    const Vec3 wiTangent = vecAdd3(
+        vecScale3(tangent, vecDot3(wi, tangent)),
+        vecScale3(bitangent, vecDot3(wi, bitangent)));
+    const float diskDistance = sqrtf(vecDot3(wiTangent, wiTangent));
+    const float effectiveRadius = brdfMaxScatterRadius(ctx.material);
+    const float radialPdf = subsurfaceBurleyPdfRadius(diskDistance, effectiveRadius);
+    return weights.subsurface * vecMax2(cosPdf, radialPdf * 0.5f);
 }
 
 PRINCIPLED_BRDF_FN float pdfSpecular(const BrdfContext& ctx, Vec3 wi)
@@ -266,8 +337,8 @@ PRINCIPLED_BRDF_FN float pdfSpecular(const BrdfContext& ctx, Vec3 wi)
 
 PRINCIPLED_BRDF_FN float pdfTransmit(const BrdfContext& ctx, Vec3 wi)
 {
-    const float cosWo = vecMax2(0.0f, vecDot3(ctx.normal, ctx.wo));
-    if (cosWo <= 0.0f) {
+    const float cosWoSigned = vecDot3(ctx.normal, ctx.wo);
+    if (!transmitContextValid(ctx, cosWoSigned)) {
         return 0.0f;
     }
 
@@ -275,7 +346,6 @@ PRINCIPLED_BRDF_FN float pdfTransmit(const BrdfContext& ctx, Vec3 wi)
     const float thin = clamp01(ctx.material.thin);
     const float etaI = ctx.etaMedium;
     const float ior = materialIor(ctx);
-    const float cosWoSigned = vecDot3(ctx.normal, ctx.wo);
     const float etaT = cosWoSigned > 0.0f ? ior : 1.0f;
     const float fresnel = brdfDielectricFresnel(cosWoSigned, etaI, etaT);
     const float reflectance = fresnel;
@@ -284,7 +354,7 @@ PRINCIPLED_BRDF_FN float pdfTransmit(const BrdfContext& ctx, Vec3 wi)
 
     const Vec3 reflected = mirrorReflectOutgoing(ctx.wo, ctx.normal);
     if (vecDot3(wi, reflected) > 0.999f) {
-        const float cosWi = vecMax2(0.0f, vecDot3(ctx.normal, wi));
+        const float cosWi = vecAbs(vecDot3(ctx.normal, wi));
         pdf += weights.transmit * reflectance / vecMax2(cosWi, 1.0e-8f);
     }
 
@@ -339,7 +409,34 @@ struct PrincipledBrdf : BrdfBase<PrincipledBrdf>
 
     PRINCIPLED_BRDF_FN BrdfSampleResult sampleSubsurface(const BrdfContext& ctx, float u1, float u2) const
     {
-        return sampleDiffuse(ctx, u1, u2);
+        BrdfSampleResult result{};
+        const float maxRadius = brdfMaxScatterRadius(ctx.material);
+        if (maxRadius <= SubsurfaceDetail::kMinRadius) {
+            return sampleDiffuse(ctx, u1, u2);
+        }
+
+        Vec3 exitOffset{};
+        float diskDistance = 0.0f;
+        float offsetPdf = 0.0f;
+        const float u3 = u1 * 0.318f + u2 * 0.682f;
+        subsurfaceSampleExitOffset(ctx, u1, u2, u3, exitOffset, diskDistance, offsetPdf);
+
+        Vec3 tangent{};
+        Vec3 bitangent{};
+        brdfBuildBasis(ctx.normal, tangent, bitangent);
+
+        const Vec3 local = brdfSampleCosineHemisphereLocal(
+            vecMax2(BrdfDetail::kMinPdf, u1 * 0.5f + 0.25f),
+            vecMax2(BrdfDetail::kMinPdf, u2 * 0.5f + 0.25f));
+        result.direction = brdfLocalToWorld(local, ctx.normal, tangent, bitangent);
+        result.subsurfaceScatter = true;
+        result.subsurfaceExitOffset = exitOffset;
+        result.subsurfaceInternalSteps = PrincipledDetail::clamp01(ctx.material.thin) > 0.5f ? 0 : 2;
+        result.pdf = pdfImpl(ctx, result.direction);
+        result.valid = vecDot3(ctx.normal, result.direction) > 0.0f && result.pdf > BrdfDetail::kMinPdf;
+        result.transmitted = false;
+        result.nextMediumEta = ctx.etaMedium;
+        return result;
     }
 
     PRINCIPLED_BRDF_FN BrdfSampleResult sampleSpecular(const BrdfContext& ctx, float u1, float u2) const
@@ -378,30 +475,51 @@ struct PrincipledBrdf : BrdfBase<PrincipledBrdf>
 
     PRINCIPLED_BRDF_FN BrdfSampleResult sampleTransmit(const BrdfContext& ctx, float u1, float u2) const
     {
-        (void)u2;
         BrdfSampleResult result{};
-        const float cosWo = vecMax2(0.0f, vecDot3(ctx.normal, ctx.wo));
-        if (cosWo <= 0.0f) {
+        const float cosWoSigned = vecDot3(ctx.normal, ctx.wo);
+        if (!PrincipledDetail::transmitContextValid(ctx, cosWoSigned)) {
             return result;
         }
 
         const float thin = PrincipledDetail::clamp01(ctx.material.thin);
         const float etaI = ctx.etaMedium;
         const float ior = PrincipledDetail::materialIor(ctx);
-        const float cosWoSigned = vecDot3(ctx.normal, ctx.wo);
         const float etaT = cosWoSigned > 0.0f ? ior : 1.0f;
         const float fresnel = brdfDielectricFresnel(cosWoSigned, etaI, etaT);
         const float reflectance = fresnel;
         const float transmittance = 1.0f - reflectance;
 
-        if (u1 < transmittance) {
+        bool refractBranch = u1 < transmittance;
+        if ((ctx.debugFlags & BrdfDebugFlags::kDisableRefract) != 0) {
+            refractBranch = false;
+        }
+        if ((ctx.debugFlags & BrdfDebugFlags::kDisableReflect) != 0) {
+            refractBranch = true;
+        }
+
+        BrdfContext refractCtx = ctx;
+        const float alpha = brdfAlphaFromRoughness(ctx.material.roughness);
+        if (refractBranch && thin < 0.5f && alpha > 0.04f) {
+            Vec3 tangent{};
+            Vec3 bitangent{};
+            brdfBuildBasis(ctx.normal, tangent, bitangent);
+            float hPdf = 0.0f;
+            const Vec3 hLocal = brdfSampleGGXHalfLocal(alpha, u2, u1 * 0.413f + u2 * 0.587f, hPdf);
+            const Vec3 microNormal = brdfLocalToWorld(hLocal, ctx.normal, tangent, bitangent);
+            refractCtx.normal = microNormal;
+        }
+
+        if (refractBranch) {
             if (thin > 0.5f) {
                 result.direction = vecNormalize3(vecScale3(ctx.wo, -1.0f));
                 result.nextMediumEta = ctx.etaMedium;
             } else {
                 float etaOutI = 0.0f;
                 float etaOutT = 0.0f;
-                if (!PrincipledDetail::refractDirection(ctx, result.direction, etaOutI, etaOutT, result.nextMediumEta)) {
+                if (!PrincipledDetail::refractDirection(refractCtx, result.direction, etaOutI, etaOutT, result.nextMediumEta)) {
+                    if ((ctx.debugFlags & BrdfDebugFlags::kDisableTirFallback) != 0) {
+                        return result;
+                    }
                     result.direction = PrincipledDetail::mirrorReflectOutgoing(ctx.wo, ctx.normal);
                     result.transmitted = false;
                     result.nextMediumEta = ctx.etaMedium;
@@ -419,7 +537,7 @@ struct PrincipledBrdf : BrdfBase<PrincipledBrdf>
             }
         } else {
             result.direction = PrincipledDetail::mirrorReflectOutgoing(ctx.wo, ctx.normal);
-            const float cosWi = vecMax2(0.0f, vecDot3(ctx.normal, result.direction));
+            const float cosWi = vecAbs(vecDot3(ctx.normal, result.direction));
             if (cosWi <= 0.0f) {
                 return result;
             }
@@ -434,6 +552,10 @@ struct PrincipledBrdf : BrdfBase<PrincipledBrdf>
 
     PRINCIPLED_BRDF_FN BrdfSampleResult sampleImpl(const BrdfContext& ctx, float u1, float u2) const
     {
+        if ((ctx.debugFlags & BrdfDebugFlags::kForceTransmitLobeOnly) != 0) {
+            return sampleTransmit(ctx, u1, u2);
+        }
+
         const PrincipledDetail::LobeWeights weights = PrincipledDetail::computeLobeWeights(ctx);
         const int lobe = PrincipledDetail::pickLobe(weights, u1);
 

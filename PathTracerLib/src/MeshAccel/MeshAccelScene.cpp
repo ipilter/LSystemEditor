@@ -37,24 +37,60 @@ MaterialGpu defaultMaterial()
     material.transmission = 0.0f;
     material.thin = 0.0f;
     material.subsurface = 0.0f;
+    material.diffuseRoughness = -1.0f;
+    material.scatterRadiusR = 0.0f;
+    material.scatterRadiusG = 0.0f;
+    material.scatterRadiusB = 0.0f;
+    material.specular = 1.0f;
     return material;
+}
+
+float triangleArea(const TriangleGpu& tri)
+{
+    const Vec3 e1 = vecSub3(tri.v1, tri.v0);
+    const Vec3 e2 = vecSub3(tri.v2, tri.v0);
+    const Vec3 cross = vecCross3(e1, e2);
+    return 0.5f * vecLength3(cross);
+}
+
+float materialEmissionLuminance(const MaterialGpu& material)
+{
+    return material.emission * (
+        0.2126f * material.r + 0.7152f * material.g + 0.0722f * material.b);
 }
 
 void buildEmissiveTriangleList(
     const std::vector<TriangleGpu>& triangles,
     const std::vector<MaterialGpu>& materials,
-    std::vector<uint32_t>& outIndices)
+    std::vector<uint32_t>& outIndices,
+    std::vector<float>& outCdf)
 {
     outIndices.clear();
+    outCdf.clear();
+    outCdf.push_back(0.0f);
+
+    float totalWeight = 0.0f;
     for (uint32_t triIndex = 0; triIndex < triangles.size(); ++triIndex) {
         const TriangleGpu& tri = triangles[triIndex];
         if (tri.materialIndex >= materials.size()) {
             continue;
         }
         const MaterialGpu& material = materials[tri.materialIndex];
-        if (material.emission > 0.0f) {
-            outIndices.push_back(triIndex);
+        const float luminance = materialEmissionLuminance(material);
+        if (luminance <= 0.0f) {
+            continue;
         }
+        const float weight = triangleArea(tri) * luminance;
+        if (weight <= 0.0f) {
+            continue;
+        }
+        outIndices.push_back(triIndex);
+        totalWeight += weight;
+        outCdf.push_back(totalWeight);
+    }
+
+    if (totalWeight <= 0.0f) {
+        outCdf.assign(1, 0.0f);
     }
 }
 
@@ -96,6 +132,7 @@ void MeshAccelScene::clear()
     m_materials.clear();
     m_textures.clear();
     m_emissiveTriangleIndices.clear();
+    m_emissiveTriangleCdf.clear();
     m_hostScene = MeshAccelSceneGpu{};
     m_built = false;
     m_deviceDirty = true;
@@ -135,13 +172,14 @@ bool MeshAccelScene::build(const HostMesh& mesh)
         return false;
     }
 
-    buildEmissiveTriangleList(m_triangles, m_materials, m_emissiveTriangleIndices);
+    buildEmissiveTriangleList(m_triangles, m_materials, m_emissiveTriangleIndices, m_emissiveTriangleCdf);
 
     m_hostScene = MeshAccelSceneGpu{};
     m_hostScene.bvhNodes = m_bvhNodes.data();
     m_hostScene.triangles = m_triangles.data();
     m_hostScene.materials = m_materials.data();
     m_hostScene.emissiveTriangleIndices = m_emissiveTriangleIndices.data();
+    m_hostScene.emissiveTriangleCdf = m_emissiveTriangleCdf.data();
     m_hostScene.textures = m_textures.empty() ? nullptr : m_textures.data();
     m_hostScene.bvhNodeCount = static_cast<uint32_t>(m_bvhNodes.size());
     m_hostScene.triangleCount = static_cast<uint32_t>(m_triangles.size());
@@ -186,6 +224,10 @@ void MeshAccelScene::release()
         cudaFree(m_dEmissiveTriangleIndices);
         m_dEmissiveTriangleIndices = nullptr;
     }
+    if (m_dEmissiveTriangleCdf != nullptr) {
+        cudaFree(m_dEmissiveTriangleCdf);
+        m_dEmissiveTriangleCdf = nullptr;
+    }
     if (m_dTextures != nullptr) {
         cudaFree(m_dTextures);
         m_dTextures = nullptr;
@@ -225,6 +267,10 @@ bool MeshAccelScene::upload(cudaStream_t stream)
         cudaFree(m_dEmissiveTriangleIndices);
         m_dEmissiveTriangleIndices = nullptr;
     }
+    if (m_dEmissiveTriangleCdf != nullptr) {
+        cudaFree(m_dEmissiveTriangleCdf);
+        m_dEmissiveTriangleCdf = nullptr;
+    }
     if (m_dTextures != nullptr) {
         cudaFree(m_dTextures);
         m_dTextures = nullptr;
@@ -250,6 +296,10 @@ bool MeshAccelScene::upload(cudaStream_t stream)
         release();
         return false;
     }
+    if (!uploadBuffer(&m_dEmissiveTriangleCdf, m_emissiveTriangleCdf)) {
+        release();
+        return false;
+    }
     if (!uploadBuffer(&m_dTextures, m_textures)) {
         release();
         return false;
@@ -260,6 +310,7 @@ bool MeshAccelScene::upload(cudaStream_t stream)
     deviceScene.triangles = m_dTriangles;
     deviceScene.materials = m_dMaterials;
     deviceScene.emissiveTriangleIndices = m_dEmissiveTriangleIndices;
+    deviceScene.emissiveTriangleCdf = m_dEmissiveTriangleCdf;
     deviceScene.textures = m_dTextures;
     deviceScene.bvhNodeCount = static_cast<uint32_t>(m_bvhNodes.size());
     deviceScene.triangleCount = static_cast<uint32_t>(m_triangles.size());

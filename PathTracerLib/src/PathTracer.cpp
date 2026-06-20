@@ -8,6 +8,7 @@
 #include "PathTracerAdaptiveSampling.h"
 #include "MeshAccel/MeshAccelBoundsMesh.h"
 #include "MeshAccel/MeshAccelScene.h"
+#include "MeshAccel/MeshAccelIntersectCore.h"
 #include "MeshAccel/MeshSceneContent.h"
 #include "PathTracerCuda.h"
 #include "PathTracerPreviewLevels.h"
@@ -87,6 +88,7 @@ struct PathTracerDetail::PathTracerImpl
     std::atomic<int> minSamples{16};
     std::atomic<float> relativeErrorThreshold{0.02f};
     std::atomic<int> debugOverlayMode{0};
+    std::atomic<int> brdfDebugFlags{0};
     std::atomic<int> activePixelCount{0};
     std::atomic<int> previewStepsPerLevel{0};
     std::atomic<int> sampleCount{0};
@@ -716,6 +718,7 @@ bool initRenderParamsGpu(PathTracerDetail::PathTracerImpl* impl, QString* outErr
     impl->hostRenderParams.maxSamplesPerPixel = clampMaxSamples(impl->maxSamplesPerPixel.load());
     impl->hostRenderParams.relativeErrorThreshold = clampRelativeErrorThreshold(impl->relativeErrorThreshold.load());
     impl->hostRenderParams.debugOverlayMode = impl->debugOverlayMode.load();
+    impl->hostRenderParams.brdfDebugFlags = impl->brdfDebugFlags.load();
     impl->deviceParamsArePreview = false;
     impl->renderParamsDirty.store(true);
     return true;
@@ -748,6 +751,7 @@ bool syncRenderParamsToDevice(
     deviceParams.maxSamplesPerPixel = clampMaxSamples(impl->maxSamplesPerPixel.load());
     deviceParams.relativeErrorThreshold = clampRelativeErrorThreshold(impl->relativeErrorThreshold.load());
     deviceParams.debugOverlayMode = impl->debugOverlayMode.load();
+    deviceParams.brdfDebugFlags = impl->brdfDebugFlags.load();
     if (previewPass) {
         deviceParams.maxPathDepth = kPreviewMaxPathDepth;
     }
@@ -1770,6 +1774,19 @@ int PathTracer::debugOverlayMode() const
     return m_impl->debugOverlayMode.load();
 }
 
+void PathTracer::setBrdfDebugFlags(int flags)
+{
+    m_impl->brdfDebugFlags.store(flags);
+    m_impl->hostRenderParams.brdfDebugFlags = flags;
+    m_impl->renderParamsDirty.store(true);
+    notifyWorker();
+}
+
+int PathTracer::brdfDebugFlags() const
+{
+    return m_impl->brdfDebugFlags.load();
+}
+
 void PathTracer::setPreviewStepsPerLevel(int steps)
 {
     const int clamped = clampPreviewStepsPerLevel(steps);
@@ -1940,6 +1957,59 @@ void PathTracer::setPhysicalCamera(float fStop, float shutterSpeedSeconds, float
     m_impl->hostCamera.fStop = PhysicalCamera::clampFStop(fStop);
     m_impl->hostCamera.shutterSpeedSeconds = PhysicalCamera::clampShutterSpeedSeconds(shutterSpeedSeconds);
     m_impl->hostCamera.iso = PhysicalCamera::clampIso(iso);
+    m_impl->cameraDirty.store(true);
+}
+
+void PathTracer::setFocusPoint(const glm::vec3& worldPoint)
+{
+    {
+        std::lock_guard<std::mutex> lock(m_impl->cameraMutex);
+        m_impl->hostCamera.setFocusPoint(worldPoint);
+    }
+    m_impl->cameraDirty.store(true);
+
+    if (m_impl->configured.load()) {
+        resetAccumulation();
+    }
+    notifyWorker();
+}
+
+void PathTracer::clearFocusPoint()
+{
+    {
+        std::lock_guard<std::mutex> lock(m_impl->cameraMutex);
+        m_impl->hostCamera.clearFocusPoint();
+    }
+    m_impl->cameraDirty.store(true);
+
+    if (m_impl->configured.load()) {
+        resetAccumulation();
+    }
+    notifyWorker();
+}
+
+bool PathTracer::pickSurface(const glm::vec3& ro, const glm::vec3& rd, glm::vec3* hitPoint) const
+{
+    if (hitPoint == nullptr || m_impl == nullptr) {
+        return false;
+    }
+
+    std::lock_guard<std::mutex> meshSceneLock(m_impl->meshSceneMutex);
+    const MeshAccelSceneGpu* scene = m_impl->meshScene.hostScene();
+    if (scene == nullptr) {
+        return false;
+    }
+
+    const glm::vec3 normalizedRd = glm::normalize(rd);
+    const Vec3 roVec = vecMake3(ro.x, ro.y, ro.z);
+    const Vec3 rdVec = vecMake3(normalizedRd.x, normalizedRd.y, normalizedRd.z);
+    const MeshHit hit = meshAccelTraceRay(roVec, rdVec, scene, 0.001f, 1.0e30f);
+    if (!hit.hit) {
+        return false;
+    }
+
+    *hitPoint = ro + normalizedRd * hit.t;
+    return true;
 }
 
 PhysicalCamera PathTracer::suggestedPhysicalCamera() const

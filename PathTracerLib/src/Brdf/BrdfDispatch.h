@@ -55,8 +55,17 @@ BRDF_DISPATCH_FN Vec3 brdfApplyThroughput(Vec3 throughput, const BrdfContext& ct
     } else if (sample.transmitted) {
         const float cosTheta = vecAbs(vecDot3(ctx.normal, sample.direction));
         scale = vecScale3(bsdfValue, cosTheta / sample.pdf);
-    } else {
+        if (thin > 0.5f) {
+            const Vec3 tint = brdfBaseColor(ctx.material);
+            scale = vecMake3(scale.x * tint.x, scale.y * tint.y, scale.z * tint.z);
+        }
+    } else if (sample.subsurfaceScatter) {
         const float cosTheta = vecMax2(0.0f, vecDot3(ctx.normal, sample.direction));
+        scale = vecScale3(bsdfValue, cosTheta / sample.pdf);
+    } else {
+        const float cosTheta = ctx.etaMedium > 1.0f + 1.0e-4f
+            ? vecAbs(vecDot3(ctx.normal, sample.direction))
+            : vecMax2(0.0f, vecDot3(ctx.normal, sample.direction));
         scale = vecScale3(bsdfValue, cosTheta / sample.pdf);
     }
 

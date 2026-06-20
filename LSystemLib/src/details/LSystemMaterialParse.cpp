@@ -394,6 +394,16 @@ void assign_legacy_entry(MaterialEntry& entry, const std::vector<float>& comps)
     set_inline_scalar(entry.ior, std::max(1.0e-3f, scalarAt(7u, 1.5f)));
     set_inline_scalar(entry.subsurface, clamp01(scalarAt(8u, 0.f)));
     set_inline_scalar(entry.emission, std::max(0.f, scalarAt(9u, 0.f)));
+    const float roughnessDefault = materialChannelScalar(entry.roughness, 0.5f);
+    if (comps.size() > 10u) {
+        set_inline_scalar(entry.diffuseRoughness, clamp01(comps[10]));
+    } else {
+        set_inline_scalar(entry.diffuseRoughness, -1.f);
+    }
+    set_inline_scalar(entry.scatterRadiusR, std::max(0.f, scalarAt(11u, 0.f)));
+    set_inline_scalar(entry.scatterRadiusG, std::max(0.f, scalarAt(12u, 0.f)));
+    set_inline_scalar(entry.scatterRadiusB, std::max(0.f, scalarAt(13u, 0.f)));
+    set_inline_scalar(entry.specular, clamp01(scalarAt(14u, 1.f)));
 }
 
 void assign_scalar_channel(MaterialChannel& channel, std::size_t slotIndex, float value)
@@ -403,6 +413,10 @@ void assign_scalar_channel(MaterialChannel& channel, std::size_t slotIndex, floa
         set_inline_scalar(channel, std::max(1.0e-3f, value));
     }
     else if (slotIndex == 7u)
+    {
+        set_inline_scalar(channel, std::max(0.f, value));
+    }
+    else if (slotIndex >= 9u && slotIndex <= 11u)
     {
         set_inline_scalar(channel, std::max(0.f, value));
     }
@@ -448,9 +462,14 @@ void assign_component_entry(std::string_view line, MaterialEntry& entry, const s
         &entry.ior,
         &entry.subsurface,
         &entry.emission,
+        &entry.diffuseRoughness,
+        &entry.scatterRadiusR,
+        &entry.scatterRadiusG,
+        &entry.scatterRadiusB,
+        &entry.specular,
     };
 
-    for (std::size_t slot = 0; slot < 7u && index < comps.size(); ++slot, ++index)
+    for (std::size_t slot = 0; slot < 11u && index < comps.size(); ++slot, ++index)
     {
         const ParsedComponent& component = comps[index];
         if (component.isTexture)
@@ -466,11 +485,11 @@ void assign_component_entry(std::string_view line, MaterialEntry& entry, const s
 
 void validate_component_count(std::string_view line, const std::vector<ParsedComponent>& comps)
 {
-    if (comps.empty() || comps.size() > 10u)
+    if (comps.empty() || comps.size() > 15u)
     {
         material_parse_error(
             line,
-            "material requires 1 to 10 components "
+            "material requires 1 to 15 components "
             "(albedo texture or r,g,b, then optional channel values)");
     }
 
@@ -480,8 +499,10 @@ void validate_component_count(std::string_view line, const std::vector<ParsedCom
         {
             material_parse_error(
                 line,
-                "material requires 3 to 10 scalar components "
-                "(r, g, b, [roughness], [metallic], [transmission], [thin], [ior], [subsurface], [emission])");
+                "material requires 3 to 15 scalar components "
+                "(r, g, b, [roughness], [metallic], [transmission], [thin], [ior], "
+                "[subsurface], [emission], [diffuseRoughness], [scatterRadiusR], "
+                "[scatterRadiusG], [scatterRadiusB], [specular])");
         }
         return;
     }
@@ -569,7 +590,8 @@ bool try_parse_material_line(std::string_view trimmed_line, std::vector<Material
         material_parse_error(
             trimmed_line,
             "material declaration expected '{' "
-            "(r, g, b, [roughness], [metallic], [transmission], [thin], [ior], [subsurface], [emission])");
+            "(r, g, b, [roughness], [metallic], [transmission], [thin], [ior], [subsurface], "
+            "[emission], [diffuseRoughness], [scatterRadiusR], [scatterRadiusG], [scatterRadiusB], [specular])");
     }
 
     skip_ws(trimmed_line, pos);

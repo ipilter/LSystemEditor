@@ -1,6 +1,8 @@
 #pragma once
 
 #include "Brdf/BrdfDispatch.h"
+#include "Brdf/BrdfDebug.h"
+#include "Brdf/SubsurfaceCore.h"
 #include "Geometry/MathCore.h"
 #include "MeshAccel/MeshAccelIntersectCore.h"
 #include "MeshAccel/MeshAccelTypes.h"
@@ -105,6 +107,102 @@ PATH_INTEGRATOR_RAND_FN Vec3 pathIntegratorRandEvaluateEnvironmentNee(
     return vecMul3(bsdf, vecScale3(lightRadiance, scale));
 }
 
+PATH_INTEGRATOR_RAND_FN Vec3 pathIntegratorRandEvaluateEmissiveNee(
+    Vec3 position,
+    Vec3 normal,
+    Vec3 wo,
+    const MaterialGpu& material,
+    float etaMedium,
+    float wavelengthNm,
+    const MeshAccelSceneGpu* scene,
+    curandState* rng)
+{
+    if (scene == nullptr || scene->emissiveTriangleCount == 0) {
+        return vecMake3(0.0f, 0.0f, 0.0f);
+    }
+
+    float uTri = 0.0f;
+    float u1 = 0.0f;
+    float u2 = 0.0f;
+    rand02(rng, uTri, u1);
+    u2 = rand01(rng);
+
+    Vec3 lightPosition{};
+    Vec3 lightNormal{};
+    Vec3 lightRadiance{};
+    float areaPdf = 0.0f;
+    if (!lightSampleEmissiveTriangle(scene, uTri, u1, u2, lightPosition, lightNormal, lightRadiance, areaPdf)) {
+        return vecMake3(0.0f, 0.0f, 0.0f);
+    }
+
+    const Vec3 toLight = vecSub3(lightPosition, position);
+    const float dist2 = vecDot3(toLight, toLight);
+    if (dist2 <= PathIntegratorRandDetail::kMinPdf) {
+        return vecMake3(0.0f, 0.0f, 0.0f);
+    }
+
+    const Vec3 wi = vecNormalize3(toLight);
+    const float cosTheta = vecMax2(0.0f, vecDot3(normal, wi));
+    const float cosLight = vecMax2(0.0f, vecDot3(lightNormal, vecScale3(wi, -1.0f)));
+    if (cosTheta <= 0.0f || cosLight <= 0.0f) {
+        return vecMake3(0.0f, 0.0f, 0.0f);
+    }
+
+    if (lightIsOccludedFrom(position, wi, scene)) {
+        return vecMake3(0.0f, 0.0f, 0.0f);
+    }
+
+    const float lightPdf = areaPdf * dist2 / cosLight;
+    if (lightPdf <= PathIntegratorRandDetail::kMinPdf) {
+        return vecMake3(0.0f, 0.0f, 0.0f);
+    }
+
+    const BrdfContext ctx{normal, wo, material, etaMedium, wavelengthNm};
+    const Vec3 bsdf = brdfEval(ctx, wi);
+    const float bsdfPdfValue = brdfPdf(ctx, wi);
+    const float misWeight = misBalanceWeight(lightPdf, bsdfPdfValue);
+    const float scale = misWeight * cosTheta / lightPdf;
+
+    return vecMul3(bsdf, vecScale3(lightRadiance, scale));
+}
+
+PATH_INTEGRATOR_RAND_FN Vec3 pathIntegratorRandApplySubsurfaceTierB(
+    Vec3 throughput,
+    const MaterialGpu& material,
+    Vec3 normal,
+    const BrdfSampleResult& sample,
+    curandState* rng)
+{
+    if (!sample.subsurfaceScatter || sample.subsurfaceInternalSteps <= 0) {
+        return throughput;
+    }
+
+    const float maxRadius = brdfMaxScatterRadius(material);
+    if (maxRadius <= SubsurfaceDetail::kMinRadius) {
+        return throughput;
+    }
+
+    const Vec3 albedo = vecMake3(material.r, material.g, material.b);
+    for (int step = 0; step < sample.subsurfaceInternalSteps; ++step) {
+        float uStep1 = 0.0f;
+        float uStep2 = 0.0f;
+        rand02(rng, uStep1, uStep2);
+        const float uStep3 = rand01(rng);
+        (void)subsurfaceInternalStepDirection(normal, uStep1, uStep2);
+        const float meanFreePath = maxRadius * (-logf(vecMax2(1.0e-8f, uStep3)));
+        const float scatterSurvival = expf(-meanFreePath / maxRadius);
+        throughput = vecMul3(throughput, vecScale3(albedo, scatterSurvival));
+    }
+
+    const float exitDistance = vecLength3(sample.subsurfaceExitOffset);
+    if (exitDistance > 0.0f) {
+        const float exitFactor = expf(-exitDistance / maxRadius);
+        throughput = vecScale3(throughput, exitFactor);
+    }
+
+    return throughput;
+}
+
 PATH_INTEGRATOR_RAND_FN Vec3 tracePathRandFromHit(
     const MeshHit& hit,
     Vec3 rayOrigin,
@@ -120,6 +218,7 @@ PATH_INTEGRATOR_RAND_FN Vec3 tracePathRandFromHit(
 
     int maxDepth = PathIntegratorRandDetail::kDefaultMaxPathDepth;
     int rrMinDepth = PathIntegratorRandDetail::kRussianRouletteStartDepth;
+    int brdfDebugFlags = BrdfDebugFlags::kNone;
     if (params != nullptr) {
         if (params->maxPathDepth > 0) {
             maxDepth = params->maxPathDepth;
@@ -129,6 +228,7 @@ PATH_INTEGRATOR_RAND_FN Vec3 tracePathRandFromHit(
         if (params->russianRouletteMinDepth >= 0) {
             rrMinDepth = params->russianRouletteMinDepth;
         }
+        brdfDebugFlags = params->brdfDebugFlags;
     }
 
     Vec3 radiance = vecMake3(0.0f, 0.0f, 0.0f);
@@ -163,7 +263,27 @@ PATH_INTEGRATOR_RAND_FN Vec3 tracePathRandFromHit(
                     params,
                     rng)));
 
-        const BrdfContext ctx{normal, wo, material, etaMedium, PathIntegratorRandDetail::kDefaultWavelengthNm};
+        radiance = vecAdd3(
+            radiance,
+            vecMul3(
+                throughput,
+                pathIntegratorRandEvaluateEmissiveNee(
+                    position,
+                    normal,
+                    wo,
+                    material,
+                    etaMedium,
+                    PathIntegratorRandDetail::kDefaultWavelengthNm,
+                    scene,
+                    rng)));
+
+        const BrdfContext ctx{
+            normal,
+            wo,
+            material,
+            etaMedium,
+            PathIntegratorRandDetail::kDefaultWavelengthNm,
+            brdfDebugFlags};
 
         float u1 = 0.0f;
         float u2 = 0.0f;
@@ -175,6 +295,15 @@ PATH_INTEGRATOR_RAND_FN Vec3 tracePathRandFromHit(
 
         const Vec3 bsdfValue = brdfEval(ctx, sample.direction);
         throughput = brdfApplyThroughput(throughput, ctx, sample, bsdfValue);
+        throughput = pathIntegratorRandApplySubsurfaceTierB(throughput, material, normal, sample, rng);
+
+        if ((brdfDebugFlags & BrdfDebugFlags::kTintGlassPaths) != 0) {
+            if (sample.transmitted) {
+                throughput = vecMul3(throughput, vecMake3(0.2f, 1.0f, 0.2f));
+            } else {
+                throughput = vecMul3(throughput, vecMake3(1.0f, 0.2f, 0.2f));
+            }
+        }
 
         const float throughputLuminance = brdfThroughputLuminance(throughput);
         if (!isfinite(throughputLuminance) || throughputLuminance <= 0.0f || throughputLuminance > 1.0e8f) {
@@ -197,11 +326,8 @@ PATH_INTEGRATOR_RAND_FN Vec3 tracePathRandFromHit(
             PathIntegratorRandDetail::kShadowBias,
             PathIntegratorRandDetail::kRelativeShadowBias * currentHit.t);
 
-        if (sample.transmitted) {
-            currentOrigin = vecSub3(position, vecScale3(normal, continuationBias));
-        } else {
-            currentOrigin = vecAdd3(position, vecScale3(normal, continuationBias));
-        }
+        const float biasSign = vecDot3(normal, sample.direction) >= 0.0f ? 1.0f : -1.0f;
+        currentOrigin = vecAdd3(position, vecScale3(normal, biasSign * continuationBias));
         currentDir = sample.direction;
         currentHit = meshAccelTraceRay(
             currentOrigin,

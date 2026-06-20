@@ -23,5 +23,7 @@ struct RenderParamsGpu
     int minSamples = 16;
     int maxSamplesPerPixel = 1024;
     int debugOverlayMode = 0;
+    /** @brief BrdfDebugFlags bit mask for glass/transmission debugging. */
+    int brdfDebugFlags = 0;
     float relativeErrorThreshold = 0.02f;
 };

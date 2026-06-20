@@ -2,18 +2,20 @@
 
 #include "AppSettings.h"
 #include "PhysicalCamera.h"
+#include "SceneUnits.h"
 
 #include <glm/glm.hpp>
 
 #include <cmath>
 
+// Linear thrust is mm/s²; linear drag is velocity damping (1/s), matching angular drag.
 class CameraDynamicsController
 {
 public:
     static constexpr float kMass = 1.0f;
     static constexpr float kInertia = 1.0f;
-    static constexpr float kVelocityEpsilon = 1.0e-3f;
-    static constexpr float kPositionEpsilon = 1.0e-4f;
+    static constexpr float kVelocityEpsilon = 1.0f;
+    static constexpr float kPositionEpsilon = 0.5f;
     static constexpr float kAngleEpsilon = 1.0e-3f;
 
     void applySettings(const CameraDynamicsSettings& settings)
@@ -80,8 +82,8 @@ public:
     }
 
 private:
-    float m_thrustLinear = 2.0f;
-    float m_dragLinear = 4.0f;
+    float m_thrustLinear = SceneUnits::kDefaultLinearThrustMmPerSec2;
+    float m_dragLinear = SceneUnits::kDefaultLinearDragPerSec;
     float m_thrustAngular = 2.0f;
     float m_dragAngular = 5.0f;
     glm::vec3 m_linearVelocity{0.0f};

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "SceneUnits.h"
+
 #include <QByteArray>
 #include <QColor>
 #include <QHash>
@@ -19,8 +21,8 @@ inline constexpr const char* kPhysicalCamera = "physicalCamera";
 
 struct CameraDynamicsSettings
 {
-    float thrustLinear = 2.0f;
-    float dragLinear = 4.0f;
+    float thrustLinear = SceneUnits::kDefaultLinearThrustMmPerSec2;
+    float dragLinear = SceneUnits::kDefaultLinearDragPerSec;
     float thrustAngular = 2.0f;
     float dragAngular = 5.0f;
     float mouseSensitivity = 0.15f;
@@ -94,6 +96,9 @@ public:
     float fStop() const;
     void setFStop(float value);
 
+    float focalLengthMm() const;
+    void setFocalLengthMm(float value);
+
     float shutterSpeedSeconds() const;
     void setShutterSpeedSeconds(float value);
 
@@ -142,6 +147,7 @@ private:
     static int clampRussianRouletteMinDepth(int value);
     static float clampCreaseAngleDeg(float value);
     static float clampFStop(float value);
+    static float clampFocalLengthMm(float value);
     static float clampShutterSpeedSeconds(float value);
     static float clampIso(float value);
     static float clampEnvironmentIntensity(float value);
@@ -167,6 +173,7 @@ private:
     int m_logFontSize = 9;
     float m_environmentIntensity = 1.0f;
     float m_fStop = 0.0f;
+    float m_focalLengthMm = 0.0f;
     float m_shutterSpeedSeconds = 0.0f;
     float m_iso = 0.0f;
     QByteArray m_windowGeometry;

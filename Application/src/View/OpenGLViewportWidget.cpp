@@ -4,6 +4,7 @@
 #include "AppSettings.h"
 #include "MeshAccel/MeshSceneContent.h"
 #include "SceneModel.h"
+#include "SceneUnits.h"
 
 #include <QFocusEvent>
 #include <QKeyEvent>
@@ -292,6 +293,15 @@ void OpenGLViewportWidget::setSceneModel(SceneModel* model)
         refreshDisplayImage();
     });
 
+    connect(m_model, &SceneModel::brdfDebugFlagsChanged, this, [this](int flags) {
+        m_pathTracer.setBrdfDebugFlags(flags);
+        refreshDisplayImage();
+    });
+
+    connect(m_model, &SceneModel::sceneOverlayVisibleChanged, this, [this](bool) {
+        update();
+    });
+
     connect(m_model, &SceneModel::minSamplesChanged, this, [this](int min) {
         m_pathTracer.setMinSamples(min);
     });
@@ -316,6 +326,8 @@ void OpenGLViewportWidget::setSceneModel(SceneModel* model)
             return;
         }
         rebuildBoundsOverlay();
+        applyFocusFromModel();
+        syncCameraToPathTracer();
         restartRender(false);
         doneCurrent();
         update();
@@ -349,11 +361,44 @@ void OpenGLViewportWidget::setEnvironmentIntensity(float intensity)
 
 void OpenGLViewportWidget::setPhysicalCamera(float fStop, float shutterSpeedSeconds, float iso)
 {
+    m_camera.fStop = PhysicalCamera::clampFStop(fStop);
+    m_camera.shutterSpeedSeconds = PhysicalCamera::clampShutterSpeedSeconds(shutterSpeedSeconds);
+    m_camera.iso = PhysicalCamera::clampIso(iso);
     m_pathTracer.setPhysicalCamera(fStop, shutterSpeedSeconds, iso);
+    syncCameraToPathTracer();
     if (m_glInitialized && m_textureAllocated) {
         m_hasNewFrame.store(true);
         update();
     }
+}
+
+void OpenGLViewportWidget::setFocalLengthMm(float focalLengthMm)
+{
+    const float clamped = PhysicalCamera::clampFocalLengthMm(focalLengthMm);
+    if (std::fabs(m_camera.focalLengthMm() - clamped) < 1.0e-4f) {
+        return;
+    }
+
+    m_camera.setFocalLengthMm(clamped);
+    syncCameraToPathTracer();
+    resetAccumulationForCamera();
+}
+
+void OpenGLViewportWidget::setFocusDistanceMm(float distanceMm)
+{
+    if (m_model == nullptr || m_model->focusPointPinned()) {
+        return;
+    }
+
+    const float clamped = std::max(PhysicalCamera::kMinFocalLengthMm, std::min(distanceMm, 500'000.0f));
+    if (std::fabs(m_camera.computeFocusDistance() - clamped) < 1.0e-3f) {
+        return;
+    }
+
+    m_camera.setFocusDistance(clamped);
+    syncCameraToPathTracer();
+    resetAccumulationForCamera();
+    update();
 }
 
 PhysicalCamera OpenGLViewportWidget::suggestedPhysicalCamera() const
@@ -403,6 +448,7 @@ void OpenGLViewportWidget::initializeGL()
 
     m_boundsOverlay.initialize(this);
     m_originGizmo.initialize(this);
+    m_focusGizmo.initialize(this);
     m_regionOverlay.initialize(this);
     m_glInitialized = true;
 
@@ -579,7 +625,7 @@ void OpenGLViewportWidget::refreshDisplayImage()
 
 void OpenGLViewportWidget::drawSceneOverlays()
 {
-    if (m_model == nullptr || !m_quadView.isDefault()) {
+    if (m_model == nullptr || !m_model->sceneOverlayVisible()) {
         return;
     }
 
@@ -603,16 +649,36 @@ void OpenGLViewportWidget::drawSceneOverlays()
     glClear(GL_DEPTH_BUFFER_BIT);
 
     const CameraGpu sampleCamera = m_pathTracer.lastSampleCamera();
-    const glm::mat4 viewProj =
+    const glm::mat4 sceneMvp =
         PhysicalCamera::projMatrixFromGpu(sampleCamera, renderW, renderH)
         * PhysicalCamera::viewMatrixFromGpu(sampleCamera);
+    const glm::mat4 quadViewProj = m_quadView.viewProjMatrix(1.0f, 1.0f);
 
-    m_originGizmo.draw(this, viewProj);
+    m_originGizmo.draw(this, sceneMvp, quadViewProj);
+
+    if (m_model->focusPointPinned()) {
+        const glm::quat orientation(
+            sampleCamera.orientation.x,
+            sampleCamera.orientation.y,
+            sampleCamera.orientation.z,
+            sampleCamera.orientation.w);
+        const glm::vec3 cameraRight = orientation * glm::vec3(1.0f, 0.0f, 0.0f);
+        const glm::vec3 cameraUp = orientation * glm::vec3(0.0f, 1.0f, 0.0f);
+        m_focusGizmo.draw(
+            this,
+            sceneMvp,
+            quadViewProj,
+            m_model->focusPoint(),
+            cameraRight,
+            cameraUp,
+            SceneUnits::kFocusGizmoSizeMm);
+    }
 
     if (m_model->boundsOverlayMode() != RenderViewOverlayMode::Render) {
         m_boundsOverlay.draw(
             this,
-            viewProj,
+            sceneMvp,
+            quadViewProj,
             m_model->boundsOverlayMode(),
             m_model->accelBvhColor());
     }
@@ -652,6 +718,12 @@ void OpenGLViewportWidget::mousePressEvent(QMouseEvent* event)
         if (imagePixel.has_value()) {
             finalizeRegionDefinition(*imagePixel);
         }
+        event->accept();
+        return;
+    }
+
+    if (event->button() == Qt::LeftButton && (event->modifiers() & Qt::ShiftModifier) && !m_regionDefining) {
+        trySetFocusFromClick(event->pos());
         event->accept();
         return;
     }
@@ -831,6 +903,7 @@ void OpenGLViewportWidget::updateCameraDynamics()
     m_cameraDynamics.setAngularInput(angularInput);
 
     if (m_cameraDynamics.step(m_camera, dt)) {
+        refreshPinnedFocusFromModel();
         syncCameraLive();
         m_cameraResetThrottle.schedule();
         m_cameraMotionStopDebounce.schedule();
@@ -985,6 +1058,67 @@ bool OpenGLViewportWidget::exportSceneWavefrontObj(const QString& objFilePath, Q
 void OpenGLViewportWidget::syncCameraToPathTracer()
 {
     m_pathTracer.setCamera(m_camera.toGpu());
+}
+
+void OpenGLViewportWidget::trySetFocusFromClick(const QPoint& widgetPos)
+{
+    if (m_model == nullptr) {
+        return;
+    }
+
+    const auto imagePixel = widgetPosToImagePixel(widgetPos);
+    if (!imagePixel.has_value()) {
+        return;
+    }
+
+    const int renderW = m_model->renderSize().width();
+    const int renderH = m_model->renderSize().height();
+    if (renderW <= 0 || renderH <= 0) {
+        return;
+    }
+
+    const float u = (static_cast<float>(imagePixel->x()) + 0.5f) / static_cast<float>(renderW);
+    const float v = (static_cast<float>(imagePixel->y()) + 0.5f) / static_cast<float>(renderH);
+
+    glm::vec3 ro{};
+    glm::vec3 rd{};
+    m_camera.primaryRay(u, v, ro, rd);
+
+    glm::vec3 hit{};
+    if (!m_pathTracer.pickSurface(ro, rd, &hit)) {
+        return;
+    }
+
+    m_camera.setFocusPoint(hit);
+    m_model->pinFocusPoint(hit);
+    m_model->syncFocusDistanceMm(m_camera.computeFocusDistance());
+    syncCameraToPathTracer();
+    resetAccumulationForCamera();
+    update();
+}
+
+void OpenGLViewportWidget::applyFocusFromModel()
+{
+    if (m_model == nullptr) {
+        return;
+    }
+
+    if (m_model->focusPointPinned()) {
+        m_camera.setFocusPoint(m_model->focusPoint());
+        m_model->syncFocusDistanceMm(m_camera.computeFocusDistance());
+    } else {
+        m_camera.setFocusDistance(m_model->focusDistanceMm());
+    }
+}
+
+void OpenGLViewportWidget::refreshPinnedFocusFromModel()
+{
+    if (m_model == nullptr || !m_model->focusPointPinned()) {
+        return;
+    }
+
+    m_camera.setFocusPoint(m_model->focusPoint());
+    m_model->syncFocusDistanceMm(m_camera.computeFocusDistance());
 }
 
 void OpenGLViewportWidget::syncCameraLive()
@@ -1171,6 +1305,7 @@ void OpenGLViewportWidget::recreateGpuBuffers()
     m_pathTracer.setMinSamples(m_model->minSamples());
     m_pathTracer.setRelativeErrorThreshold(m_model->relativeErrorThreshold());
     m_pathTracer.setDebugOverlayMode(static_cast<int>(m_model->boundsOverlayMode()));
+    m_pathTracer.setBrdfDebugFlags(m_model->brdfDebugFlags());
     m_pathTracer.setPreviewStepsPerLevel(m_model->previewStepsPerLevel());
     m_pathTracer.setRussianRouletteMinDepth(m_model->russianRouletteMinDepth());
     m_pathTracer.setEnvironmentHdrPath(m_model->environmentHdrPath());
@@ -1188,6 +1323,11 @@ void OpenGLViewportWidget::recreateGpuBuffers()
     glBindTexture(GL_TEXTURE_2D, 0);
 
     m_camera.setAspect(w, h);
+    m_camera.setFocalLengthMm(m_model->focalLengthMm());
+    m_camera.fStop = PhysicalCamera::clampFStop(m_model->fStop());
+    m_camera.shutterSpeedSeconds = PhysicalCamera::clampShutterSpeedSeconds(m_model->shutterSpeedSeconds());
+    m_camera.iso = PhysicalCamera::clampIso(m_model->iso());
+    applyFocusFromModel();
     syncCameraToPathTracer();
 
     if (!m_renderPaused) {
@@ -1232,6 +1372,7 @@ void OpenGLViewportWidget::releaseGlResources()
     m_pathTracer.releaseOutputSurfaces();
     m_boundsOverlay.release(this);
     m_originGizmo.release(this);
+    m_focusGizmo.release(this);
     m_regionOverlay.release(this);
 
     if (m_texture != 0) {

@@ -102,6 +102,31 @@ TEST(LSystemMaterialParse, parses_subsurface_params)
     EXPECT_NEAR(materialChannelScalar(e->roughness, 0.5f), 0.9f, 1e-5f);
 }
 
+TEST(LSystemMaterialParse, parses_extended_v3_params)
+{
+    std::vector<MaterialDefinition> definitions;
+    ASSERT_TRUE(try_parse_material_line(
+        "Mat(Wax) = {0.9, 0.85, 0.7, 0.9, 0, 0, 0, 1.5, 0.8, 0, 0.7, 0.05, 0.04, 0.02, 1.0}",
+        definitions));
+    const MaterialEntry* e = find_material(definitions, "Wax");
+    ASSERT_NE(e, nullptr);
+    EXPECT_NEAR(materialChannelScalar(e->subsurface), 0.8f, 1e-5f);
+    EXPECT_NEAR(materialChannelScalar(e->diffuseRoughness), 0.7f, 1e-5f);
+    EXPECT_NEAR(materialChannelScalar(e->scatterRadiusR), 0.05f, 1e-5f);
+    EXPECT_NEAR(materialChannelScalar(e->scatterRadiusG), 0.04f, 1e-5f);
+    EXPECT_NEAR(materialChannelScalar(e->scatterRadiusB), 0.02f, 1e-5f);
+    EXPECT_NEAR(materialChannelScalar(e->specular, 1.f), 1.f, 1e-5f);
+}
+
+TEST(LSystemMaterialParse, default_diffuse_roughness_matches_roughness)
+{
+    std::vector<MaterialDefinition> definitions;
+    ASSERT_TRUE(try_parse_material_line("Mat(0) = {0.5, 0.5, 0.5, 0.3}", definitions));
+    const MaterialEntry* e = find_material(definitions, "0");
+    ASSERT_NE(e, nullptr);
+    EXPECT_NEAR(materialChannelScalar(e->diffuseRoughness, -1.f), -1.f, 1e-5f);
+}
+
 TEST(LSystemMaterialParse, rejects_typed_syntax)
 {
     std::vector<MaterialDefinition> definitions;
@@ -136,7 +161,7 @@ TEST(LSystemMaterialParse, rejects_wrong_arity)
         std::runtime_error);
     EXPECT_THROW(
         {
-            const bool ignored = try_parse_material_line("Mat(1) = {1,1,1,1,1,1,1,1,1,1,1}", definitions);
+            const bool ignored = try_parse_material_line("Mat(1) = {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1}", definitions);
             (void)ignored;
         },
         std::runtime_error);

@@ -16,6 +16,7 @@ class ZoomablePlainTextEdit;
 class QPushButton;
 class QSpinBox;
 class QCheckBox;
+class QTabWidget;
 
 enum class RenderAccumulationState;
 
@@ -34,6 +35,8 @@ public:
     QDoubleSpinBox* environmentIntensitySpinBox() const;
     void setEnvironmentHdrPath(const QString& path);
     QDoubleSpinBox* fStopSpinBox() const;
+    QDoubleSpinBox* focalLengthSpinBox() const;
+    QDoubleSpinBox* focusDistanceSpinBox() const;
     QComboBox* shutterSpeedComboBox() const;
     QComboBox* isoComboBox() const;
     QLabel* exposureValueLabel() const;
@@ -45,7 +48,9 @@ public:
     QDoubleSpinBox* relativeErrorThresholdSpinBox() const;
     QSpinBox* previewStepsSpinBox() const;
     QSpinBox* russianRouletteMinDepthSpinBox() const;
-    QComboBox* boundsOverlayComboBox() const;
+    QComboBox* renderViewOverlayComboBox() const;
+    QComboBox* brdfDebugComboBox() const;
+    QCheckBox* sceneOverlayCheckBox() const;
     QCheckBox* regionRenderCheckBox() const;
     QSpinBox* regionBottomLeftXSpinBox() const;
     QSpinBox* regionBottomLeftYSpinBox() const;
@@ -84,6 +89,8 @@ private:
     QPushButton* m_environmentHdrClearButton = nullptr;
     QDoubleSpinBox* m_environmentIntensitySpinBox = nullptr;
     QDoubleSpinBox* m_fStopSpinBox = nullptr;
+    QDoubleSpinBox* m_focalLengthSpinBox = nullptr;
+    QDoubleSpinBox* m_focusDistanceSpinBox = nullptr;
     QComboBox* m_shutterSpeedComboBox = nullptr;
     QComboBox* m_isoComboBox = nullptr;
     QLabel* m_exposureValueLabel = nullptr;
@@ -94,7 +101,9 @@ private:
     QDoubleSpinBox* m_relativeErrorThresholdSpinBox = nullptr;
     QSpinBox* m_previewStepsSpinBox = nullptr;
     QSpinBox* m_russianRouletteMinDepthSpinBox = nullptr;
-    QComboBox* m_boundsOverlayComboBox = nullptr;
+    QComboBox* m_renderViewOverlayComboBox = nullptr;
+    QComboBox* m_brdfDebugComboBox = nullptr;
+    QCheckBox* m_sceneOverlayCheckBox = nullptr;
     QCheckBox* m_regionRenderCheckBox = nullptr;
     QSpinBox* m_regionBottomLeftXSpinBox = nullptr;
     QSpinBox* m_regionBottomLeftYSpinBox = nullptr;
@@ -113,5 +122,6 @@ private:
     ZoomablePlainTextEdit* m_lsystemEdit = nullptr;
     QSpinBox* m_lsystemIterationsSpinBox = nullptr;
     ZoomablePlainTextEdit* m_logView = nullptr;
+    QTabWidget* m_controlTabWidget = nullptr;
     QSize m_pendingViewportSize;
 };

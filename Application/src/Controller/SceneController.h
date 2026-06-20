@@ -36,6 +36,8 @@ private:
     void onRussianRouletteMinDepthSpinBoxChanged();
     void syncRussianRouletteMinDepthSpinBox();
     void onBoundsOverlayComboBoxChanged();
+    void onBrdfDebugComboBoxChanged();
+    void onSceneOverlayCheckBoxChanged();
     void onStartButtonClicked();
     void onStopButtonClicked();
     void onSettingsButtonClicked();
@@ -54,6 +56,7 @@ private:
     void applySuggestedPhysicalCameraFromHdr();
     void syncEnvironmentHdrPath();
     void syncPhysicalCameraUi();
+    void syncFocusDistanceSpinBox();
     void updateExposureValueLabel();
     void syncColorButtonStyle();
     void syncRenderSpinBoxes();
@@ -62,6 +65,8 @@ private:
     void syncRelativeErrorThresholdSpinBox();
     void syncPreviewStepsSpinBox();
     void syncBoundsOverlayComboBox();
+    void syncBrdfDebugComboBox();
+    void syncSceneOverlayCheckBox();
     void onRegionRenderCheckBoxChanged();
     void onRegionRectSpinBoxesChanged();
     void onDefineRegionButtonToggled(bool checked);

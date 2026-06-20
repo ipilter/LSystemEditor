@@ -43,9 +43,12 @@ public:
     static constexpr float kMinShutterSpeedSeconds = 1.0f / 8000.0f;
     static constexpr float kMaxShutterSpeedSeconds = 120.0f;
     static constexpr float kDisplayMiddleGray = 0.18f;
-    static constexpr float kDefaultFovYRad = 1.04719755f;
-    static constexpr float kDefaultNearPlane = 0.1f;
-    static constexpr float kDefaultFarPlane = 1000.0f;
+    static constexpr float kDefaultFarPlane = 1'000'000.0f;
+    static constexpr float kDefaultFocusDistance = 1000.0f;
+    static constexpr float kSensorHeightMm = 23.9f;
+    static constexpr float kMinFocalLengthMm = 14.0f;
+    static constexpr float kMaxFocalLengthMm = 1000.0f;
+    static constexpr float kDefaultFocalLengthMm = 24.0f;
 
     PhysicalCamera();
 
@@ -69,7 +72,24 @@ public:
 
     glm::vec3 position() const { return m_position; }
 
+    glm::vec3 focusPoint() const { return m_focusPoint; }
+    bool focusValid() const { return m_focusValid; }
+    float focusDistance() const { return m_focusDistance; }
+    float focalLengthMm() const { return m_focalLengthMm; }
+
+    void setFocusPoint(const glm::vec3& point);
+    void setFocusDistance(float distance);
+    void clearFocusPoint();
+    void setDefaultFocusPoint();
+    void refreshFocusDistanceFromPoint();
+
+    float computeFocusDistance() const;
+    float apertureRadius() const;
+
+    void primaryRay(float u, float v, glm::vec3& ro, glm::vec3& rd) const;
+
     void setAspect(int imageW, int imageH);
+    void setFocalLengthMm(float focalLengthMm);
     CameraGpu toGpu() const;
     void copyGeometryFrom(const PhysicalCamera& other);
     void applyGpuGeometry(const CameraGpu& camera);
@@ -77,6 +97,10 @@ public:
     static glm::mat4 viewMatrixFromGpu(const CameraGpu& camera);
     static glm::mat4 projMatrixFromGpu(const CameraGpu& camera, int imageW, int imageH);
     static CameraGpu defaultGpu();
+
+    static float clampFocalLengthMm(float value);
+    static float focalLengthMmToFovY(float focalLengthMm);
+    static float fovYToFocalLengthMm(float fovY);
 
     float exposureMultiplier() const;
     static float exposureMultiplier(float fStop, float shutterSec, float iso);
@@ -98,6 +122,7 @@ public:
 
 private:
     void rebuildOrientation();
+    void updateOpticsFromFocalLengthMm();
 
     glm::vec3 m_position;
     glm::quat m_orientation;
@@ -108,4 +133,8 @@ private:
     float m_yawRad;
     float m_pitchRad;
     float m_rollRad;
+    float m_focalLengthMm = kDefaultFocalLengthMm;
+    glm::vec3 m_focusPoint{};
+    float m_focusDistance = kDefaultFocusDistance;
+    bool m_focusValid = false;
 };

@@ -17,6 +17,8 @@
 
 #include <QString>
 
+#include <glm/glm.hpp>
+
 namespace PathTracerDetail {
 struct PathTracerImpl;
 }
@@ -80,6 +82,10 @@ public:
     void setDebugOverlayMode(int mode);
     int debugOverlayMode() const;
 
+    /** @brief BrdfDebugFlags bit mask for glass/transmission path debugging. */
+    void setBrdfDebugFlags(int flags);
+    int brdfDebugFlags() const;
+
     /// 0 = disabled (no preview passes). N > 0 runs N dense low-res preview passes (1/2^N .. 1/2)
     /// with shallow path tracing before full-resolution accumulation.
     void setPreviewStepsPerLevel(int steps);
@@ -99,6 +105,11 @@ public:
     void setClearColor(const QColor& color);
 
     void setPhysicalCamera(float fStop, float shutterSpeedSeconds, float iso);
+
+    void setFocusPoint(const glm::vec3& worldPoint);
+    void clearFocusPoint();
+    bool pickSurface(const glm::vec3& ro, const glm::vec3& rd, glm::vec3* hitPoint) const;
+
     PhysicalCamera suggestedPhysicalCamera() const;
 
     bool computeSuggestedCameraFromAccumulator(PhysicalCamera* out) const;

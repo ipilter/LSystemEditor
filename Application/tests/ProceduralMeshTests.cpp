@@ -187,8 +187,8 @@ void expectSingleFCylinderOutwardNormals()
     bool foundSmoothSideCornerNormals = false;
 
     constexpr float normalTolerance = 0.15f;
-    constexpr float capCentroidTolerance = 0.06f;
-    constexpr float sideCentroidTolerance = 0.04f;
+    constexpr float capCentroidTolerance = 60.0f;
+    constexpr float sideCentroidTolerance = 40.0f;
     constexpr float radialDotMin = 0.85f;
     constexpr float cornerNormalTolerance = 0.05f;
 
@@ -196,7 +196,7 @@ void expectSingleFCylinderOutwardNormals()
         const Vec3 centroid = triangleCentroid(tri);
         const Vec3 normal = centroidInterpolatedNormal(tri);
 
-        if (centroid.z > -capCentroidTolerance && std::fabs(centroid.x) < 0.15f && std::fabs(centroid.y) < 0.15f) {
+        if (centroid.z > -capCentroidTolerance && std::fabs(centroid.x) < 150.0f && std::fabs(centroid.y) < 150.0f) {
             if (normalNear(normal, vecMake3(0.0f, 0.0f, 1.0f), normalTolerance)) {
                 foundStartCap = true;
             }
@@ -205,8 +205,8 @@ void expectSingleFCylinderOutwardNormals()
             }
         }
 
-        if (std::fabs(centroid.z + 0.5f) < capCentroidTolerance && std::fabs(centroid.x) < 0.15f
-            && std::fabs(centroid.y) < 0.15f) {
+        if (std::fabs(centroid.z + 500.0f) < capCentroidTolerance && std::fabs(centroid.x) < 150.0f
+            && std::fabs(centroid.y) < 150.0f) {
             if (normalNear(normal, vecMake3(0.0f, 0.0f, -1.0f), normalTolerance)) {
                 foundEndCap = true;
             }
@@ -216,7 +216,7 @@ void expectSingleFCylinderOutwardNormals()
         }
 
         const Vec3 radial = horizontalRadialNormal(centroid);
-        if (vecLength3(radial) > 0.5f && centroid.z <= 0.0f && centroid.z >= -0.5f) {
+        if (vecLength3(radial) > 0.5f && centroid.z <= 0.0f && centroid.z >= -500.0f) {
             if (vecDot3(normal, radial) > radialDotMin) {
                 foundSmoothSide = true;
             }
@@ -246,8 +246,8 @@ void expectSphereRadialNormals(const MeshAccelScene& scene, const char* labelPre
 {
     constexpr float radialDotMin = 0.85f;
     constexpr float axisNormalTolerance = 0.2f;
-    constexpr float axisCentroidMin = 0.04f;
-    constexpr float axisCrossMax = 0.03f;
+    constexpr float axisCentroidMin = 40.0f;
+    constexpr float axisCrossMax = 30.0f;
 
     bool foundPosX = false;
     bool foundNegX = false;
@@ -332,8 +332,8 @@ void expectF0SphereOutwardNormals()
 void runProceduralMeshTests()
 {
     TurtleParams params{};
-    params.defaultStepLength = 0.5f;
-    params.defaultRadius = 0.1f;
+    params.defaultStepLength = 500.0f;
+    params.defaultRadius = 100.0f;
 
     {
         const TurtleOutput output = turtleFromDefinition("F\n", params);
@@ -367,34 +367,34 @@ void runProceduralMeshTests()
     {
         HostMesh mesh{};
         expectTrue(
-            ProceduralMeshBuilder::buildHostMesh("F(2, 1, 1)\n", 0, RootTransform{}, mesh),
-            "procedural build succeeds for F(2, 1, 1)");
-        expectTrue(!mesh.triangles.empty(), "F(2, 1, 1) mesh has triangles");
+            ProceduralMeshBuilder::buildHostMesh("F(2, 1000, 1000)\n", 0, RootTransform{}, mesh),
+            "procedural build succeeds for F(2, 1000, 1000)");
+        expectTrue(!mesh.triangles.empty(), "F(2, 1000, 1000) mesh has triangles");
         expectTrue(
             !meshHasInteriorAxisTriangles(
                 mesh,
                 Vec3{0.0f, 0.0f, 0.0f},
-                Vec3{0.0f, 0.0f, -2.0f},
-                1.0f),
-            "F(2, 1, 1) mesh has no interior axis-near rogue triangles");
+                Vec3{0.0f, 0.0f, -2000.0f},
+                1000.0f),
+            "F(2, 1000, 1000) mesh has no interior axis-near rogue triangles");
     }
 
     {
         HostMesh mesh{};
         expectTrue(
-            ProceduralMeshBuilder::buildHostMesh("F(0, 1)\n", 0, RootTransform{}, mesh),
-            "procedural build succeeds for F(0, 1)");
-        expectTrue(!mesh.triangles.empty(), "F(0, 1) mesh has triangles");
-        expectSphereDiameter(mesh, 2.0f, 0.08f, "F(0, 1) mesh sphere diameter");
+            ProceduralMeshBuilder::buildHostMesh("F(0, 1000)\n", 0, RootTransform{}, mesh),
+            "procedural build succeeds for F(0, 1000)");
+        expectTrue(!mesh.triangles.empty(), "F(0, 1000) mesh has triangles");
+        expectSphereDiameter(mesh, 2000.0f, 80.0f, "F(0, 1000) mesh sphere diameter");
     }
 
     {
         HostMesh mesh{};
         expectTrue(
-            ProceduralMeshBuilder::buildHostMesh("F(0, 1, 1)\n", 0, RootTransform{}, mesh),
-            "procedural build succeeds for F(0, 1, 1)");
-        expectTrue(!mesh.triangles.empty(), "F(0, 1, 1) mesh has triangles");
-        expectSphereDiameter(mesh, 2.0f, 0.08f, "F(0, 1, 1) mesh sphere diameter");
+            ProceduralMeshBuilder::buildHostMesh("F(0, 1000, 1000)\n", 0, RootTransform{}, mesh),
+            "procedural build succeeds for F(0, 1000, 1000)");
+        expectTrue(!mesh.triangles.empty(), "F(0, 1000, 1000) mesh has triangles");
+        expectSphereDiameter(mesh, 2000.0f, 80.0f, "F(0, 1000, 1000) mesh sphere diameter");
     }
 
     {
@@ -403,7 +403,7 @@ void runProceduralMeshTests()
             ProceduralMeshBuilder::buildHostMesh("F(0)\n", 0, RootTransform{}, mesh),
             "procedural build succeeds for F(0)");
         expectTrue(!mesh.triangles.empty(), "F(0) mesh has triangles");
-        expectSphereDiameter(mesh, 2.0f * params.defaultRadius, 0.08f, "F(0) mesh uses defaultRadius sphere");
+        expectSphereDiameter(mesh, 2.0f * params.defaultRadius, 80.0f, "F(0) mesh uses defaultRadius sphere");
     }
 
     {
@@ -438,7 +438,7 @@ void runProceduralMeshTests()
         expectEqSize(output.segments.size(), 2, "F f F produces two segments");
         if (output.segments.size() == 2) {
             const Vec3& endPosition = output.segments.back().states.back().position;
-            expectNear(endPosition.z, -1.5f, 1e-5f, "F f F ends after two drawn and one pen-up step");
+            expectNear(endPosition.z, -1500.0f, 1e-2f, "F f F ends after two drawn and one pen-up step");
         }
     }
 
@@ -457,8 +457,8 @@ void runProceduralMeshTests()
     {
         TurtleSegment segment{};
         segment.states = {
-            TurtleState{Vec3{0.0f, 0.0f, 0.0f}, Vec3{0.0f, 0.0f, -1.0f}, 0.2f},
-            TurtleState{Vec3{0.0f, 0.0f, -1.0f}, Vec3{0.0f, 0.0f, -1.0f}, 0.1f}};
+            TurtleState{Vec3{0.0f, 0.0f, 0.0f}, Vec3{0.0f, 0.0f, -1.0f}, 200.0f},
+            TurtleState{Vec3{0.0f, 0.0f, -1000.0f}, Vec3{0.0f, 0.0f, -1.0f}, 100.0f}};
         SplinePath path;
         expectTrue(path.buildFromSegment(segment), "spline builds from segment");
         const std::vector<SplineSample> samples = path.sampleUniform(4);
@@ -473,7 +473,7 @@ void runProceduralMeshTests()
     {
         HostMesh mesh{};
         const std::string definition =
-            "F(0.8) Yaw(2) F(0.5) Yaw(1) F(0.3) Yaw(3) [Pitch(45) F F F][Pitch(-45) F F F]";
+            "F(800) Yaw(2) F(500) Yaw(1) F(300) Yaw(3) [Pitch(45) F F F][Pitch(-45) F F F]";
         expectTrue(
             ProceduralMeshBuilder::buildHostMesh(definition, 0, RootTransform{}, mesh),
             "procedural build succeeds");

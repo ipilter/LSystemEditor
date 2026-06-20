@@ -1,5 +1,7 @@
 #include "PhysicalCamera.h"
 
+#include "SceneUnits.h"
+
 #include <algorithm>
 #include <cmath>
 
@@ -87,10 +89,10 @@ constexpr IsoPreset kIsoPresets[] = {
 } // namespace
 
 PhysicalCamera::PhysicalCamera()
-    : m_position(0.0f, 0.5f, 4.0f)
+    : m_position(0.0f, 500.0f, 1500.0f)
     , m_orientation(1.0f, 0.0f, 0.0f, 0.0f)
-    , m_fovY(kDefaultFovYRad)
-    , m_near(kDefaultNearPlane)
+    , m_fovY(0.0f)
+    , m_near(0.0f)
     , m_far(kDefaultFarPlane)
     , m_aspect(1.0f)
     , m_yawRad(0.0f)
@@ -98,6 +100,8 @@ PhysicalCamera::PhysicalCamera()
     , m_rollRad(0.0f)
 {
     rebuildOrientation();
+    updateOpticsFromFocalLengthMm();
+    setDefaultFocusPoint();
 }
 
 glm::vec3 PhysicalCamera::forward() const
@@ -200,6 +204,113 @@ void PhysicalCamera::setAspect(int imageW, int imageH)
     }
 }
 
+void PhysicalCamera::setFocusPoint(const glm::vec3& point)
+{
+    m_focusPoint = point;
+    const glm::vec3 delta = point - m_position;
+    const float distance = glm::dot(delta, forward());
+    m_focusDistance = distance > 0.0f ? distance : 0.0f;
+    m_focusValid = m_focusDistance > 0.0f;
+}
+
+void PhysicalCamera::setFocusDistance(float distance)
+{
+    m_focusDistance = distance > 0.0f ? distance : 0.0f;
+    m_focusValid = m_focusDistance > 0.0f;
+    if (m_focusValid) {
+        m_focusPoint = m_position + forward() * m_focusDistance;
+    }
+}
+
+void PhysicalCamera::clearFocusPoint()
+{
+    m_focusValid = false;
+}
+
+void PhysicalCamera::setDefaultFocusPoint()
+{
+    m_focusDistance = kDefaultFocusDistance;
+    m_focusPoint = m_position + forward() * m_focusDistance;
+    m_focusValid = true;
+}
+
+void PhysicalCamera::refreshFocusDistanceFromPoint()
+{
+    if (!m_focusValid) {
+        return;
+    }
+
+    const glm::vec3 delta = m_focusPoint - m_position;
+    const float distance = glm::dot(delta, forward());
+    m_focusDistance = distance > 0.0f ? distance : 0.0f;
+    m_focusValid = m_focusDistance > 0.0f;
+}
+
+float PhysicalCamera::computeFocusDistance() const
+{
+    if (!m_focusValid) {
+        return 0.0f;
+    }
+
+    return m_focusDistance;
+}
+
+float PhysicalCamera::clampFocalLengthMm(float value)
+{
+    return std::max(kMinFocalLengthMm, std::min(value, kMaxFocalLengthMm));
+}
+
+float PhysicalCamera::focalLengthMmToFovY(float focalLengthMm)
+{
+    const float clamped = clampFocalLengthMm(focalLengthMm);
+    return 2.0f * std::atan(kSensorHeightMm / (2.0f * clamped));
+}
+
+float PhysicalCamera::fovYToFocalLengthMm(float fovY)
+{
+    const float halfFov = fovY * 0.5f;
+    const float tanHalf = std::tan(halfFov);
+    if (tanHalf <= 0.0f) {
+        return kMaxFocalLengthMm;
+    }
+    return clampFocalLengthMm(kSensorHeightMm / (2.0f * tanHalf));
+}
+
+void PhysicalCamera::updateOpticsFromFocalLengthMm()
+{
+    m_fovY = focalLengthMmToFovY(m_focalLengthMm);
+    m_near = SceneUnits::millimetersToUnits(m_focalLengthMm);
+}
+
+void PhysicalCamera::setFocalLengthMm(float focalLengthMm)
+{
+    m_focalLengthMm = clampFocalLengthMm(focalLengthMm);
+    updateOpticsFromFocalLengthMm();
+}
+
+float PhysicalCamera::apertureRadius() const
+{
+    if (!m_focusValid || fStop <= 0.0f) {
+        return 0.0f;
+    }
+    const float pupilRadiusMm = m_focalLengthMm / (2.0f * fStop);
+    return SceneUnits::millimetersToUnits(pupilRadiusMm);
+}
+
+void PhysicalCamera::primaryRay(float u, float v, glm::vec3& ro, glm::vec3& rd) const
+{
+    const float ndcX = 2.0f * u - 1.0f;
+    const float ndcY = 1.0f - 2.0f * v;
+
+    const float tanHalf = glm::tan(m_fovY * 0.5f);
+    const float top = m_near * tanHalf;
+    const float rightExtent = top * m_aspect;
+
+    const glm::vec3 viewDir = glm::mat3_cast(m_orientation) * glm::vec3(ndcX * rightExtent, ndcY * top, -m_near);
+    ro = m_position;
+    rd = glm::normalize(viewDir);
+}
+
 CameraGpu PhysicalCamera::toGpu() const
 {
     CameraGpu gpu{};
@@ -209,6 +320,11 @@ CameraGpu PhysicalCamera::toGpu() const
     gpu.aspect = m_aspect;
     gpu.nearPlane = m_near;
     gpu.farPlane = m_far;
+    gpu.apertureRadius = apertureRadius();
+    gpu.focusDistance = computeFocusDistance();
+    const glm::vec3 derivedFocusPoint = m_position + forward() * m_focusDistance;
+    gpu.focusPoint = float3{derivedFocusPoint.x, derivedFocusPoint.y, derivedFocusPoint.z};
+    gpu.focusValid = m_focusValid ? 1 : 0;
     return gpu;
 }
 
@@ -223,6 +339,10 @@ void PhysicalCamera::copyGeometryFrom(const PhysicalCamera& other)
     m_yawRad = other.m_yawRad;
     m_pitchRad = other.m_pitchRad;
     m_rollRad = other.m_rollRad;
+    m_focalLengthMm = other.m_focalLengthMm;
+    m_focusPoint = other.m_focusPoint;
+    m_focusDistance = other.m_focusDistance;
+    m_focusValid = other.m_focusValid;
 }
 
 void PhysicalCamera::applyGpuGeometry(const CameraGpu& camera)
@@ -237,6 +357,10 @@ void PhysicalCamera::applyGpuGeometry(const CameraGpu& camera)
     m_aspect = camera.aspect;
     m_near = camera.nearPlane;
     m_far = camera.farPlane;
+    m_focalLengthMm = fovYToFocalLengthMm(camera.fovY);
+    m_focusPoint = glm::vec3(camera.focusPoint.x, camera.focusPoint.y, camera.focusPoint.z);
+    m_focusDistance = camera.focusDistance;
+    m_focusValid = camera.focusValid != 0;
 }
 
 glm::mat4 PhysicalCamera::viewMatrixFromGpu(const CameraGpu& camera)

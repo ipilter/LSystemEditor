@@ -32,8 +32,8 @@ struct TurtleOutput
 
 struct TurtleParams
 {
-    float defaultStepLength = 0.5f;
-    float defaultRadius = 0.1f;
+    float defaultStepLength = 500.0f;
+    float defaultRadius = 100.0f;
 };
 
 struct RootTransform

@@ -2,6 +2,7 @@
 
 #include "AppSettings.h"
 #include "AppLog.h"
+#include "Brdf/BrdfDebug.h"
 #include "MainView.h"
 #include "OpenGLViewportWidget.h"
 #include "LSystemTransformDialog.h"
@@ -58,6 +59,44 @@ int comboIndexFromBoundsOverlayMode(RenderViewOverlayMode mode)
     case RenderViewOverlayMode::Uv:
         return 3;
     case RenderViewOverlayMode::Render:
+    default:
+        return 0;
+    }
+}
+
+int brdfDebugFlagsFromComboIndex(int index)
+{
+    switch (index) {
+    case 1:
+        return BrdfDebugFlags::kForceTransmitLobeOnly;
+    case 2:
+        return BrdfDebugFlags::kDisableRefract;
+    case 3:
+        return BrdfDebugFlags::kDisableReflect;
+    case 4:
+        return BrdfDebugFlags::kTintGlassPaths;
+    case 5:
+        return BrdfDebugFlags::kDisableTirFallback;
+    case 0:
+    default:
+        return BrdfDebugFlags::kNone;
+    }
+}
+
+int comboIndexFromBrdfDebugFlags(int flags)
+{
+    switch (flags) {
+    case BrdfDebugFlags::kForceTransmitLobeOnly:
+        return 1;
+    case BrdfDebugFlags::kDisableRefract:
+        return 2;
+    case BrdfDebugFlags::kDisableReflect:
+        return 3;
+    case BrdfDebugFlags::kTintGlassPaths:
+        return 4;
+    case BrdfDebugFlags::kDisableTirFallback:
+        return 5;
+    case BrdfDebugFlags::kNone:
     default:
         return 0;
     }
@@ -125,12 +164,15 @@ SceneController::SceneController(SceneModel* model, MainView* view, QObject* par
     syncPreviewStepsSpinBox();
     syncRussianRouletteMinDepthSpinBox();
     syncBoundsOverlayComboBox();
+    syncBrdfDebugComboBox();
+    syncSceneOverlayCheckBox();
     syncRegionRenderUi();
     updateRegionSpinBoxRanges();
     syncEnvironmentHdrPath();
     syncEnvironmentIntensitySpinBox();
     syncEnvironmentIntensityEnabled();
     syncPhysicalCameraUi();
+    syncFocusDistanceSpinBox();
     updateExposureValueLabel();
     applyPhysicalCameraToViewport();
     restoreLsystemFromSettings();
@@ -150,6 +192,12 @@ SceneController::SceneController(SceneModel* model, MainView* view, QObject* par
     connect(m_model, &SceneModel::boundsOverlayModeChanged, this, [this](RenderViewOverlayMode) {
         syncBoundsOverlayComboBox();
     });
+    connect(m_model, &SceneModel::brdfDebugFlagsChanged, this, [this](int) {
+        syncBrdfDebugComboBox();
+    });
+    connect(m_model, &SceneModel::sceneOverlayVisibleChanged, this, [this](bool) {
+        syncSceneOverlayCheckBox();
+    });
     connect(m_view->renderWidthSpinBox(), &QSpinBox::valueChanged, this, &SceneController::onRenderSizeSpinBoxChanged);
     connect(m_view->renderHeightSpinBox(), &QSpinBox::valueChanged, this, &SceneController::onRenderSizeSpinBoxChanged);
     connect(m_view->maxSamplesSpinBox(), &QSpinBox::valueChanged, this, &SceneController::onMaxSamplesSpinBoxChanged);
@@ -166,10 +214,20 @@ SceneController::SceneController(SceneModel* model, MainView* view, QObject* par
         this,
         &SceneController::onRussianRouletteMinDepthSpinBoxChanged);
     connect(
-        m_view->boundsOverlayComboBox(),
+        m_view->renderViewOverlayComboBox(),
         QOverload<int>::of(&QComboBox::currentIndexChanged),
         this,
         &SceneController::onBoundsOverlayComboBoxChanged);
+    connect(
+        m_view->brdfDebugComboBox(),
+        QOverload<int>::of(&QComboBox::currentIndexChanged),
+        this,
+        &SceneController::onBrdfDebugComboBoxChanged);
+    connect(
+        m_view->sceneOverlayCheckBox(),
+        &QCheckBox::toggled,
+        this,
+        &SceneController::onSceneOverlayCheckBoxChanged);
     connect(m_view->regionRenderCheckBox(), &QCheckBox::toggled, this, &SceneController::onRegionRenderCheckBoxChanged);
     connect(m_view->regionBottomLeftXSpinBox(), &QSpinBox::valueChanged, this, &SceneController::onRegionRectSpinBoxesChanged);
     connect(m_view->regionBottomLeftYSpinBox(), &QSpinBox::valueChanged, this, &SceneController::onRegionRectSpinBoxesChanged);
@@ -229,6 +287,21 @@ SceneController::SceneController(SceneModel* model, MainView* view, QObject* par
         m_model->setFStop(static_cast<float>(value));
         updateExposureValueLabel();
         m_physicalCameraDebounce.schedule();
+    });
+    connect(m_view->focalLengthSpinBox(), QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [this](double value) {
+        m_model->setFocalLengthMm(static_cast<float>(value));
+        m_physicalCameraDebounce.schedule();
+    });
+    connect(
+        m_view->focusDistanceSpinBox(),
+        QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+        this,
+        [this](double value) {
+            m_model->setFocusDistanceMm(static_cast<float>(value));
+            m_view->viewport()->setFocusDistanceMm(m_model->focusDistanceMm());
+        });
+    connect(m_model, &SceneModel::focusDistanceMmChanged, this, [this](float) {
+        syncFocusDistanceSpinBox();
     });
     connect(
         m_view->shutterSpeedComboBox(),
@@ -347,7 +420,17 @@ void SceneController::onRussianRouletteMinDepthSpinBoxChanged()
 void SceneController::onBoundsOverlayComboBoxChanged()
 {
     m_model->setBoundsOverlayMode(
-        renderViewOverlayModeFromComboIndex(m_view->boundsOverlayComboBox()->currentIndex()));
+        renderViewOverlayModeFromComboIndex(m_view->renderViewOverlayComboBox()->currentIndex()));
+}
+
+void SceneController::onBrdfDebugComboBoxChanged()
+{
+    m_model->setBrdfDebugFlags(brdfDebugFlagsFromComboIndex(m_view->brdfDebugComboBox()->currentIndex()));
+}
+
+void SceneController::onSceneOverlayCheckBoxChanged()
+{
+    m_model->setSceneOverlayVisible(m_view->sceneOverlayCheckBox()->isChecked());
 }
 
 void SceneController::onRegionRenderCheckBoxChanged()
@@ -573,10 +656,24 @@ void SceneController::syncRussianRouletteMinDepthSpinBox()
 
 void SceneController::syncBoundsOverlayComboBox()
 {
-    m_view->boundsOverlayComboBox()->blockSignals(true);
-    m_view->boundsOverlayComboBox()->setCurrentIndex(
+    m_view->renderViewOverlayComboBox()->blockSignals(true);
+    m_view->renderViewOverlayComboBox()->setCurrentIndex(
         comboIndexFromBoundsOverlayMode(m_model->boundsOverlayMode()));
-    m_view->boundsOverlayComboBox()->blockSignals(false);
+    m_view->renderViewOverlayComboBox()->blockSignals(false);
+}
+
+void SceneController::syncBrdfDebugComboBox()
+{
+    m_view->brdfDebugComboBox()->blockSignals(true);
+    m_view->brdfDebugComboBox()->setCurrentIndex(comboIndexFromBrdfDebugFlags(m_model->brdfDebugFlags()));
+    m_view->brdfDebugComboBox()->blockSignals(false);
+}
+
+void SceneController::syncSceneOverlayCheckBox()
+{
+    m_view->sceneOverlayCheckBox()->blockSignals(true);
+    m_view->sceneOverlayCheckBox()->setChecked(m_model->sceneOverlayVisible());
+    m_view->sceneOverlayCheckBox()->blockSignals(false);
 }
 
 void SceneController::syncEnvironmentHdrPath()
@@ -664,6 +761,10 @@ void SceneController::applyAccumulatorExposureRefine(bool ok, PhysicalCamera sug
 void SceneController::applyPhysicalCameraToViewport()
 {
     m_view->viewport()->setPhysicalCamera(m_model->fStop(), m_model->shutterSpeedSeconds(), m_model->iso());
+    m_view->viewport()->setFocalLengthMm(m_model->focalLengthMm());
+    if (!m_model->focusPointPinned()) {
+        m_view->viewport()->setFocusDistanceMm(m_model->focusDistanceMm());
+    }
 }
 
 void SceneController::applySuggestedPhysicalCameraFromHdr()
@@ -679,17 +780,30 @@ void SceneController::applySuggestedPhysicalCameraFromHdr()
 void SceneController::syncPhysicalCameraUi()
 {
     m_view->fStopSpinBox()->blockSignals(true);
+    m_view->focalLengthSpinBox()->blockSignals(true);
+    m_view->focusDistanceSpinBox()->blockSignals(true);
     m_view->shutterSpeedComboBox()->blockSignals(true);
     m_view->isoComboBox()->blockSignals(true);
     m_view->fStopSpinBox()->setValue(static_cast<double>(m_model->fStop()));
+    m_view->focalLengthSpinBox()->setValue(static_cast<double>(m_model->focalLengthMm()));
+    m_view->focusDistanceSpinBox()->setValue(static_cast<double>(m_model->focusDistanceMm()));
     m_view->shutterSpeedComboBox()->setCurrentIndex(
         shutterComboIndexForSeconds(m_view->shutterSpeedComboBox(), m_model->shutterSpeedSeconds()));
     m_view->isoComboBox()->setCurrentIndex(
         isoComboIndexForValue(m_view->isoComboBox(), m_model->iso()));
     m_view->fStopSpinBox()->blockSignals(false);
+    m_view->focalLengthSpinBox()->blockSignals(false);
+    m_view->focusDistanceSpinBox()->blockSignals(false);
     m_view->shutterSpeedComboBox()->blockSignals(false);
     m_view->isoComboBox()->blockSignals(false);
     updateExposureValueLabel();
+}
+
+void SceneController::syncFocusDistanceSpinBox()
+{
+    m_view->focusDistanceSpinBox()->blockSignals(true);
+    m_view->focusDistanceSpinBox()->setValue(static_cast<double>(m_model->focusDistanceMm()));
+    m_view->focusDistanceSpinBox()->blockSignals(false);
 }
 
 void SceneController::updateExposureValueLabel()
