@@ -17,6 +17,7 @@ enum class TextureKind : uint32_t
     ConstantRgb = 1,
     Grid2D = 2,
     Stripe1D = 3,
+    Noise2D = 4,
 };
 
 struct TextureDescGpu
@@ -84,6 +85,11 @@ struct alignas(16) MaterialGpu
     uint32_t iorTex = 0;
     uint32_t subsurfaceTex = 0;
     uint32_t emissionTex = 0;
+    uint32_t diffuseRoughnessTex = 0;
+    uint32_t scatterRadiusRTex = 0;
+    uint32_t scatterRadiusGTex = 0;
+    uint32_t scatterRadiusBTex = 0;
+    uint32_t specularTex = 0;
 };
 
 static_assert(sizeof(MaterialGpu) % alignof(MaterialGpu) == 0);

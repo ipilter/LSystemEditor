@@ -4,6 +4,7 @@
 #include "LSystemEvaluator.h"
 #include "LSystemMaterials.h"
 #include "Loft.h"
+#include "Texture/TexturePack.h"
 #include "Turtle.h"
 
 #include <cmath>
@@ -39,61 +40,18 @@ void ensureTextureBankBase(std::vector<TextureDescGpu>& bank)
     }
 }
 
-TextureDescGpu packGridTexture(const TextureDef& texture)
+TextureDescGpu packTextureDescLocal(const TextureDef& texture)
 {
-    TextureDescGpu desc{};
-    desc.kind = static_cast<uint32_t>(TextureKind::Grid2D);
-    const float defaultFrequency = 8.0f;
-    const float defaultThickness = 0.05f;
-    float freqU = defaultFrequency;
-    float freqV = defaultFrequency;
-    float thickness = defaultThickness;
-
-    if (texture.params.size() == 7u) {
-        freqU = texture.params[6];
-        freqV = texture.params[6];
-    } else if (texture.params.size() == 8u) {
-        freqU = texture.params[6];
-        freqV = texture.params[6];
-        thickness = texture.params[7];
-    } else if (texture.params.size() == 9u) {
-        freqU = texture.params[6];
-        freqV = texture.params[7];
-        thickness = texture.params[8];
-    } else if (texture.params.size() >= 10u) {
-        freqU = texture.params[6];
-        freqV = texture.params[7];
-        thickness = texture.params[8];
-    }
-
-    desc.p0 = make_float4(freqU, freqV, thickness, 0.0f);
-    desc.p1 = make_float4(texture.params[0], texture.params[1], texture.params[2], 0.0f);
-    desc.p2 = make_float4(texture.params[3], texture.params[4], texture.params[5], 0.0f);
-    return desc;
-}
-
-TextureDescGpu packStripeTexture(const TextureDef& texture)
-{
-    TextureDescGpu desc{};
-    desc.kind = static_cast<uint32_t>(TextureKind::Stripe1D);
-    const float onValue = texture.params.size() > 2u ? texture.params[2] : 1.0f;
-    const float offValue = texture.params.size() > 3u ? texture.params[3] : 0.0f;
-    desc.p0 = make_float4(texture.params[0], texture.params[1], onValue, offValue);
-    return desc;
-}
-
-TextureDescGpu packTextureDesc(const TextureDef& texture)
-{
-    if (texture.kind == "Grid") {
-        return packGridTexture(texture);
-    }
-    return packStripeTexture(texture);
+    return ::packTextureDesc(
+        texture.kind.c_str(),
+        texture.params.data(),
+        texture.params.size());
 }
 
 uint32_t addTexture(std::vector<TextureDescGpu>& bank, const TextureDef& texture)
 {
     ensureTextureBankBase(bank);
-    bank.push_back(packTextureDesc(texture));
+    bank.push_back(packTextureDescLocal(texture));
     return static_cast<uint32_t>(bank.size() - 1u);
 }
 
@@ -132,6 +90,11 @@ MaterialGpu toMaterialGpu(const MaterialEntry& entry, std::vector<TextureDescGpu
     material.iorTex = channelTextureIndex(entry.ior, bank);
     material.subsurfaceTex = channelTextureIndex(entry.subsurface, bank);
     material.emissionTex = channelTextureIndex(entry.emission, bank);
+    material.diffuseRoughnessTex = channelTextureIndex(entry.diffuseRoughness, bank);
+    material.scatterRadiusRTex = channelTextureIndex(entry.scatterRadiusR, bank);
+    material.scatterRadiusGTex = channelTextureIndex(entry.scatterRadiusG, bank);
+    material.scatterRadiusBTex = channelTextureIndex(entry.scatterRadiusB, bank);
+    material.specularTex = channelTextureIndex(entry.specular, bank);
     return material;
 }
 

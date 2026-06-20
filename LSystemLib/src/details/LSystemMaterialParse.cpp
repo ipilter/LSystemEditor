@@ -198,6 +198,17 @@ void validate_stripe_params(std::string_view line, const std::vector<float>& par
     }
 }
 
+void validate_noise_params(std::string_view line, const std::vector<float>& params)
+{
+    if (params.size() < 1u || params.size() > 5u)
+    {
+        material_parse_error(
+            line,
+            "Noise texture requires 1 to 5 params "
+            "(scale, [octaves], [seed], [minValue], [maxValue])");
+    }
+}
+
 bool parse_texture_block(std::string_view line, std::size_t& pos, TextureDef& out_texture)
 {
     skip_ws(line, pos);
@@ -258,6 +269,10 @@ bool parse_texture_block(std::string_view line, std::size_t& pos, TextureDef& ou
     else if (kind == "Stripe")
     {
         validate_stripe_params(line, params);
+    }
+    else if (kind == "Noise")
+    {
+        validate_noise_params(line, params);
     }
     else
     {

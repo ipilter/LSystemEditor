@@ -306,3 +306,44 @@ TEST(LSystemMaterialParse, rejects_unknown_texture_kind)
         },
         std::runtime_error);
 }
+
+TEST(LSystemMaterialParse, parses_grid_emission_texture)
+{
+    std::vector<MaterialDefinition> definitions;
+    ASSERT_TRUE(try_parse_material_line(
+        "Mat(GridLamp) = {0.1, 0.1, 0.1, 0.4, 0, 0, 0, 1.5, 0, {Grid, 1,1,1, 1,1,1, 24, 24, 0.02}}",
+        definitions));
+    const MaterialEntry* entry = find_material(definitions, "GridLamp");
+    ASSERT_NE(entry, nullptr);
+    EXPECT_EQ(entry->emission.mode, MaterialChannel::Mode::Texture);
+    EXPECT_EQ(entry->emission.texture.kind, "Grid");
+    EXPECT_NEAR(materialChannelScalar(entry->emission), 0.0f, 1e-5f);
+}
+
+TEST(LSystemMaterialParse, parses_noise_roughness_texture)
+{
+    std::vector<MaterialDefinition> definitions;
+    ASSERT_TRUE(try_parse_material_line(
+        "Mat(NoisyPlastic) = {0.9, 0.7, 0.94, {Noise, 16, 3, 42, 0.2, 0.9}}",
+        definitions));
+    const MaterialEntry* entry = find_material(definitions, "NoisyPlastic");
+    ASSERT_NE(entry, nullptr);
+    EXPECT_EQ(entry->roughness.mode, MaterialChannel::Mode::Texture);
+    EXPECT_EQ(entry->roughness.texture.kind, "Noise");
+    ASSERT_EQ(entry->roughness.texture.params.size(), 5u);
+    EXPECT_NEAR(entry->roughness.texture.params[0], 16.f, 1e-5f);
+    EXPECT_NEAR(entry->roughness.texture.params[4], 0.9f, 1e-5f);
+}
+
+TEST(LSystemMaterialParse, rejects_invalid_noise_params)
+{
+    std::vector<MaterialDefinition> definitions;
+    EXPECT_THROW(
+        {
+            const bool ignored = try_parse_material_line(
+                "Mat(0) = {0.5, {Noise}}",
+                definitions);
+            (void)ignored;
+        },
+        std::runtime_error);
+}

@@ -113,5 +113,20 @@ inline void meshAppend(Mesh& dst, const Mesh& src, const uint32_t materialIndexO
         if (material.emissionTex != 0u) {
             material.emissionTex += textureIndexOffset;
         }
+        if (material.diffuseRoughnessTex != 0u) {
+            material.diffuseRoughnessTex += textureIndexOffset;
+        }
+        if (material.scatterRadiusRTex != 0u) {
+            material.scatterRadiusRTex += textureIndexOffset;
+        }
+        if (material.scatterRadiusGTex != 0u) {
+            material.scatterRadiusGTex += textureIndexOffset;
+        }
+        if (material.scatterRadiusBTex != 0u) {
+            material.scatterRadiusBTex += textureIndexOffset;
+        }
+        if (material.specularTex != 0u) {
+            material.specularTex += textureIndexOffset;
+        }
     }
 }

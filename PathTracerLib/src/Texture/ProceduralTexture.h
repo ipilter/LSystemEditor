@@ -3,6 +3,7 @@
 #include "Geometry/GeometryTypes.h"
 #include "Geometry/MathCore.h"
 #include "MeshAccel/MeshAccelTypes.h"
+#include "Texture/MaterialChannels.h"
 
 #include <cmath>
 #include <cstdint>
@@ -18,8 +19,8 @@
  *
  * To add a new texture type:
  * 1. Add a TextureKind value in MeshAccelTypes.h.
- * 2. Document param packing in TextureDescGpu::p0..p2.
- * 3. Add cases to evalProceduralScalar / evalProceduralRgb below.
+ * 2. Document param packing in TextureDescGpu::p0..p2 and TexturePack.h.
+ * 3. Add mask/scalar cases to evalProceduralScalar / evalProceduralRgb below.
  * 4. Add parser + packTextureDesc on the host.
  * 5. Add unit tests.
  */
@@ -34,6 +35,90 @@ PROCEDURAL_TEXTURE_FN float proceduralClamp01(float value)
     return fminf(fmaxf(value, 0.0f), 1.0f);
 }
 
+PROCEDURAL_TEXTURE_FN float proceduralHash01(int x, int y, int seed)
+{
+    uint32_t n = static_cast<uint32_t>(x * 374761393 + y * 668265263 + seed * 362437);
+    n = (n ^ (n >> 13)) * 1274126177u;
+    n = n ^ (n >> 16);
+    return static_cast<float>(n & 0x00FFFFFFu) / static_cast<float>(0x01000000u);
+}
+
+PROCEDURAL_TEXTURE_FN float proceduralValueNoise01(float u, float v, int seed)
+{
+    const int x0 = static_cast<int>(floorf(u));
+    const int y0 = static_cast<int>(floorf(v));
+    const int x1 = x0 + 1;
+    const int y1 = y0 + 1;
+    const float tx = u - static_cast<float>(x0);
+    const float ty = v - static_cast<float>(y0);
+
+    const float v00 = proceduralHash01(x0, y0, seed);
+    const float v10 = proceduralHash01(x1, y0, seed);
+    const float v01 = proceduralHash01(x0, y1, seed);
+    const float v11 = proceduralHash01(x1, y1, seed);
+
+    const float a = v00 + (v10 - v00) * tx;
+    const float b = v01 + (v11 - v01) * tx;
+    return a + (b - a) * ty;
+}
+
+PROCEDURAL_TEXTURE_FN float evalGridMask(const TextureDescGpu& desc, TextureEvalContext ctx)
+{
+    const float freqX = desc.p0.x;
+    const float freqY = desc.p0.y;
+    const float thickness = desc.p0.z;
+    const float fx = proceduralFract(ctx.uv.x * freqX);
+    const float fy = proceduralFract(ctx.uv.y * freqY);
+    return (fx < thickness || fy < thickness) ? 1.0f : 0.0f;
+}
+
+PROCEDURAL_TEXTURE_FN float evalStripeMask(const TextureDescGpu& desc, TextureEvalContext ctx)
+{
+    const float freq = desc.p0.x;
+    const float thickness = desc.p0.y;
+    const float onValue = desc.p0.z;
+    const float offValue = desc.p0.w;
+    const float stripeCoord = proceduralFract(ctx.u1d * freq);
+    return stripeCoord < thickness ? onValue : offValue;
+}
+
+PROCEDURAL_TEXTURE_FN float evalNoiseMask01(const TextureDescGpu& desc, TextureEvalContext ctx)
+{
+    const float scale = desc.p0.x;
+    const int octaves = static_cast<int>(fmaxf(1.0f, floorf(desc.p0.y + 0.5f)));
+    const int seed = static_cast<int>(desc.p0.z);
+
+    float u = ctx.uv.x * scale;
+    float v = ctx.uv.y * scale;
+    float amplitude = 1.0f;
+    float total = 0.0f;
+    float weightSum = 0.0f;
+
+    for (int octave = 0; octave < octaves; ++octave) {
+        total += proceduralValueNoise01(u, v, seed + octave) * amplitude;
+        weightSum += amplitude;
+        u *= 2.0f;
+        v *= 2.0f;
+        amplitude *= 0.5f;
+    }
+
+    return weightSum > 0.0f ? total / weightSum : 0.0f;
+}
+
+PROCEDURAL_TEXTURE_FN float evalTextureMask(const TextureDescGpu& desc, TextureEvalContext ctx)
+{
+    switch (static_cast<TextureKind>(desc.kind)) {
+    case TextureKind::Grid2D:
+        return evalGridMask(desc, ctx);
+    case TextureKind::Stripe1D:
+        return evalStripeMask(desc, ctx);
+    case TextureKind::Noise2D:
+        return evalNoiseMask01(desc, ctx);
+    default:
+        return 0.0f;
+    }
+}
+
 PROCEDURAL_TEXTURE_FN float evalProceduralScalar(
     const TextureDescGpu& desc,
     TextureEvalContext ctx)
@@ -41,21 +126,23 @@ PROCEDURAL_TEXTURE_FN float evalProceduralScalar(
     switch (static_cast<TextureKind>(desc.kind)) {
     case TextureKind::ConstantScalar:
         return desc.p0.x;
-    case TextureKind::Stripe1D: {
-        const float freq = desc.p0.x;
-        const float thickness = desc.p0.y;
-        const float onValue = desc.p0.z;
-        const float offValue = desc.p0.w;
-        const float stripeCoord = proceduralFract(ctx.u1d * freq);
-        return stripeCoord < thickness ? onValue : offValue;
-    }
+    case TextureKind::Stripe1D:
+        return evalStripeMask(desc, ctx);
     case TextureKind::Grid2D: {
-        const float freqX = desc.p0.x;
-        const float freqY = desc.p0.y;
-        const float thickness = desc.p0.z;
-        const float fx = proceduralFract(ctx.uv.x * freqX);
-        const float fy = proceduralFract(ctx.uv.y * freqY);
-        return (fx < thickness || fy < thickness) ? 1.0f : 0.0f;
+        const float mask = evalGridMask(desc, ctx);
+        float onValue = desc.p0.w;
+        float offValue = desc.p2.w;
+        if (onValue == 0.0f && offValue == 0.0f) {
+            onValue = 1.0f;
+            offValue = 0.0f;
+        }
+        return offValue + (onValue - offValue) * mask;
+    }
+    case TextureKind::Noise2D: {
+        const float minValue = desc.p0.w;
+        const float maxValue = desc.p1.x;
+        const float noise = evalNoiseMask01(desc, ctx);
+        return minValue + (maxValue - minValue) * noise;
     }
     default:
         return 0.0f;
@@ -70,25 +157,63 @@ PROCEDURAL_TEXTURE_FN Vec3 evalProceduralRgb(
     case TextureKind::ConstantRgb:
         return vecMake3(desc.p0.x, desc.p0.y, desc.p0.z);
     case TextureKind::Grid2D: {
-        const float freqX = desc.p0.x;
-        const float freqY = desc.p0.y;
-        const float thickness = desc.p0.z;
+        const float mask = evalGridMask(desc, ctx);
         const Vec3 colorA = vecMake3(desc.p1.x, desc.p1.y, desc.p1.z);
         const Vec3 colorB = vecMake3(desc.p2.x, desc.p2.y, desc.p2.z);
-        const float fx = proceduralFract(ctx.uv.x * freqX);
-        const float fy = proceduralFract(ctx.uv.y * freqY);
-        const float grid = (fx < thickness || fy < thickness) ? 1.0f : 0.0f;
         return vecMake3(
-            colorA.x + (colorB.x - colorA.x) * grid,
-            colorA.y + (colorB.y - colorA.y) * grid,
-            colorA.z + (colorB.z - colorA.z) * grid);
+            colorA.x + (colorB.x - colorA.x) * mask,
+            colorA.y + (colorB.y - colorA.y) * mask,
+            colorA.z + (colorB.z - colorA.z) * mask);
     }
     default:
         return vecMake3(0.0f, 0.0f, 0.0f);
     }
 }
 
+PROCEDURAL_TEXTURE_FN float applyChannelCompositionScalar(
+    float inlineValue,
+    float textureValue,
+    ChannelComposition composition)
+{
+    switch (composition) {
+    case ChannelComposition::Replace:
+        return textureValue;
+    case ChannelComposition::Multiply:
+        return inlineValue * textureValue;
+    case ChannelComposition::Add:
+        return inlineValue + textureValue;
+    default:
+        return textureValue;
+    }
+}
+
+PROCEDURAL_TEXTURE_FN Vec3 applyChannelCompositionRgb(
+    float inlineR,
+    float inlineG,
+    float inlineB,
+    Vec3 textureValue,
+    ChannelComposition composition)
+{
+    switch (composition) {
+    case ChannelComposition::Replace:
+        return textureValue;
+    case ChannelComposition::Multiply:
+        return vecMake3(
+            inlineR * textureValue.x,
+            inlineG * textureValue.y,
+            inlineB * textureValue.z);
+    case ChannelComposition::Add:
+        return vecMake3(
+            inlineR + textureValue.x,
+            inlineG + textureValue.y,
+            inlineB + textureValue.z);
+    default:
+        return textureValue;
+    }
+}
+
 PROCEDURAL_TEXTURE_FN float resolveChannelScalar(
+    MaterialChannelId channelId,
     float inlineValue,
     uint32_t textureIndex,
     const TextureDescGpu* bank,
@@ -98,7 +223,13 @@ PROCEDURAL_TEXTURE_FN float resolveChannelScalar(
     if (textureIndex == 0u || bank == nullptr || textureIndex >= bankCount) {
         return inlineValue;
     }
-    return evalProceduralScalar(bank[textureIndex], ctx);
+
+    const float textureValue = evalProceduralScalar(bank[textureIndex], ctx);
+    const ChannelComposition composition = channelDefaultComposition(
+        channelId,
+        inlineValue,
+        textureIndex);
+    return applyChannelCompositionScalar(inlineValue, textureValue, composition);
 }
 
 PROCEDURAL_TEXTURE_FN Vec3 resolveChannelRgb(
@@ -113,27 +244,253 @@ PROCEDURAL_TEXTURE_FN Vec3 resolveChannelRgb(
     if (textureIndex == 0u || bank == nullptr || textureIndex >= bankCount) {
         return vecMake3(inlineR, inlineG, inlineB);
     }
-    return evalProceduralRgb(bank[textureIndex], ctx);
+
+    const Vec3 textureValue = evalProceduralRgb(bank[textureIndex], ctx);
+    const ChannelComposition composition = channelDefaultComposition(MaterialChannelId::Albedo);
+    return applyChannelCompositionRgb(
+        inlineR,
+        inlineG,
+        inlineB,
+        textureValue,
+        composition);
 }
 
-struct ResolvedMaterial
+PROCEDURAL_TEXTURE_FN void resolveChannel(
+    MaterialChannelId channelId,
+    float inlineR,
+    float inlineG,
+    float inlineB,
+    float inlineScalar,
+    uint32_t textureIndex,
+    const TextureDescGpu* bank,
+    uint32_t bankCount,
+    TextureEvalContext ctx,
+    ResolvedMaterial& outResolved)
 {
-    float r = 0.8f;
-    float g = 0.8f;
-    float b = 0.8f;
-    float roughness = 0.5f;
-    float metallic = 0.0f;
-    float transmission = 0.0f;
-    float thin = 0.0f;
-    float ior = 1.5f;
-    float subsurface = 0.0f;
-    float emission = 0.0f;
-    float diffuseRoughness = 0.5f;
-    float scatterRadiusR = 0.0f;
-    float scatterRadiusG = 0.0f;
-    float scatterRadiusB = 0.0f;
-    float specular = 1.0f;
-};
+    if (channelValueKind(channelId) == ChannelValueKind::Rgb) {
+        const Vec3 rgb = resolveChannelRgb(
+            inlineR,
+            inlineG,
+            inlineB,
+            textureIndex,
+            bank,
+            bankCount,
+            ctx);
+        outResolved.r = rgb.x;
+        outResolved.g = rgb.y;
+        outResolved.b = rgb.z;
+        return;
+    }
+
+    const float scalar = resolveChannelScalar(
+        channelId,
+        inlineScalar,
+        textureIndex,
+        bank,
+        bankCount,
+        ctx);
+
+    switch (channelId) {
+    case MaterialChannelId::Roughness:
+        outResolved.roughness = proceduralClamp01(scalar);
+        break;
+    case MaterialChannelId::Metallic:
+        outResolved.metallic = proceduralClamp01(scalar);
+        break;
+    case MaterialChannelId::Transmission:
+        outResolved.transmission = proceduralClamp01(scalar);
+        break;
+    case MaterialChannelId::Thin:
+        outResolved.thin = proceduralClamp01(scalar);
+        break;
+    case MaterialChannelId::Ior:
+        outResolved.ior = fmaxf(1.0e-3f, scalar);
+        break;
+    case MaterialChannelId::Subsurface:
+        outResolved.subsurface = proceduralClamp01(scalar);
+        break;
+    case MaterialChannelId::Emission:
+        outResolved.emission = fmaxf(0.0f, scalar);
+        break;
+    case MaterialChannelId::DiffuseRoughness:
+        outResolved.diffuseRoughness = scalar;
+        break;
+    case MaterialChannelId::ScatterRadiusR:
+        outResolved.scatterRadiusR = fmaxf(0.0f, scalar);
+        break;
+    case MaterialChannelId::ScatterRadiusG:
+        outResolved.scatterRadiusG = fmaxf(0.0f, scalar);
+        break;
+    case MaterialChannelId::ScatterRadiusB:
+        outResolved.scatterRadiusB = fmaxf(0.0f, scalar);
+        break;
+    case MaterialChannelId::Specular:
+        outResolved.specular = proceduralClamp01(scalar);
+        break;
+    default:
+        break;
+    }
+}
+
+PROCEDURAL_TEXTURE_FN ResolvedMaterial resolveLayer(
+    const MaterialGpu& material,
+    TextureEvalContext ctx,
+    const TextureDescGpu* bank,
+    uint32_t bankCount)
+{
+    ResolvedMaterial resolved{};
+
+    resolveChannel(
+        MaterialChannelId::Albedo,
+        material.r,
+        material.g,
+        material.b,
+        0.0f,
+        material.albedoTex,
+        bank,
+        bankCount,
+        ctx,
+        resolved);
+    resolveChannel(
+        MaterialChannelId::Roughness,
+        0.0f,
+        0.0f,
+        0.0f,
+        material.roughness,
+        material.roughnessTex,
+        bank,
+        bankCount,
+        ctx,
+        resolved);
+    resolveChannel(
+        MaterialChannelId::Metallic,
+        0.0f,
+        0.0f,
+        0.0f,
+        material.metallic,
+        material.metallicTex,
+        bank,
+        bankCount,
+        ctx,
+        resolved);
+    resolveChannel(
+        MaterialChannelId::Transmission,
+        0.0f,
+        0.0f,
+        0.0f,
+        material.transmission,
+        material.transmissionTex,
+        bank,
+        bankCount,
+        ctx,
+        resolved);
+    resolveChannel(
+        MaterialChannelId::Thin,
+        0.0f,
+        0.0f,
+        0.0f,
+        material.thin,
+        material.thinTex,
+        bank,
+        bankCount,
+        ctx,
+        resolved);
+    resolveChannel(
+        MaterialChannelId::Ior,
+        0.0f,
+        0.0f,
+        0.0f,
+        material.ior,
+        material.iorTex,
+        bank,
+        bankCount,
+        ctx,
+        resolved);
+    resolveChannel(
+        MaterialChannelId::Subsurface,
+        0.0f,
+        0.0f,
+        0.0f,
+        material.subsurface,
+        material.subsurfaceTex,
+        bank,
+        bankCount,
+        ctx,
+        resolved);
+    resolveChannel(
+        MaterialChannelId::Emission,
+        0.0f,
+        0.0f,
+        0.0f,
+        material.emission,
+        material.emissionTex,
+        bank,
+        bankCount,
+        ctx,
+        resolved);
+    resolveChannel(
+        MaterialChannelId::DiffuseRoughness,
+        0.0f,
+        0.0f,
+        0.0f,
+        material.diffuseRoughness,
+        material.diffuseRoughnessTex,
+        bank,
+        bankCount,
+        ctx,
+        resolved);
+    if (resolved.diffuseRoughness < 0.0f) {
+        resolved.diffuseRoughness = resolved.roughness;
+    } else {
+        resolved.diffuseRoughness = proceduralClamp01(resolved.diffuseRoughness);
+    }
+    resolveChannel(
+        MaterialChannelId::ScatterRadiusR,
+        0.0f,
+        0.0f,
+        0.0f,
+        material.scatterRadiusR,
+        material.scatterRadiusRTex,
+        bank,
+        bankCount,
+        ctx,
+        resolved);
+    resolveChannel(
+        MaterialChannelId::ScatterRadiusG,
+        0.0f,
+        0.0f,
+        0.0f,
+        material.scatterRadiusG,
+        material.scatterRadiusGTex,
+        bank,
+        bankCount,
+        ctx,
+        resolved);
+    resolveChannel(
+        MaterialChannelId::ScatterRadiusB,
+        0.0f,
+        0.0f,
+        0.0f,
+        material.scatterRadiusB,
+        material.scatterRadiusBTex,
+        bank,
+        bankCount,
+        ctx,
+        resolved);
+    resolveChannel(
+        MaterialChannelId::Specular,
+        0.0f,
+        0.0f,
+        0.0f,
+        material.specular,
+        material.specularTex,
+        bank,
+        bankCount,
+        ctx,
+        resolved);
+
+    return resolved;
+}
 
 PROCEDURAL_TEXTURE_FN ResolvedMaterial resolveMaterial(
     const MaterialGpu& material,
@@ -141,48 +498,7 @@ PROCEDURAL_TEXTURE_FN ResolvedMaterial resolveMaterial(
     const TextureDescGpu* bank,
     uint32_t bankCount)
 {
-    ResolvedMaterial resolved{};
-    const Vec3 albedo = resolveChannelRgb(
-        material.r,
-        material.g,
-        material.b,
-        material.albedoTex,
-        bank,
-        bankCount,
-        ctx);
-    resolved.r = albedo.x;
-    resolved.g = albedo.y;
-    resolved.b = albedo.z;
-    resolved.roughness = proceduralClamp01(resolveChannelScalar(
-        material.roughness, material.roughnessTex, bank, bankCount, ctx));
-    resolved.metallic = proceduralClamp01(resolveChannelScalar(
-        material.metallic, material.metallicTex, bank, bankCount, ctx));
-    resolved.transmission = proceduralClamp01(resolveChannelScalar(
-        material.transmission, material.transmissionTex, bank, bankCount, ctx));
-    resolved.thin = proceduralClamp01(resolveChannelScalar(
-        material.thin, material.thinTex, bank, bankCount, ctx));
-    resolved.ior = fmaxf(1.0e-3f, resolveChannelScalar(
-        material.ior, material.iorTex, bank, bankCount, ctx));
-    resolved.subsurface = proceduralClamp01(resolveChannelScalar(
-        material.subsurface, material.subsurfaceTex, bank, bankCount, ctx));
-    resolved.emission = fmaxf(0.0f, resolveChannelScalar(
-        material.emission, material.emissionTex, bank, bankCount, ctx));
-    resolved.diffuseRoughness = resolveChannelScalar(
-        material.diffuseRoughness,
-        0u,
-        bank,
-        bankCount,
-        ctx);
-    if (resolved.diffuseRoughness < 0.0f) {
-        resolved.diffuseRoughness = resolved.roughness;
-    } else {
-        resolved.diffuseRoughness = proceduralClamp01(resolved.diffuseRoughness);
-    }
-    resolved.scatterRadiusR = fmaxf(0.0f, material.scatterRadiusR);
-    resolved.scatterRadiusG = fmaxf(0.0f, material.scatterRadiusG);
-    resolved.scatterRadiusB = fmaxf(0.0f, material.scatterRadiusB);
-    resolved.specular = proceduralClamp01(material.specular);
-    return resolved;
+    return resolveLayer(material, ctx, bank, bankCount);
 }
 
 PROCEDURAL_TEXTURE_FN MaterialGpu materialFromResolved(const ResolvedMaterial& resolved)
