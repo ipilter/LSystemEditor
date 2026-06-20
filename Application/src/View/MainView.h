@@ -48,6 +48,7 @@ public:
     QDoubleSpinBox* relativeErrorThresholdSpinBox() const;
     QSpinBox* previewStepsSpinBox() const;
     QSpinBox* russianRouletteMinDepthSpinBox() const;
+    /** View mode combo: Render, BVH, Adaptive, UV, Normals. */
     QComboBox* renderViewOverlayComboBox() const;
     QComboBox* brdfDebugComboBox() const;
     QCheckBox* sceneOverlayCheckBox() const;

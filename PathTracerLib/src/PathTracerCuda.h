@@ -124,3 +124,12 @@ bool pathTracerWriteUvDebugToPbo(
     int height,
     const RenderParamsGpu* d_params,
     cudaStream_t stream);
+
+bool pathTracerWriteNormalsDebugToPbo(
+    const CameraGpu* d_camera,
+    const MeshAccelSceneGpu* d_scene,
+    uchar4* pbo,
+    int width,
+    int height,
+    const RenderParamsGpu* d_params,
+    cudaStream_t stream);

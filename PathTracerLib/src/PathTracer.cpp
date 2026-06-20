@@ -13,6 +13,7 @@
 #include "PathTracerCuda.h"
 #include "PathTracerPreviewLevels.h"
 #include "RenderTypes.h"
+#include "SceneUnits.h"
 #include "Spectral/SpectralState.h"
 
 #if defined(_WIN32)
@@ -1124,8 +1125,7 @@ void logPipelineTimingIfDue()
 
 bool buildAndUploadMeshScene(
     PathTracerDetail::PathTracerImpl* impl,
-    const std::vector<ProceduralInstance>& proceduralInstances,
-    const MeshSceneBuildParams& meshParams,
+    const Mesh& mesh,
     QString* outError)
 {
     if (impl == nullptr || impl->sampleStream == nullptr) {
@@ -1138,10 +1138,10 @@ bool buildAndUploadMeshScene(
     std::lock_guard<std::mutex> meshSceneLock(impl->meshSceneMutex);
 
     QString meshError;
-    if (!meshSceneBuild(proceduralInstances, impl->meshScene, meshParams, &meshError)) {
+    if (!meshSceneBuild(mesh, impl->meshScene, &meshError)) {
         if (outError != nullptr) {
             *outError = meshError.isEmpty()
-                ? QStringLiteral("Manifold mesh scene build failed")
+                ? QStringLiteral("Mesh scene build failed")
                 : meshError;
         }
         return false;
@@ -1198,8 +1198,7 @@ bool PathTracer::configure(
     int height,
     uint32_t pbo0,
     uint32_t pbo1,
-    const std::vector<ProceduralInstance>& proceduralInstances,
-    const MeshSceneBuildParams& meshParams)
+    const Mesh& mesh)
 {
     if (width <= 0 || height <= 0 || pbo0 == 0 || pbo1 == 0) {
         AppLog::instance().error(QStringLiteral("PathTracer configure: invalid dimensions or PBO ids"));
@@ -1327,7 +1326,7 @@ bool PathTracer::configure(
     }
 
     QString accelError;
-    if (!buildAndUploadMeshScene(m_impl.get(), proceduralInstances, meshParams, &accelError)) {
+    if (!buildAndUploadMeshScene(m_impl.get(), mesh, &accelError)) {
         AppLog::instance().error(
             QStringLiteral("PathTracer configure: %1").arg(accelError));
         unregisterPboResources(m_impl.get());
@@ -1487,9 +1486,11 @@ bool launchDisplayPublishLocked(
     }
 
     const int overlayMode = impl->debugOverlayMode.load();
-    const bool uvMode = overlayMode == static_cast<int>(RenderViewOverlayMode::Uv);
+    const bool rayTraceDebugMode =
+        overlayMode == static_cast<int>(RenderViewOverlayMode::Uv)
+        || overlayMode == static_cast<int>(RenderViewOverlayMode::Normals);
 
-    if (!uvMode && (!impl->displayBuffersValid.load() || !hasDisplayableContent(*impl))) {
+    if (!rayTraceDebugMode && (!impl->displayBuffersValid.load() || !hasDisplayableContent(*impl))) {
         return false;
     }
 
@@ -1506,7 +1507,7 @@ bool launchDisplayPublishLocked(
         return false;
     }
 
-    if (!uvMode) {
+    if (!rayTraceDebugMode) {
         const cudaError_t waitError =
             cudaStreamWaitEvent(impl->displayStream, impl->sampleCompleteEvent, 0);
         if (waitError != cudaSuccess) {
@@ -1544,7 +1545,7 @@ bool launchDisplayPublishLocked(
     const int finest = impl->finestCompletedPreview.load();
 
     const bool showPreview =
-        !uvMode &&
+        !rayTraceDebugMode &&
         !impl->regionEnabled.load() &&
         previewCount > 0 &&
         finest >= 0 &&
@@ -1558,8 +1559,17 @@ bool launchDisplayPublishLocked(
     }
 
     bool copied = false;
-    if (uvMode) {
+    if (overlayMode == static_cast<int>(RenderViewOverlayMode::Uv)) {
         copied = pathTracerWriteUvDebugToPbo(
+            impl->d_camera,
+            impl->meshScene.deviceScene(),
+            static_cast<uchar4*>(devicePointer),
+            impl->acc.width,
+            impl->acc.height,
+            impl->d_renderParams,
+            impl->displayStream);
+    } else if (overlayMode == static_cast<int>(RenderViewOverlayMode::Normals)) {
+        copied = pathTracerWriteNormalsDebugToPbo(
             impl->d_camera,
             impl->meshScene.deviceScene(),
             static_cast<uchar4*>(devicePointer),
@@ -1760,8 +1770,8 @@ void PathTracer::setDebugOverlayMode(int mode)
     if (mode < 0) {
         mode = 0;
     }
-    if (mode > 3) {
-        mode = 3;
+    if (mode > static_cast<int>(RenderViewOverlayMode::Normals)) {
+        mode = static_cast<int>(RenderViewOverlayMode::Normals);
     }
     m_impl->debugOverlayMode.store(mode);
     m_impl->hostRenderParams.debugOverlayMode = mode;
@@ -2003,7 +2013,9 @@ bool PathTracer::pickSurface(const glm::vec3& ro, const glm::vec3& rd, glm::vec3
     const glm::vec3 normalizedRd = glm::normalize(rd);
     const Vec3 roVec = vecMake3(ro.x, ro.y, ro.z);
     const Vec3 rdVec = vecMake3(normalizedRd.x, normalizedRd.y, normalizedRd.z);
-    const MeshHit hit = meshAccelTraceRay(roVec, rdVec, scene, 0.001f, 1.0e30f);
+    const float primaryEpsilon = SceneUnits::rayEpsilonMm(0.0f, scene->sceneExtentMm);
+    const MeshHit hit = meshAccelTraceRay(
+        roVec, rdVec, scene, primaryEpsilon, SceneUnits::kDefaultRayTMaxMm);
     if (!hit.hit) {
         return false;
     }
@@ -2158,16 +2170,14 @@ const MeshAccelBoundsMesh& PathTracer::meshBoundsMesh() const
     return m_impl->boundsMesh;
 }
 
-bool PathTracer::rebuildMeshScene(
-    const std::vector<ProceduralInstance>& proceduralInstances,
-    const MeshSceneBuildParams& meshParams)
+bool PathTracer::rebuildMeshScene(const Mesh& mesh)
 {
     if (!m_impl->configured.load()) {
         return false;
     }
 
     QString error;
-    if (!buildAndUploadMeshScene(m_impl.get(), proceduralInstances, meshParams, &error)) {
+    if (!buildAndUploadMeshScene(m_impl.get(), mesh, &error)) {
         AppLog::instance().error(QStringLiteral("PathTracer rebuild mesh scene: %1").arg(error));
         return false;
     }

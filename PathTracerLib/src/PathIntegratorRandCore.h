@@ -10,6 +10,7 @@
 #include "Sampling/LightSamplingCore.h"
 #include "Sampling/MisCore.h"
 #include "Sampling/RandCore.h"
+#include "SceneUnits.h"
 #include "Texture/ProceduralTexture.h"
 
 #include <cmath>
@@ -22,9 +23,7 @@
 
 namespace PathIntegratorRandDetail {
 
-constexpr float kRayTMax = 1.0e6f;
-constexpr float kShadowBias = 1.0e-4f;
-constexpr float kRelativeShadowBias = 1.0e-3f;
+constexpr float kRayTMax = SceneUnits::kDefaultRayTMaxMm;
 constexpr float kMinPdf = 1.0e-8f;
 constexpr float kAirIor = 1.0f;
 constexpr float kDefaultWavelengthNm = 550.0f;
@@ -72,7 +71,9 @@ PATH_INTEGRATOR_RAND_FN Vec3 pathIntegratorRandEvaluateEnvironmentNee(
     const MeshAccelSceneGpu* scene,
     const EnvironmentMapGpu* env,
     const RenderParamsGpu* params,
-    curandState* rng)
+    curandState* rng,
+    float hitDistanceMm,
+    uint32_t sourceTriangleIndex)
 {
     if (brdfSkipsEnvironmentNee(material)) {
         return vecMake3(0.0f, 0.0f, 0.0f);
@@ -88,7 +89,7 @@ PATH_INTEGRATOR_RAND_FN Vec3 pathIntegratorRandEvaluateEnvironmentNee(
         return vecMake3(0.0f, 0.0f, 0.0f);
     }
 
-    if (lightIsOccluded(position, normal, wi, scene)) {
+    if (lightIsOccluded(position, normal, wi, scene, hitDistanceMm, sourceTriangleIndex)) {
         return vecMake3(0.0f, 0.0f, 0.0f);
     }
 
@@ -115,7 +116,9 @@ PATH_INTEGRATOR_RAND_FN Vec3 pathIntegratorRandEvaluateEmissiveNee(
     float etaMedium,
     float wavelengthNm,
     const MeshAccelSceneGpu* scene,
-    curandState* rng)
+    curandState* rng,
+    float hitDistanceMm,
+    uint32_t sourceTriangleIndex)
 {
     if (scene == nullptr || scene->emissiveTriangleCount == 0) {
         return vecMake3(0.0f, 0.0f, 0.0f);
@@ -148,7 +151,7 @@ PATH_INTEGRATOR_RAND_FN Vec3 pathIntegratorRandEvaluateEmissiveNee(
         return vecMake3(0.0f, 0.0f, 0.0f);
     }
 
-    if (lightIsOccludedFrom(position, wi, scene)) {
+    if (lightIsOccludedFrom(position, wi, scene, hitDistanceMm, sourceTriangleIndex)) {
         return vecMake3(0.0f, 0.0f, 0.0f);
     }
 
@@ -261,7 +264,9 @@ PATH_INTEGRATOR_RAND_FN Vec3 tracePathRandFromHit(
                     scene,
                     env,
                     params,
-                    rng)));
+                    rng,
+                    currentHit.t,
+                    currentHit.triangleIndex)));
 
         radiance = vecAdd3(
             radiance,
@@ -275,7 +280,9 @@ PATH_INTEGRATOR_RAND_FN Vec3 tracePathRandFromHit(
                     etaMedium,
                     PathIntegratorRandDetail::kDefaultWavelengthNm,
                     scene,
-                    rng)));
+                    rng,
+                    currentHit.t,
+                    currentHit.triangleIndex)));
 
         const BrdfContext ctx{
             normal,
@@ -322,9 +329,9 @@ PATH_INTEGRATOR_RAND_FN Vec3 tracePathRandFromHit(
 
         etaMedium = sample.nextMediumEta;
 
-        const float continuationBias = vecMax2(
-            PathIntegratorRandDetail::kShadowBias,
-            PathIntegratorRandDetail::kRelativeShadowBias * currentHit.t);
+        const float continuationBias = SceneUnits::rayEpsilonMm(
+            currentHit.t,
+            scene != nullptr ? scene->sceneExtentMm : 0.0f);
 
         const float biasSign = vecDot3(normal, sample.direction) >= 0.0f ? 1.0f : -1.0f;
         currentOrigin = vecAdd3(position, vecScale3(normal, biasSign * continuationBias));
@@ -357,8 +364,11 @@ PATH_INTEGRATOR_RAND_FN Vec3 tracePathRand(
     const EnvironmentMapGpu* env,
     curandState* rng)
 {
+    const float primaryEpsilon = SceneUnits::rayEpsilonMm(
+        0.0f,
+        scene != nullptr ? scene->sceneExtentMm : 0.0f);
     const MeshHit hit = meshAccelTraceRay(
-        rayOrigin, rayDir, scene, 0.0f, PathIntegratorRandDetail::kRayTMax);
+        rayOrigin, rayDir, scene, primaryEpsilon, PathIntegratorRandDetail::kRayTMax);
     return tracePathRandFromHit(hit, rayOrigin, rayDir, scene, params, env, rng);
 }
 

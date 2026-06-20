@@ -1,9 +1,9 @@
 #pragma once
 
-#include "HostMesh.h"
+#include "MeshAccel/Mesh.h"
 
 namespace manifold {
 class Manifold;
 }
 
-HostMesh meshFromManifold(const manifold::Manifold& manifoldMesh);
+Mesh meshFromManifold(const manifold::Manifold& manifoldMesh);

@@ -6,7 +6,7 @@
 #include <cstdint>
 #include <vector>
 
-struct HostTriangle
+struct MeshTriangle
 {
     Vec3 v0{};
     Vec3 v1{};
@@ -20,27 +20,27 @@ struct HostTriangle
     uint32_t materialIndex = 0;
 };
 
-struct HostMesh
+struct Mesh
 {
-    std::vector<HostTriangle> triangles;
+    std::vector<MeshTriangle> triangles;
     std::vector<MaterialGpu> materials;
     std::vector<TextureDescGpu> textures;
 };
 
-struct HostMeshAabb
+struct MeshAabb
 {
     Vec3 min{};
     Vec3 max{};
 };
 
-inline HostMeshAabb hostMeshComputeAabb(const HostMesh& mesh)
+inline MeshAabb meshComputeAabb(const Mesh& mesh)
 {
-    HostMeshAabb aabb{};
+    MeshAabb aabb{};
     if (mesh.triangles.empty()) {
         return aabb;
     }
 
-    const HostTriangle& first = mesh.triangles.front();
+    const MeshTriangle& first = mesh.triangles.front();
     aabb.min = first.v0;
     aabb.max = first.v0;
 
@@ -65,7 +65,7 @@ inline HostMeshAabb hostMeshComputeAabb(const HostMesh& mesh)
         }
     };
 
-    for (const HostTriangle& tri : mesh.triangles) {
+    for (const MeshTriangle& tri : mesh.triangles) {
         expand(tri.v0);
         expand(tri.v1);
         expand(tri.v2);
@@ -74,7 +74,7 @@ inline HostMeshAabb hostMeshComputeAabb(const HostMesh& mesh)
     return aabb;
 }
 
-inline void hostMeshAppend(HostMesh& dst, const HostMesh& src, const uint32_t materialIndexOffset = 0)
+inline void meshAppend(Mesh& dst, const Mesh& src, const uint32_t materialIndexOffset = 0)
 {
     const size_t triOffset = dst.triangles.size();
     dst.triangles.insert(dst.triangles.end(), src.triangles.begin(), src.triangles.end());

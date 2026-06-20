@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Geometry/GeometryTypes.h"
+#include "SceneUnits.h"
 
 #include <cstddef>
 #include <string>
@@ -32,7 +33,9 @@ struct TurtleOutput
 
 struct TurtleParams
 {
+    /** @brief Default turtle step length in mm. */
     float defaultStepLength = 500.0f;
+    /** @brief Default branch radius in mm. */
     float defaultRadius = 100.0f;
 };
 
@@ -63,8 +66,10 @@ struct ProceduralBuildParams
     int circularSegments = 32;
     int samplesPerSpan = 4;
     float hermiteTension = 1.0f;
-    float segmentRefineTolerance = 0.01f;
-    float globalRefineTolerance = 0.01f;
+    /** @brief Manifold geometric deviation tolerance in mm; see SceneUnits::kDefaultSegmentRefineToleranceMm. */
+    float segmentRefineTolerance = SceneUnits::kDefaultSegmentRefineToleranceMm;
+    /** @brief Manifold RefineToTolerance setpoint in mm; see SceneUnits::kDefaultGlobalRefineToleranceMm. */
+    float globalRefineTolerance = SceneUnits::kDefaultGlobalRefineToleranceMm;
     float creaseAngleDeg = 50.0f;
     TurtleParams turtle{};
 };

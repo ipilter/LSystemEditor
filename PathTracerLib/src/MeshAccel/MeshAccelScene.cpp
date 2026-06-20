@@ -2,13 +2,14 @@
 
 #include "MeshBvhBuilder.h"
 #include "Geometry/MathCore.h"
+#include "Mesh.h"
 
 #include <cuda_runtime.h>
 #include <type_traits>
 
 namespace {
 
-TriangleGpu makeTriangleGpu(const HostTriangle& tri)
+TriangleGpu makeTriangleGpu(const MeshTriangle& tri)
 {
     TriangleGpu gpu{};
     gpu.v0 = tri.v0;
@@ -57,6 +58,15 @@ float materialEmissionLuminance(const MaterialGpu& material)
 {
     return material.emission * (
         0.2126f * material.r + 0.7152f * material.g + 0.0722f * material.b);
+}
+
+float sceneExtentFromMesh(const Mesh& mesh)
+{
+    const MeshAabb aabb = meshComputeAabb(mesh);
+    return vecMax3(
+        aabb.max.x - aabb.min.x,
+        aabb.max.y - aabb.min.y,
+        aabb.max.z - aabb.min.z);
 }
 
 void buildEmissiveTriangleList(
@@ -138,7 +148,7 @@ void MeshAccelScene::clear()
     m_deviceDirty = true;
 }
 
-bool MeshAccelScene::build(const HostMesh& mesh)
+bool MeshAccelScene::build(const Mesh& mesh)
 {
     clear();
 
@@ -161,7 +171,7 @@ bool MeshAccelScene::build(const HostMesh& mesh)
     m_textures = mesh.textures;
 
     m_triangles.reserve(mesh.triangles.size());
-    for (const HostTriangle& tri : mesh.triangles) {
+    for (const MeshTriangle& tri : mesh.triangles) {
         m_triangles.push_back(makeTriangleGpu(tri));
     }
 
@@ -173,6 +183,8 @@ bool MeshAccelScene::build(const HostMesh& mesh)
     }
 
     buildEmissiveTriangleList(m_triangles, m_materials, m_emissiveTriangleIndices, m_emissiveTriangleCdf);
+
+    const float sceneExtentMm = sceneExtentFromMesh(mesh);
 
     m_hostScene = MeshAccelSceneGpu{};
     m_hostScene.bvhNodes = m_bvhNodes.data();
@@ -187,6 +199,7 @@ bool MeshAccelScene::build(const HostMesh& mesh)
     m_hostScene.materialCount = static_cast<uint32_t>(m_materials.size());
     m_hostScene.emissiveTriangleCount = static_cast<uint32_t>(m_emissiveTriangleIndices.size());
     m_hostScene.textureCount = static_cast<uint32_t>(m_textures.size());
+    m_hostScene.sceneExtentMm = sceneExtentMm;
 
     m_built = true;
     m_deviceDirty = true;
@@ -318,6 +331,7 @@ bool MeshAccelScene::upload(cudaStream_t stream)
     deviceScene.materialCount = static_cast<uint32_t>(m_materials.size());
     deviceScene.emissiveTriangleCount = static_cast<uint32_t>(m_emissiveTriangleIndices.size());
     deviceScene.textureCount = static_cast<uint32_t>(m_textures.size());
+    deviceScene.sceneExtentMm = m_hostScene.sceneExtentMm;
 
     if (cudaMemcpyAsync(m_dScene, &deviceScene, sizeof(MeshAccelSceneGpu), cudaMemcpyHostToDevice, stream)
         != cudaSuccess) {

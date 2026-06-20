@@ -1,7 +1,7 @@
 #pragma once
 
 #include "MeshAccelTypes.h"
-#include "MeshBuilder/HostMesh.h"
+#include "MeshAccel/Mesh.h"
 
 #include <QString>
 
@@ -19,7 +19,7 @@ public:
 
     void clear();
 
-    bool build(const HostMesh& mesh);
+    bool build(const Mesh& mesh);
 
     bool allocate();
     void release();

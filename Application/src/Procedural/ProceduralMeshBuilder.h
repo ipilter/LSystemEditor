@@ -1,6 +1,6 @@
 #pragma once
 
-#include "HostMesh.h"
+#include "MeshAccel/Mesh.h"
 #include "ProceduralTypes.h"
 
 #include <cstddef>
@@ -14,7 +14,7 @@ public:
         std::string_view definition,
         std::size_t iterations,
         const RootTransform& root,
-        HostMesh& outMesh,
+        Mesh& outMesh,
         const ProceduralBuildParams& params = ProceduralBuildParams{},
         std::string* outError = nullptr);
 };

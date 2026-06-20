@@ -9,6 +9,25 @@
 #define MESH_ACCEL_CORE_FN inline
 #endif
 
+MESH_ACCEL_CORE_FN Vec3 meshAccelTriangleGeometricNormal(const TriangleGpu& tri)
+{
+    const Vec3 e1 = vecSub3(tri.v1, tri.v0);
+    const Vec3 e2 = vecSub3(tri.v2, tri.v0);
+    const Vec3 cross = vecCross3(e1, e2);
+    const float len = vecLength3(cross);
+    if (len <= 1.0e-12f) {
+        return vecMake3(0.0f, 0.0f, 1.0f);
+    }
+    return vecScale3(cross, 1.0f / len);
+}
+
+MESH_ACCEL_CORE_FN float meshAccelTriangleDoubleArea(const TriangleGpu& tri)
+{
+    const Vec3 e1 = vecSub3(tri.v1, tri.v0);
+    const Vec3 e2 = vecSub3(tri.v2, tri.v0);
+    return vecLength3(vecCross3(e1, e2));
+}
+
 MESH_ACCEL_CORE_FN bool meshAccelRayAabb(
     Vec3 ro,
     Vec3 rd,
@@ -28,6 +47,13 @@ MESH_ACCEL_CORE_FN bool meshAccelRayAabb(
         const float invD = axis == 0 ? invRd.x : (axis == 1 ? invRd.y : invRd.z);
         const float bMin = axis == 0 ? boundsMin.x : (axis == 1 ? boundsMin.y : boundsMin.z);
         const float bMax = axis == 0 ? boundsMax.x : (axis == 1 ? boundsMax.y : boundsMax.z);
+
+        if (fabsf(invD) <= 1.0e-8f) {
+            if (origin < bMin || origin > bMax) {
+                return false;
+            }
+            continue;
+        }
 
         float t0 = (bMin - origin) * invD;
         float t1 = (bMax - origin) * invD;
@@ -94,9 +120,18 @@ MESH_ACCEL_CORE_FN bool meshAccelRayTriangle(
 
     const float baryW = 1.0f - baryU - baryV;
     outT = t;
-    Vec3 n = vecNormalize3(vecAdd3(
+
+    const Vec3 geomNormal = meshAccelTriangleGeometricNormal(tri);
+    const float doubleArea = meshAccelTriangleDoubleArea(tri);
+    Vec3 n = vecAdd3(
         vecAdd3(vecScale3(tri.n0, baryW), vecScale3(tri.n1, baryU)),
-        vecScale3(tri.n2, baryV)));
+        vecScale3(tri.n2, baryV));
+    const float shadingNormalLen = vecLength3(n);
+    if (shadingNormalLen <= 1.0e-4f || doubleArea <= 1.0e-6f) {
+        n = geomNormal;
+    } else {
+        n = vecScale3(n, 1.0f / shadingNormalLen);
+    }
     if (vecDot3(n, rd) > 0.0f) {
         n = vecScale3(n, -1.0f);
     }

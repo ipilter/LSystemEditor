@@ -553,6 +553,49 @@ __global__ void writeUvDebugToPboKernel(
     pbo[y * width + x] = toneMapToUchar4(rgb);
 }
 
+__global__ void writeNormalsDebugToPboKernel(
+    const CameraGpu* camera,
+    const MeshAccelSceneGpu* scene,
+    uchar4* pbo,
+    int width,
+    int height,
+    const RenderParamsGpu* params)
+{
+    const int x = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
+    const int y = static_cast<int>(blockIdx.y * blockDim.y + threadIdx.y);
+    if (x >= width || y >= height || camera == nullptr || scene == nullptr || pbo == nullptr) {
+        return;
+    }
+
+    const float u = (static_cast<float>(x) + 0.5f) / static_cast<float>(width);
+    const float v = (static_cast<float>(y) + 0.5f) / static_cast<float>(height);
+
+    float3 roFloat{};
+    float3 rdFloat{};
+    cameraPrimaryRay(camera, u, v, roFloat, rdFloat);
+
+    float3 rgb{};
+    if (params != nullptr) {
+        rgb = make_float3(params->backgroundR, params->backgroundG, params->backgroundB);
+    }
+
+    const MeshHit hit = meshAccelTraceRay(
+        float3ToVec3(roFloat),
+        float3ToVec3(rdFloat),
+        scene,
+        0.001f,
+        1.0e30f);
+    if (hit.hit) {
+        const Vec3 normal = hit.normal;
+        rgb = make_float3(
+            normal.x * 0.5f + 0.5f,
+            normal.y * 0.5f + 0.5f,
+            normal.z * 0.5f + 0.5f);
+    }
+
+    pbo[y * width + x] = toneMapToUchar4(rgb);
+}
+
 dim3 grid2d(int width, int height, dim3 block)
 {
     return dim3(
@@ -932,5 +975,25 @@ bool pathTracerWriteUvDebugToPbo(
     const dim3 block(16, 16);
     const dim3 grid = grid2d(width, height, block);
     writeUvDebugToPboKernel<<<grid, block, 0, stream>>>(d_camera, d_scene, pbo, width, height, d_params);
+    return checkLaunch(cudaSuccess);
+}
+
+bool pathTracerWriteNormalsDebugToPbo(
+    const CameraGpu* d_camera,
+    const MeshAccelSceneGpu* d_scene,
+    uchar4* pbo,
+    int width,
+    int height,
+    const RenderParamsGpu* d_params,
+    cudaStream_t stream)
+{
+    if (d_camera == nullptr || d_scene == nullptr || pbo == nullptr || d_params == nullptr || width <= 0 ||
+        height <= 0) {
+        return false;
+    }
+
+    const dim3 block(16, 16);
+    const dim3 grid = grid2d(width, height, block);
+    writeNormalsDebugToPboKernel<<<grid, block, 0, stream>>>(d_camera, d_scene, pbo, width, height, d_params);
     return checkLaunch(cudaSuccess);
 }

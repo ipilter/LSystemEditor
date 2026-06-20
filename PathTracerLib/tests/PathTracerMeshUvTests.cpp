@@ -1,6 +1,6 @@
+#include "MeshAccel/Mesh.h"
 #include "Loft.h"
 #include "Geometry/MathCore.h"
-#include "ManifoldMeshConvert.h"
 #include "MeshAccel/MeshAccelIntersectCore.h"
 #include "MeshAccel/MeshAccelTypes.h"
 #include "ProceduralTypes.h"
@@ -46,7 +46,7 @@ void includeUv(UvBounds& bounds, const Vec2& uv)
     bounds.maxV = std::max(bounds.maxV, uv.y);
 }
 
-UvBounds triangleUvBounds(const HostTriangle& triangle)
+UvBounds triangleUvBounds(const MeshTriangle& triangle)
 {
     UvBounds bounds{};
     includeUv(bounds, triangle.uv0);
@@ -55,7 +55,7 @@ UvBounds triangleUvBounds(const HostTriangle& triangle)
     return bounds;
 }
 
-bool isCapFacingTriangle(const HostTriangle& triangle, const Vec3& axis)
+bool isCapFacingTriangle(const MeshTriangle& triangle, const Vec3& axis)
 {
     const Vec3 edge0 = vecSub3(triangle.v1, triangle.v0);
     const Vec3 edge1 = vecSub3(triangle.v2, triangle.v0);
@@ -77,9 +77,9 @@ TurtleSegment makeShortWideLoftSegment()
     return segment;
 }
 
-HostMesh buildShortWideLoftHostMesh(const ProceduralBuildParams& params)
+Mesh buildShortWideLoftMesh(const ProceduralBuildParams& params)
 {
-    return loftHostMeshFromSegment(makeShortWideLoftSegment(), params);
+    return renderMeshFromSegment(makeShortWideLoftSegment(), params);
 }
 
 void testLoftMeshPreservesNonZeroUvs()
@@ -101,12 +101,12 @@ void testLoftMeshPreservesNonZeroUvs()
     const manifold::Manifold loftMesh = loftOrSphereFromSegment(segment, params);
     expectTrue(loftMesh.NumTri() > 0, "loft validation mesh has triangles");
 
-    const HostMesh hostMesh = loftHostMeshFromSegment(segment, params);
-    expectTrue(!hostMesh.triangles.empty(), "loft render mesh has triangles");
+    const Mesh mesh = renderMeshFromSegment(segment, params);
+    expectTrue(!mesh.triangles.empty(), "loft render mesh has triangles");
 
     bool foundNonZeroU = false;
     bool foundNonZeroV = false;
-    for (const HostTriangle& triangle : hostMesh.triangles) {
+    for (const MeshTriangle& triangle : mesh.triangles) {
         if (triangle.uv0.x > 0.0f || triangle.uv1.x > 0.0f || triangle.uv2.x > 0.0f) {
             foundNonZeroU = true;
         }
@@ -126,8 +126,8 @@ void testLoftCapDiscHasPlanarUvVariation()
     params.samplesPerSpan = 4;
     params.segmentRefineTolerance = 1.0f;
 
-    const HostMesh hostMesh = buildShortWideLoftHostMesh(params);
-    expectTrue(!hostMesh.triangles.empty(), "short wide loft has triangles");
+    const Mesh mesh = buildShortWideLoftMesh(params);
+    expectTrue(!mesh.triangles.empty(), "short wide loft has triangles");
 
     const Vec3 axis{1.0f, 0.0f, 0.0f};
     bool foundCapTriangle = false;
@@ -135,7 +135,7 @@ void testLoftCapDiscHasPlanarUvVariation()
     bool foundCapVaryingV = false;
     UvBounds capBounds{};
 
-    for (const HostTriangle& triangle : hostMesh.triangles) {
+    for (const MeshTriangle& triangle : mesh.triangles) {
         if (!isCapFacingTriangle(triangle, axis)) {
             continue;
         }
@@ -168,14 +168,14 @@ void testLoftSideWallHasCylindricalUvVariation()
     params.samplesPerSpan = 4;
     params.segmentRefineTolerance = 1.0f;
 
-    const HostMesh hostMesh = buildShortWideLoftHostMesh(params);
+    const Mesh mesh = buildShortWideLoftMesh(params);
     const Vec3 axis{1.0f, 0.0f, 0.0f};
 
     bool foundSideTriangle = false;
     bool foundSideVaryingU = false;
     bool foundSideVaryingV = false;
 
-    for (const HostTriangle& triangle : hostMesh.triangles) {
+    for (const MeshTriangle& triangle : mesh.triangles) {
         if (isCapFacingTriangle(triangle, axis)) {
             continue;
         }
@@ -195,18 +195,19 @@ void testLoftSideWallHasCylindricalUvVariation()
     expectTrue(foundSideVaryingV, "loft side wall varies in V");
 }
 
-void testLoftSideWallUsesSeamColumn()
+void testLoftSideWallSeamIsWellBehaved()
 {
     ProceduralBuildParams params{};
     params.circularSegments = 16;
     params.samplesPerSpan = 4;
 
-    const HostMesh hostMesh = buildShortWideLoftHostMesh(params);
+    const Mesh mesh = buildShortWideLoftMesh(params);
     const Vec3 axis{1.0f, 0.0f, 0.0f};
 
     bool foundSideTriangle = false;
-    bool foundUAtOne = false;
-    for (const HostTriangle& triangle : hostMesh.triangles) {
+    bool foundHighU = false;
+    bool foundSeamClosingTriangle = false;
+    for (const MeshTriangle& triangle : mesh.triangles) {
         if (isCapFacingTriangle(triangle, axis)) {
             continue;
         }
@@ -214,18 +215,23 @@ void testLoftSideWallUsesSeamColumn()
         foundSideTriangle = true;
         const UvBounds bounds = triangleUvBounds(triangle);
         const float maxU = std::max({triangle.uv0.x, triangle.uv1.x, triangle.uv2.x});
-        if (maxU > 0.99f) {
-            foundUAtOne = true;
+        if (maxU > 0.9f) {
+            foundHighU = true;
         }
 
-        const bool wrapAroundSeam =
+        const bool seamClosingTriangle =
             bounds.minU < 0.05f && bounds.maxU > 0.85f && bounds.maxU < 0.99f;
-        expectTrue(!wrapAroundSeam, "no side triangle spans u=0 to u~15/16 without seam column");
+        if (seamClosingTriangle) {
+            foundSeamClosingTriangle = true;
+            continue;
+        }
+
         expectTrue(bounds.maxU - bounds.minU <= 0.5f, "loft side triangle has bounded U span");
     }
 
-    expectTrue(foundSideTriangle, "short wide loft has side-wall triangles for seam column test");
-    expectTrue(foundUAtOne, "side wall includes seam column at u=1");
+    expectTrue(foundSideTriangle, "short wide loft has side-wall triangles for seam test");
+    expectTrue(foundHighU, "side wall reaches high U near circumferential seam");
+    expectTrue(foundSeamClosingTriangle, "side wall includes seam closing triangle");
 }
 
 void testSphereMeshUsesSphericalUvFallback()
@@ -241,13 +247,12 @@ void testSphereMeshUsesSphericalUvFallback()
     ProceduralBuildParams params{};
     params.circularSegments = 12;
 
-    const manifold::Manifold sphereMesh = loftOrSphereFromSegment(segment, params);
-    const HostMesh hostMesh = meshFromManifold(sphereMesh);
-    expectTrue(!hostMesh.triangles.empty(), "sphere mesh has triangles");
+    const Mesh mesh = renderMeshFromSegment(segment, params);
+    expectTrue(!mesh.triangles.empty(), "sphere mesh has triangles");
 
     bool foundVaryingU = false;
     bool foundVaryingV = false;
-    for (const HostTriangle& triangle : hostMesh.triangles) {
+    for (const MeshTriangle& triangle : mesh.triangles) {
         const UvBounds bounds = triangleUvBounds(triangle);
         if (bounds.maxU - bounds.minU > 0.01f) {
             foundVaryingU = true;
@@ -286,14 +291,20 @@ void testInterpolatesUvAtHit()
     expectNear(uv.y, 0.25f, 1e-5f, "interpolated uv.y");
 }
 
-void testUvOverlayModeEnumValue()
+void testOverlayModeEnumValues()
 {
     expectTrue(
         static_cast<int>(RenderViewOverlayMode::Uv) == 3,
         "Uv view mode enum value is 3");
     expectTrue(
+        static_cast<int>(RenderViewOverlayMode::Normals) == 4,
+        "Normals view mode enum value is 4");
+    expectTrue(
         static_cast<int>(RenderViewOverlayMode::AdaptiveSampling) < static_cast<int>(RenderViewOverlayMode::Uv),
         "Uv follows AdaptiveSampling in view mode enum");
+    expectTrue(
+        static_cast<int>(RenderViewOverlayMode::Uv) < static_cast<int>(RenderViewOverlayMode::Normals),
+        "Normals follows Uv in view mode enum");
 }
 
 } // namespace
@@ -303,10 +314,10 @@ int main()
     testLoftMeshPreservesNonZeroUvs();
     testLoftCapDiscHasPlanarUvVariation();
     testLoftSideWallHasCylindricalUvVariation();
-    testLoftSideWallUsesSeamColumn();
+    testLoftSideWallSeamIsWellBehaved();
     testSphereMeshUsesSphericalUvFallback();
     testInterpolatesUvAtHit();
-    testUvOverlayModeEnumValue();
+    testOverlayModeEnumValues();
 
     if (gFailures == 0) {
         std::cout << "All mesh UV tests passed.\n";

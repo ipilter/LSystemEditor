@@ -4,7 +4,6 @@
 #include "LSystemEvaluator.h"
 #include "LSystemMaterials.h"
 #include "Loft.h"
-#include "ManifoldMeshConvert.h"
 #include "Turtle.h"
 
 #include <cmath>
@@ -201,64 +200,11 @@ uint32_t remapMaterialId(
     return 0;
 }
 
-void assignMaterialIndex(HostMesh& mesh, const uint32_t materialIndex)
+void assignMaterialIndex(Mesh& mesh, const uint32_t materialIndex)
 {
-    for (HostTriangle& tri : mesh.triangles) {
+    for (MeshTriangle& tri : mesh.triangles) {
         tri.materialIndex = materialIndex;
     }
-}
-
-constexpr float kDegToRad = 0.0174532925f;
-
-Vec3 rotateAroundAxis(Vec3 value, Vec3 axis, float radians)
-{
-    const Vec3 unitAxis = vecNormalize3(axis);
-    const float c = std::cos(radians);
-    const float s = std::sin(radians);
-    const float dot = vecDot3(unitAxis, value);
-    const Vec3 cross = vecMake3(
-        unitAxis.y * value.z - unitAxis.z * value.y,
-        unitAxis.z * value.x - unitAxis.x * value.z,
-        unitAxis.x * value.y - unitAxis.y * value.x);
-    return vecAdd3(
-        vecAdd3(vecScale3(value, c), vecScale3(cross, s)),
-        vecScale3(unitAxis, dot * (1.0f - c)));
-}
-
-Vec3 rotateYawPitchRoll(Vec3 value, const RootTransform& root)
-{
-    Vec3 rotated = value;
-    if (std::fabs(root.rotationDeg.x) > 1.0e-6f) {
-        rotated = rotateAroundAxis(rotated, Vec3{0.0f, 1.0f, 0.0f}, root.rotationDeg.x * kDegToRad);
-    }
-    if (std::fabs(root.rotationDeg.y) > 1.0e-6f) {
-        rotated = rotateAroundAxis(rotated, Vec3{1.0f, 0.0f, 0.0f}, root.rotationDeg.y * kDegToRad);
-    }
-    if (std::fabs(root.rotationDeg.z) > 1.0e-6f) {
-        rotated = rotateAroundAxis(rotated, Vec3{0.0f, 0.0f, 1.0f}, root.rotationDeg.z * kDegToRad);
-    }
-    return rotated;
-}
-
-void applyRootTransform(HostMesh& mesh, const RootTransform& root)
-{
-    for (HostTriangle& tri : mesh.triangles) {
-        tri.v0 = vecAdd3(rotateYawPitchRoll(tri.v0, root), root.translation);
-        tri.v1 = vecAdd3(rotateYawPitchRoll(tri.v1, root), root.translation);
-        tri.v2 = vecAdd3(rotateYawPitchRoll(tri.v2, root), root.translation);
-        tri.n0 = rotateYawPitchRoll(tri.n0, root);
-        tri.n1 = rotateYawPitchRoll(tri.n1, root);
-        tri.n2 = rotateYawPitchRoll(tri.n2, root);
-    }
-}
-
-bool isLoftSegment(const TurtleSegment& segment, const ProceduralBuildParams& params)
-{
-    SplinePath path;
-    if (!path.buildFromSegment(segment, params.hermiteTension)) {
-        return false;
-    }
-    return path.totalArcLength() > 1e-6f;
 }
 
 } // namespace
@@ -267,7 +213,7 @@ bool ProceduralMeshBuilder::buildHostMesh(
     std::string_view definition,
     const std::size_t iterations,
     const RootTransform& root,
-    HostMesh& outMesh,
+    Mesh& outMesh,
     const ProceduralBuildParams& params,
     std::string* outError)
 {
@@ -303,27 +249,17 @@ bool ProceduralMeshBuilder::buildHostMesh(
             continue;
         }
 
-        HostMesh piece{};
-        if (isLoftSegment(segment, params)) {
-            piece = loftHostMeshFromSegment(segment, params);
-            if (piece.triangles.empty()) {
-                continue;
-            }
-            applyRootTransform(piece, root);
-        } else {
-            segmentMesh = segmentMesh.CalculateNormals(0, static_cast<double>(params.creaseAngleDeg));
-            if (!isValidManifold(segmentMesh)) {
-                continue;
-            }
-            piece = meshFromManifold(segmentMesh);
-            if (piece.triangles.empty()) {
-                continue;
-            }
+        Mesh piece = renderMeshFromManifold(
+            segmentMesh,
+            params,
+            characteristicRadiusFromSegment(segment, params));
+        if (piece.triangles.empty()) {
+            continue;
         }
 
         const uint32_t materialIndex = remapMaterialId(lsystemIdToIndex, segment.materialId);
         assignMaterialIndex(piece, materialIndex);
-        hostMeshAppend(outMesh, piece);
+        meshAppend(outMesh, piece);
     }
 
     return !outMesh.triangles.empty();

@@ -43,6 +43,8 @@ RenderViewOverlayMode renderViewOverlayModeFromComboIndex(int index)
         return RenderViewOverlayMode::AdaptiveSampling;
     case 3:
         return RenderViewOverlayMode::Uv;
+    case 4:
+        return RenderViewOverlayMode::Normals;
     case 0:
     default:
         return RenderViewOverlayMode::Render;
@@ -58,6 +60,8 @@ int comboIndexFromBoundsOverlayMode(RenderViewOverlayMode mode)
         return 2;
     case RenderViewOverlayMode::Uv:
         return 3;
+    case RenderViewOverlayMode::Normals:
+        return 4;
     case RenderViewOverlayMode::Render:
     default:
         return 0;

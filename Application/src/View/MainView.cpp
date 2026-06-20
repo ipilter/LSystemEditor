@@ -176,11 +176,13 @@ MainView::MainView(QWidget* parent)
     m_renderViewOverlayComboBox->addItem(QStringLiteral("BVH"));
     m_renderViewOverlayComboBox->addItem(QStringLiteral("Adaptive"));
     m_renderViewOverlayComboBox->addItem(QStringLiteral("UV"));
+    m_renderViewOverlayComboBox->addItem(QStringLiteral("Normals"));
     m_renderViewOverlayComboBox->setToolTip(
         QStringLiteral(
             "View modes: Render (path-traced image), BVH wireframe overlay, "
             "Adaptive sampling (red = active, dark green = converged), "
-            "UV (U to red, V to green)."));
+            "UV (U to red, V to green), "
+            "Normals (R=±X, G=±Y, B=±Z; uses interpolated split normals)."));
     boundsOverlayRow->addWidget(m_renderViewOverlayComboBox, 1);
     renderLayout->addLayout(boundsOverlayRow);
 

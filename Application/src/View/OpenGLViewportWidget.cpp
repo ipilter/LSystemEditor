@@ -3,6 +3,7 @@
 #include "AppLog.h"
 #include "AppSettings.h"
 #include "MeshAccel/MeshSceneContent.h"
+#include "Procedural/ProceduralSceneMeshBuilder.h"
 #include "SceneModel.h"
 #include "SceneUnits.h"
 
@@ -147,13 +148,24 @@ QRect normalizedImageRect(const QPoint& a, const QPoint& b)
         QPoint(std::max(a.x(), b.x()), std::max(a.y(), b.y())));
 }
 
-MeshSceneBuildParams meshSceneBuildParamsForModel(const SceneModel* model)
+ProceduralBuildParams proceduralBuildParamsForModel(const SceneModel* model)
 {
-    MeshSceneBuildParams params{};
+    ProceduralBuildParams params{};
+    params.circularSegments = 64;
     if (model != nullptr) {
         params.creaseAngleDeg = model->creaseAngleDeg();
     }
     return params;
+}
+
+bool buildSceneMeshForModel(const SceneModel* model, Mesh& outMesh, std::string* outError = nullptr)
+{
+    if (model == nullptr) {
+        outMesh = Mesh{};
+        return true;
+    }
+    return buildMeshFromInstances(
+        model->proceduralInstances(), proceduralBuildParamsForModel(model), outMesh, outError);
 }
 
 } // namespace
@@ -320,8 +332,16 @@ void OpenGLViewportWidget::setSceneModel(SceneModel* model)
             return;
         }
         makeCurrent();
-        if (!m_pathTracer.rebuildMeshScene(
-                m_model->proceduralInstances(), meshSceneBuildParamsForModel(m_model))) {
+        Mesh mesh{};
+        std::string meshError;
+        if (!buildSceneMeshForModel(m_model, mesh, &meshError)) {
+            AppLog::instance().error(
+                QStringLiteral("PathTracer rebuild mesh scene: %1")
+                    .arg(QString::fromStdString(meshError)));
+            doneCurrent();
+            return;
+        }
+        if (!m_pathTracer.rebuildMeshScene(mesh)) {
             doneCurrent();
             return;
         }
@@ -1285,13 +1305,20 @@ void OpenGLViewportWidget::recreateGpuBuffers()
     }
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
+    Mesh mesh{};
+    std::string meshError;
+    if (!buildSceneMeshForModel(m_model, mesh, &meshError)) {
+        AppLog::instance().error(
+            QStringLiteral("PathTracer configure: %1").arg(QString::fromStdString(meshError)));
+        return;
+    }
+
     if (!m_pathTracer.configure(
             w,
             h,
             m_pbos[0],
             m_pbos[1],
-            m_model->proceduralInstances(),
-            meshSceneBuildParamsForModel(m_model))) {
+            mesh)) {
         AppLog::instance().error(QStringLiteral("PathTracer configure failed for %1x%2").arg(w).arg(h));
         return;
     }

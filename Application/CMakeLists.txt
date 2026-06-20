@@ -4,11 +4,13 @@ set(APPLICATION_SRC_DIR "${PATHTRACER_APPLICATION_DIR}/src")
 
 set(PATHTRACER_MESH_BUILDER_SOURCES
     "${APPLICATION_SRC_DIR}/MeshBuilder/ManifoldMeshConvert.cpp"
+    "${APPLICATION_SRC_DIR}/MeshBuilder/MeshSmoothNormals.cpp"
     "${APPLICATION_SRC_DIR}/Procedural/Turtle.cpp"
     "${APPLICATION_SRC_DIR}/Procedural/Spline.cpp"
     "${APPLICATION_SRC_DIR}/Procedural/Loft.cpp"
     "${APPLICATION_SRC_DIR}/Procedural/ProceduralAssembly.cpp"
-    "${APPLICATION_SRC_DIR}/Procedural/ProceduralMeshBuilder.cpp")
+    "${APPLICATION_SRC_DIR}/Procedural/ProceduralMeshBuilder.cpp"
+    "${APPLICATION_SRC_DIR}/Procedural/ProceduralSceneMeshBuilder.cpp")
 
 add_library(pathtracer_mesh_builder STATIC ${PATHTRACER_MESH_BUILDER_SOURCES})
 
@@ -61,6 +63,7 @@ function(application_add_pathtracer_executable)
         "${CMAKE_SOURCE_DIR}/PathTracerLib/src/MeshAccel")
     target_link_libraries(pathtracer PRIVATE
         PathTracerLib
+        pathtracer_mesh_builder
         Qt6::Widgets
         Qt6::OpenGL
         Qt6::OpenGLWidgets
@@ -119,7 +122,7 @@ function(application_add_pathtracer_tests)
     add_executable(mesh_accel_tests
         "${CMAKE_SOURCE_DIR}/PathTracerLib/tests/MeshAccelTests.cpp"
         "${_application_dir}/tests/ProceduralMeshTests.cpp")
-    target_link_libraries(mesh_accel_tests PRIVATE PathTracerLib Qt6::Gui)
+    target_link_libraries(mesh_accel_tests PRIVATE PathTracerLib pathtracer_mesh_builder Qt6::Gui)
     target_include_directories(mesh_accel_tests PRIVATE
         "${CMAKE_SOURCE_DIR}/PathTracerLib/src"
         "${CMAKE_SOURCE_DIR}/PathTracerLib/src/MeshAccel"

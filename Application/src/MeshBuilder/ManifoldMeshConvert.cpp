@@ -31,9 +31,9 @@ Vec2 sphericalUvFromPosition(Vec3 position)
 
 } // namespace
 
-HostMesh meshFromManifold(const manifold::Manifold& manifoldMesh)
+Mesh meshFromManifold(const manifold::Manifold& manifoldMesh)
 {
-    HostMesh mesh{};
+    Mesh mesh{};
     const manifold::MeshGL gl = manifoldMesh.GetMeshGL();
     if (gl.triVerts.empty() || gl.numProp < 3) {
         return mesh;
@@ -82,26 +82,26 @@ HostMesh meshFromManifold(const manifold::Manifold& manifoldMesh)
         const Vec3 v1 = vertexAt(i1);
         const Vec3 v2 = vertexAt(i2);
 
-        HostTriangle hostTri{};
-        hostTri.v0 = v0;
-        hostTri.v1 = v1;
-        hostTri.v2 = v2;
-        hostTri.uv0 = uvAt(i0);
-        hostTri.uv1 = uvAt(i1);
-        hostTri.uv2 = uvAt(i2);
+        MeshTriangle meshTri{};
+        meshTri.v0 = v0;
+        meshTri.v1 = v1;
+        meshTri.v2 = v2;
+        meshTri.uv0 = uvAt(i0);
+        meshTri.uv1 = uvAt(i1);
+        meshTri.uv2 = uvAt(i2);
 
         if (hasVertexNormals) {
-            hostTri.n0 = normalAt(i0);
-            hostTri.n1 = normalAt(i1);
-            hostTri.n2 = normalAt(i2);
+            meshTri.n0 = normalAt(i0);
+            meshTri.n1 = normalAt(i1);
+            meshTri.n2 = normalAt(i2);
         } else {
             const Vec3 faceNormal = faceNormalFromTriangle(v0, v1, v2);
-            hostTri.n0 = faceNormal;
-            hostTri.n1 = faceNormal;
-            hostTri.n2 = faceNormal;
+            meshTri.n0 = faceNormal;
+            meshTri.n1 = faceNormal;
+            meshTri.n2 = faceNormal;
         }
 
-        mesh.triangles.push_back(hostTri);
+        mesh.triangles.push_back(meshTri);
     }
 
     return mesh;

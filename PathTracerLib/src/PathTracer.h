@@ -4,8 +4,8 @@
 #include "PhysicalCamera.h"
 #include "RenderTypes.h"
 #include "MeshAccel/MeshAccelBoundsMesh.h"
+#include "MeshAccel/Mesh.h"
 #include "MeshAccel/MeshSceneContent.h"
-#include "Procedural/ProceduralTypes.h"
 
 #include <QColor>
 #include <QRect>
@@ -47,8 +47,7 @@ public:
         int height,
         uint32_t pbo0,
         uint32_t pbo1,
-        const std::vector<ProceduralInstance>& proceduralInstances = {},
-        const MeshSceneBuildParams& meshParams = {});
+        const Mesh& mesh = {});
 
     void start();
     void stop();
@@ -127,9 +126,7 @@ public:
     void rebuildMeshBoundsMesh(const QColor& boundsColor);
     const MeshAccelBoundsMesh& meshBoundsMesh() const;
 
-    bool rebuildMeshScene(
-        const std::vector<ProceduralInstance>& proceduralInstances = {},
-        const MeshSceneBuildParams& meshParams = {});
+    bool rebuildMeshScene(const Mesh& mesh = {});
 
     void setRegionRenderEnabled(bool enabled);
     bool regionRenderEnabled() const;

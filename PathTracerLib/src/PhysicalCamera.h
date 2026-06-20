@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CameraGpu.h"
+#include "SceneUnits.h"
 
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -43,7 +44,7 @@ public:
     static constexpr float kMinShutterSpeedSeconds = 1.0f / 8000.0f;
     static constexpr float kMaxShutterSpeedSeconds = 120.0f;
     static constexpr float kDisplayMiddleGray = 0.18f;
-    static constexpr float kDefaultFarPlane = 1'000'000.0f;
+    static constexpr float kDefaultFarPlane = SceneUnits::kDefaultRayTMaxMm;
     static constexpr float kDefaultFocusDistance = 1000.0f;
     static constexpr float kSensorHeightMm = 23.9f;
     static constexpr float kMinFocalLengthMm = 14.0f;

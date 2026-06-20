@@ -4,6 +4,7 @@
 #include "MeshAccel/MeshAccelIntersectCore.h"
 #include "MeshAccel/MeshAccelTypes.h"
 #include "RenderTypes.h"
+#include "SceneUnits.h"
 
 #include <cmath>
 
@@ -17,8 +18,7 @@ namespace LightCoreDetail {
 
 constexpr float kPi = 3.14159265f;
 constexpr float kMinPdf = 1.0e-8f;
-constexpr float kShadowBias = 1.0e-4f;
-constexpr float kRayTMax = 1.0e6f;
+constexpr float kRayTMax = SceneUnits::kDefaultRayTMaxMm;
 
 } // namespace LightCoreDetail
 
@@ -184,16 +184,67 @@ LIGHT_CORE_FN float lightPdfEnvironmentOrBackground(
     return lightPdfSolidEnvironment(wi);
 }
 
+LIGHT_CORE_FN float lightSceneExtentMm(const MeshAccelSceneGpu* scene)
+{
+    if (scene == nullptr) {
+        return 0.0f;
+    }
+    return scene->sceneExtentMm;
+}
+
+LIGHT_CORE_FN Vec3 lightShadowOffsetNormal(
+    Vec3 shadingNormal,
+    const MeshAccelSceneGpu* scene,
+    uint32_t sourceTriangleIndex)
+{
+    if (scene == nullptr || scene->triangles == nullptr || sourceTriangleIndex >= scene->triangleCount) {
+        return shadingNormal;
+    }
+
+    Vec3 offsetNormal = meshAccelTriangleGeometricNormal(scene->triangles[sourceTriangleIndex]);
+    if (vecDot3(offsetNormal, shadingNormal) < 0.0f) {
+        offsetNormal = vecScale3(offsetNormal, -1.0f);
+    }
+    return offsetNormal;
+}
+
+LIGHT_CORE_FN bool lightShadowHitOccludes(
+    const MeshHit& shadowHit,
+    uint32_t sourceTriangleIndex,
+    float epsilon)
+{
+    if (!shadowHit.hit) {
+        return false;
+    }
+    if (sourceTriangleIndex < UINT32_MAX && shadowHit.triangleIndex == sourceTriangleIndex &&
+        shadowHit.t <= 2.0f * epsilon) {
+        return false;
+    }
+    return true;
+}
+
 LIGHT_CORE_FN bool lightIsOccluded(
     Vec3 position,
-    Vec3 normal,
+    Vec3 shadingNormal,
     Vec3 wi,
-    const MeshAccelSceneGpu* scene)
+    const MeshAccelSceneGpu* scene,
+    float hitDistanceMm,
+    uint32_t sourceTriangleIndex)
 {
-    const Vec3 origin = vecAdd3(position, vecScale3(normal, LightCoreDetail::kShadowBias));
-    const MeshHit shadowHit = meshAccelTraceRay(
-        origin, wi, scene, LightCoreDetail::kShadowBias, LightCoreDetail::kRayTMax);
-    return shadowHit.hit;
+    const float epsilon = SceneUnits::rayEpsilonMm(hitDistanceMm, lightSceneExtentMm(scene));
+    const Vec3 offsetNormal = lightShadowOffsetNormal(shadingNormal, scene, sourceTriangleIndex);
+    const Vec3 origin = vecAdd3(position, vecScale3(offsetNormal, epsilon));
+    MeshHit shadowHit = meshAccelTraceRay(
+        origin, wi, scene, epsilon, LightCoreDetail::kRayTMax);
+    if (lightShadowHitOccludes(shadowHit, sourceTriangleIndex, epsilon)) {
+        return true;
+    }
+    if (shadowHit.hit) {
+        shadowHit = meshAccelTraceRay(
+            origin, wi, scene, shadowHit.t + epsilon, LightCoreDetail::kRayTMax);
+        return lightShadowHitOccludes(shadowHit, sourceTriangleIndex, epsilon);
+    }
+    return false;
 }
 
 LIGHT_CORE_FN MaterialGpu lightFetchMaterial(const MeshAccelSceneGpu* scene, uint32_t triangleIndex)
@@ -360,12 +411,23 @@ LIGHT_CORE_FN float lightPdfEmissiveTriangle(
 LIGHT_CORE_FN bool lightIsOccludedFrom(
     Vec3 position,
     Vec3 wi,
-    const MeshAccelSceneGpu* scene)
+    const MeshAccelSceneGpu* scene,
+    float hitDistanceMm,
+    uint32_t sourceTriangleIndex)
 {
-    const Vec3 origin = vecAdd3(position, vecScale3(wi, LightCoreDetail::kShadowBias));
-    const MeshHit shadowHit = meshAccelTraceRay(
-        origin, wi, scene, LightCoreDetail::kShadowBias, LightCoreDetail::kRayTMax);
-    return shadowHit.hit;
+    const float epsilon = SceneUnits::rayEpsilonMm(hitDistanceMm, lightSceneExtentMm(scene));
+    const Vec3 origin = vecAdd3(position, vecScale3(wi, epsilon));
+    MeshHit shadowHit = meshAccelTraceRay(
+        origin, wi, scene, epsilon, LightCoreDetail::kRayTMax);
+    if (lightShadowHitOccludes(shadowHit, sourceTriangleIndex, epsilon)) {
+        return true;
+    }
+    if (shadowHit.hit) {
+        shadowHit = meshAccelTraceRay(
+            origin, wi, scene, shadowHit.t + epsilon, LightCoreDetail::kRayTMax);
+        return lightShadowHitOccludes(shadowHit, sourceTriangleIndex, epsilon);
+    }
+    return false;
 }
 
 #undef LIGHT_CORE_FN

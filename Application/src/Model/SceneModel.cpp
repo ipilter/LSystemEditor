@@ -607,6 +607,7 @@ RenderViewOverlayMode SceneModel::clampBoundsOverlayMode(RenderViewOverlayMode m
     case RenderViewOverlayMode::Bvh:
     case RenderViewOverlayMode::AdaptiveSampling:
     case RenderViewOverlayMode::Uv:
+    case RenderViewOverlayMode::Normals:
         return mode;
     default:
         return RenderViewOverlayMode::Render;

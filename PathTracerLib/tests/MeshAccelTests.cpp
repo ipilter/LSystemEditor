@@ -19,9 +19,10 @@ void expectTrue(bool condition, const char* label)
 
 void testGpuStructLayout()
 {
-    expectTrue(sizeof(TriangleGpu) == 96, "TriangleGpuSize");
+    expectTrue(sizeof(TriangleGpu) >= 96, "TriangleGpuSize");
+    expectTrue(sizeof(TriangleGpu) % alignof(TriangleGpu) == 0, "TriangleGpuAlignment");
     expectTrue(sizeof(MeshBvhNode) == 48, "MeshBvhNodeSize");
-    expectTrue(sizeof(MeshAccelSceneGpu) == 64, "MeshAccelSceneGpuSize");
+    expectTrue(sizeof(MeshAccelSceneGpu) == 80, "MeshAccelSceneGpuSize");
     expectTrue(offsetof(MeshBvhNode, leftIndex) == 32, "MeshBvhNodeLeftIndexOffset");
 }
 

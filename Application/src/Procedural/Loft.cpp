@@ -1,17 +1,13 @@
 #include "Loft.h"
 
 #include "Geometry/MathCore.h"
+#include "ManifoldMeshConvert.h"
+#include "MeshSmoothNormals.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <vector>
-
-struct LoftCorner
-{
-    Vec3 position{};
-    Vec3 normal{};
-    Vec2 uv{};
-};
 
 namespace {
 
@@ -60,98 +56,6 @@ void appendVertex(std::vector<float>& vertProperties, Vec3 position, float u, fl
     vertProperties.push_back(0.0f);
     vertProperties.push_back(u);
     vertProperties.push_back(v);
-}
-
-LoftCorner sideWallCorner(
-    const PathFrame& frame,
-    int segment,
-    int sideColumns,
-    int circularSegments,
-    float vCoord)
-{
-    const int geomSegment = segment < circularSegments ? segment : 0;
-    const Vec3 position = ringVertex(frame, geomSegment, circularSegments);
-    const Vec3 normal = vecNormalize3(vecSub3(position, frame.position));
-    const float uCoord = static_cast<float>(segment) / static_cast<float>(circularSegments);
-    return LoftCorner{position, normal, Vec2{uCoord, vCoord}};
-}
-
-LoftCorner capRimCorner(const PathFrame& frame, int segment, int circularSegments, float normalSign)
-{
-    const Vec3 position = ringVertex(frame, segment, circularSegments);
-    const Vec2 uv = planarCapUv(segment, circularSegments);
-    const Vec3 normal = vecNormalize3(vecScale3(frame.tangent, normalSign));
-    return LoftCorner{position, normal, uv};
-}
-
-LoftCorner capCenterCorner(const PathFrame& frame, float normalSign)
-{
-    const Vec3 normal = vecNormalize3(vecScale3(frame.tangent, normalSign));
-    return LoftCorner{frame.position, normal, Vec2{0.5f, 0.5f}};
-}
-
-void appendHostTriangle(HostMesh& mesh, LoftCorner c0, LoftCorner c1, LoftCorner c2)
-{
-    HostTriangle tri{};
-    tri.v0 = c0.position;
-    tri.v1 = c1.position;
-    tri.v2 = c2.position;
-    tri.n0 = c0.normal;
-    tri.n1 = c1.normal;
-    tri.n2 = c2.normal;
-    tri.uv0 = c0.uv;
-    tri.uv1 = c1.uv;
-    tri.uv2 = c2.uv;
-    mesh.triangles.push_back(tri);
-}
-
-HostMesh buildLoftHostMeshFromFrames(const std::vector<PathFrame>& frames, int circularSegments)
-{
-    HostMesh mesh{};
-    if (frames.size() < 2 || circularSegments < 3) {
-        return mesh;
-    }
-
-    const int ringCount = static_cast<int>(frames.size());
-    const int sideColumns = circularSegments + 1;
-    const float invRingSpan = ringCount > 1 ? 1.0f / static_cast<float>(ringCount - 1) : 0.0f;
-
-    mesh.triangles.reserve(static_cast<size_t>((ringCount - 1) * circularSegments * 2 + circularSegments * 2));
-
-    for (int ring = 0; ring < ringCount - 1; ++ring) {
-        const float v0 = static_cast<float>(ring) * invRingSpan;
-        const float v1 = static_cast<float>(ring + 1) * invRingSpan;
-        const PathFrame& frame0 = frames[static_cast<size_t>(ring)];
-        const PathFrame& frame1 = frames[static_cast<size_t>(ring + 1)];
-
-        for (int segment = 0; segment < circularSegments; ++segment) {
-            const int nextSegment = segment + 1;
-            const LoftCorner v00 = sideWallCorner(frame0, segment, sideColumns, circularSegments, v0);
-            const LoftCorner v01 = sideWallCorner(frame0, nextSegment, sideColumns, circularSegments, v0);
-            const LoftCorner v10 = sideWallCorner(frame1, segment, sideColumns, circularSegments, v1);
-            const LoftCorner v11 = sideWallCorner(frame1, nextSegment, sideColumns, circularSegments, v1);
-            appendHostTriangle(mesh, v00, v01, v10);
-            appendHostTriangle(mesh, v01, v11, v10);
-        }
-    }
-
-    const PathFrame& startFrame = frames.front();
-    const PathFrame& endFrame = frames.back();
-    const LoftCorner startCenter = capCenterCorner(startFrame, -1.0f);
-    const LoftCorner endCenter = capCenterCorner(endFrame, 1.0f);
-
-    for (int segment = 0; segment < circularSegments; ++segment) {
-        const int nextSegment = (segment + 1) % circularSegments;
-        const LoftCorner startRim0 = capRimCorner(startFrame, segment, circularSegments, -1.0f);
-        const LoftCorner startRim1 = capRimCorner(startFrame, nextSegment, circularSegments, -1.0f);
-        appendHostTriangle(mesh, startCenter, startRim1, startRim0);
-
-        const LoftCorner endRim0 = capRimCorner(endFrame, segment, circularSegments, 1.0f);
-        const LoftCorner endRim1 = capRimCorner(endFrame, nextSegment, circularSegments, 1.0f);
-        appendHostTriangle(mesh, endCenter, endRim0, endRim1);
-    }
-
-    return mesh;
 }
 
 manifold::Manifold buildRingLoftMesh(const std::vector<PathFrame>& frames, int circularSegments)
@@ -277,6 +181,18 @@ manifold::Manifold buildSphereMesh(Vec3 center, float radius, int circularSegmen
 
 } // namespace
 
+float characteristicRadiusFromSegment(const TurtleSegment& segment, const ProceduralBuildParams& params)
+{
+    float maxRadius = 0.0f;
+    for (const TurtleState& state : segment.states) {
+        maxRadius = std::max(maxRadius, state.radius);
+    }
+    if (maxRadius <= 1e-6f) {
+        maxRadius = params.turtle.defaultRadius;
+    }
+    return maxRadius;
+}
+
 manifold::Manifold loftOrSphereFromSegment(const TurtleSegment& segment, const ProceduralBuildParams& params)
 {
     SplinePath path;
@@ -308,39 +224,67 @@ manifold::Manifold loftSegment(const SplinePath& path, const ProceduralBuildPara
         return manifold::Manifold();
     }
 
-    manifold::Manifold result = buildRingLoftMesh(frames, params.circularSegments);
-    if (!isValidManifold(result)) {
-        return manifold::Manifold();
-    }
-
-    manifold::Manifold refined = result.RefineToTolerance(static_cast<double>(params.segmentRefineTolerance));
-    if (isValidManifold(refined)) {
-        result = std::move(refined);
-    }
-
-    return result;
+    return buildRingLoftMesh(frames, params.circularSegments);
 }
 
-HostMesh buildLoftHostMesh(const SplinePath& path, const ProceduralBuildParams& params)
+manifold::Manifold refineManifoldForRender(
+    const manifold::Manifold& mesh,
+    const ProceduralBuildParams& params,
+    float characteristicRadius)
 {
-    const std::vector<PathFrame> frames = path.computeLoftFrames(params.samplesPerSpan);
-    if (frames.size() < 2) {
-        return HostMesh{};
+    (void)characteristicRadius;
+    if (!isValidManifold(mesh) || params.segmentRefineTolerance <= 1e-6f) {
+        return mesh;
     }
 
-    return buildLoftHostMeshFromFrames(frames, params.circularSegments);
+    // Default segmentRefineTolerance (0.01) skips refinement; circularSegments already
+    // controls silhouette quality. Only refine when tolerance is explicitly very low.
+    int refinePasses = 0;
+    if (params.segmentRefineTolerance < 0.001f) {
+        refinePasses = 2;
+    } else if (params.segmentRefineTolerance < 0.005f) {
+        refinePasses = 1;
+    } else {
+        return mesh;
+    }
+
+    manifold::Manifold refined = mesh;
+    for (int pass = 0; pass < refinePasses; ++pass) {
+        const uint64_t triangleCountBefore = refined.NumTri();
+        manifold::Manifold next = refined.Refine(2);
+        if (!isValidManifold(next) || next.NumTri() <= triangleCountBefore) {
+            break;
+        }
+        refined = std::move(next);
+    }
+
+    return refined;
 }
 
-HostMesh loftHostMeshFromSegment(const TurtleSegment& segment, const ProceduralBuildParams& params)
+Mesh renderMeshFromManifold(
+    const manifold::Manifold& mesh,
+    const ProceduralBuildParams& params,
+    float characteristicRadius)
 {
-    SplinePath path;
-    if (!path.buildFromSegment(segment, params.hermiteTension)) {
-        return HostMesh{};
+    manifold::Manifold renderMesh = refineManifoldForRender(mesh, params, characteristicRadius);
+    renderMesh = renderMesh.CalculateNormals(0, static_cast<double>(params.creaseAngleDeg));
+    if (!isValidManifold(renderMesh)) {
+        return Mesh{};
+    }
+    Mesh hostMesh = meshFromManifold(renderMesh);
+    meshAssignSmoothNormals(hostMesh, params.creaseAngleDeg);
+    return hostMesh;
+}
+
+Mesh renderMeshFromSegment(const TurtleSegment& segment, const ProceduralBuildParams& params)
+{
+    const manifold::Manifold segmentMesh = loftOrSphereFromSegment(segment, params);
+    if (!isValidManifold(segmentMesh)) {
+        return Mesh{};
     }
 
-    if (path.totalArcLength() <= 1e-6f) {
-        return HostMesh{};
-    }
-
-    return buildLoftHostMesh(path, params);
+    return renderMeshFromManifold(
+        segmentMesh,
+        params,
+        characteristicRadiusFromSegment(segment, params));
 }

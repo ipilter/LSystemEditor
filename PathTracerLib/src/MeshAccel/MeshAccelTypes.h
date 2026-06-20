@@ -39,6 +39,7 @@ enum class RenderViewOverlayMode : int
     Bvh = 1,
     AdaptiveSampling = 2,
     Uv = 3,
+    Normals = 4,
 };
 
 enum MeshBvhNodeFlags : uint32_t
@@ -67,7 +68,7 @@ struct alignas(16) MaterialGpu
     float emission = 0.0f;
     /** @brief Oren-Nayar diffuse roughness in [0, 1]; negative = use roughness. */
     float diffuseRoughness = -1.0f;
-    /** @brief Burley diffusion radius per channel in world/scene units. */
+    /** @brief Burley diffusion radius per channel in world units (mm). */
     float scatterRadiusR = 0.0f;
     float scatterRadiusG = 0.0f;
     float scatterRadiusB = 0.0f;
@@ -137,6 +138,8 @@ struct alignas(16) MeshAccelSceneGpu
     uint32_t materialCount = 0;
     uint32_t emissiveTriangleCount = 0;
     uint32_t textureCount = 0;
+    /** @brief Longest AABB axis length in scene units (mm); used for scale-aware ray epsilon. */
+    float sceneExtentMm = 0.0f;
 };
 
 static_assert(sizeof(MeshAccelSceneGpu) % alignof(MeshAccelSceneGpu) == 0);

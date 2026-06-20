@@ -45,11 +45,8 @@ if(PATHTRACER_ENABLE_PROFILE)
     target_compile_definitions(PathTracerLib PRIVATE PATHTRACER_PROFILE)
 endif()
 target_include_directories(PathTracerLib PRIVATE
-    "${CMAKE_SOURCE_DIR}/Application/src"
-    "${CMAKE_SOURCE_DIR}/Application/src/MeshBuilder"
-    "${CMAKE_SOURCE_DIR}/Application/src/Procedural")
+    "${CMAKE_SOURCE_DIR}/Application/src")
 target_link_libraries(PathTracerLib PUBLIC
-    pathtracer_mesh_builder
     CUDA::cudart
     CUDA::curand
     stb_image
@@ -151,3 +148,22 @@ target_include_directories(path_tracer_mesh_uv_tests PRIVATE
     "${CMAKE_SOURCE_DIR}/Application/src/Procedural")
 set_target_properties(path_tracer_mesh_uv_tests PROPERTIES FOLDER "PathTracerLib/tests")
 add_test(NAME PathTracerMeshUv COMMAND path_tracer_mesh_uv_tests)
+
+add_executable(path_tracer_shadow_epsilon_tests tests/PathTracerShadowEpsilonTests.cpp)
+target_link_libraries(path_tracer_shadow_epsilon_tests PRIVATE PathTracerLib)
+target_include_directories(path_tracer_shadow_epsilon_tests PRIVATE
+    "${PATHTRACER_LIB_INCLUDE_DIR}"
+    "${PATHTRACER_LIB_INCLUDE_DIR}/MeshAccel"
+    "${PATHTRACER_LIB_INCLUDE_DIR}/Geometry"
+    "${PATHTRACER_LIB_INCLUDE_DIR}/Sampling")
+set_target_properties(path_tracer_shadow_epsilon_tests PROPERTIES FOLDER "PathTracerLib/tests")
+add_test(NAME PathTracerShadowEpsilon COMMAND path_tracer_shadow_epsilon_tests)
+
+add_executable(path_tracer_scene_units_tests tests/PathTracerSceneUnitsTests.cpp)
+target_link_libraries(path_tracer_scene_units_tests PRIVATE PathTracerLib)
+target_include_directories(path_tracer_scene_units_tests PRIVATE
+    "${PATHTRACER_LIB_INCLUDE_DIR}"
+    "${PATHTRACER_LIB_INCLUDE_DIR}/MeshAccel"
+    "${PATHTRACER_LIB_INCLUDE_DIR}/Geometry")
+set_target_properties(path_tracer_scene_units_tests PROPERTIES FOLDER "PathTracerLib/tests")
+add_test(NAME PathTracerSceneUnits COMMAND path_tracer_scene_units_tests)

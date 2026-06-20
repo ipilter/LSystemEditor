@@ -1,12 +1,13 @@
 #include "Procedural/ProceduralMeshBuilder.h"
+#include "Procedural/ProceduralSceneMeshBuilder.h"
 #include "Procedural/Spline.h"
 #include "Procedural/Turtle.h"
 #include "Geometry/MathCore.h"
 #include "LSystemEvaluator.h"
+#include "MeshAccel/Mesh.h"
 #include "MeshAccel/MeshAccelScene.h"
 #include "MeshAccel/MeshAccelTypes.h"
-#include "MeshAccel/MeshSceneContent.h"
-#include "MeshBuilder/HostMesh.h"
+#include "MeshSmoothNormals.h"
 
 #include <cmath>
 #include <cstdlib>
@@ -98,14 +99,14 @@ float distancePointToSegment(Vec3 point, Vec3 segmentStart, Vec3 segmentEnd)
 }
 
 bool meshHasInteriorAxisTriangles(
-    const HostMesh& mesh,
+    const Mesh& mesh,
     Vec3 axisStart,
     Vec3 axisEnd,
     float expectedRadius,
     float axisThresholdFraction = 0.05f)
 {
     const float threshold = expectedRadius * axisThresholdFraction;
-    for (const HostTriangle& triangle : mesh.triangles) {
+    for (const MeshTriangle& triangle : mesh.triangles) {
         const float maxDistance = vecMax3(
             distancePointToSegment(triangle.v0, axisStart, axisEnd),
             distancePointToSegment(triangle.v1, axisStart, axisEnd),
@@ -117,16 +118,16 @@ bool meshHasInteriorAxisTriangles(
     return false;
 }
 
-float meshMaxExtent(const HostMesh& mesh)
+float meshMaxExtent(const Mesh& mesh)
 {
-    const HostMeshAabb aabb = hostMeshComputeAabb(mesh);
+    const MeshAabb aabb = meshComputeAabb(mesh);
     return vecMax3(
         aabb.max.x - aabb.min.x,
         aabb.max.y - aabb.min.y,
         aabb.max.z - aabb.min.z);
 }
 
-void expectSphereDiameter(const HostMesh& mesh, float expectedDiameter, float tolerance, const char* label)
+void expectSphereDiameter(const Mesh& mesh, float expectedDiameter, float tolerance, const char* label)
 {
     expectNear(meshMaxExtent(mesh), expectedDiameter, tolerance, label);
 }
@@ -172,7 +173,7 @@ void expectSingleFCylinderOutwardNormals()
     ProceduralBuildParams buildParams{};
     buildParams.creaseAngleDeg = 50.0f;
 
-    HostMesh mesh{};
+    Mesh mesh{};
     expectTrue(
         ProceduralMeshBuilder::buildHostMesh("F\n", 0, RootTransform{}, mesh, buildParams),
         "single F normal test build succeeds");
@@ -256,6 +257,10 @@ void expectSphereRadialNormals(const MeshAccelScene& scene, const char* labelPre
     bool foundPosZ = false;
     bool foundNegZ = false;
     bool allRadialAligned = true;
+    bool foundSmoothEquatorCorners = false;
+
+    constexpr float cornerNormalTolerance = 0.05f;
+    constexpr float equatorCentroidTolerance = 20.0f;
 
     for (const TriangleGpu& tri : scene.trianglesHost()) {
         const Vec3 centroid = triangleCentroid(tri);
@@ -304,6 +309,12 @@ void expectSphereRadialNormals(const MeshAccelScene& scene, const char* labelPre
                 foundNegZ = true;
             }
         }
+
+        if (std::fabs(centroid.y) < equatorCentroidTolerance && centroidLength > 50.0f) {
+            if (!cornerNormalsEqual(tri, cornerNormalTolerance)) {
+                foundSmoothEquatorCorners = true;
+            }
+        }
     }
 
     expectTrue(allRadialAligned, labelPrefix);
@@ -313,11 +324,45 @@ void expectSphereRadialNormals(const MeshAccelScene& scene, const char* labelPre
     expectTrue(foundNegY, "sphere -Y patch normal points -Y");
     expectTrue(foundPosZ, "sphere +Z patch normal points +Z");
     expectTrue(foundNegZ, "sphere -Z patch normal points -Z");
+    expectTrue(foundSmoothEquatorCorners, "sphere equator uses smooth corner normals");
+}
+
+void expectMeshAssignSmoothNormalsOnCoarseFan()
+{
+    Mesh mesh{};
+    MeshTriangle left{};
+    left.v0 = vecMake3(0.0f, 0.0f, 0.0f);
+    left.v1 = vecMake3(1.0f, 0.0f, 0.0f);
+    left.v2 = vecMake3(1.0f, 1.0f, 0.0f);
+    const Vec3 faceNormal = vecMake3(0.0f, 0.0f, 1.0f);
+    left.n0 = faceNormal;
+    left.n1 = faceNormal;
+    left.n2 = faceNormal;
+
+    MeshTriangle right{};
+    right.v0 = vecMake3(0.0f, 0.0f, 0.0f);
+    right.v1 = vecMake3(1.0f, 1.0f, 0.0f);
+    right.v2 = vecMake3(0.0f, 1.0f, 0.0f);
+    right.n0 = faceNormal;
+    right.n1 = faceNormal;
+    right.n2 = faceNormal;
+
+    mesh.triangles.push_back(left);
+    mesh.triangles.push_back(right);
+
+    meshAssignSmoothNormals(mesh, 60.0f);
+
+    expectTrue(
+        normalNear(mesh.triangles[0].n0, mesh.triangles[1].n0, 0.01f),
+        "smooth normal pass welds shared corner at quad origin");
+    expectTrue(
+        normalNear(mesh.triangles[0].n2, mesh.triangles[1].n1, 0.01f),
+        "smooth normal pass welds shared corner at quad diagonal");
 }
 
 void expectF0SphereOutwardNormals()
 {
-    HostMesh mesh{};
+    Mesh mesh{};
     expectTrue(
         ProceduralMeshBuilder::buildHostMesh("F(0)\n", 0, RootTransform{}, mesh),
         "F(0) sphere normal test build succeeds");
@@ -344,7 +389,7 @@ void runProceduralMeshTests()
     }
 
     {
-        HostMesh mesh{};
+        Mesh mesh{};
         expectTrue(
             ProceduralMeshBuilder::buildHostMesh("F\n", 0, RootTransform{}, mesh),
             "procedural build succeeds for single F axiom");
@@ -360,12 +405,16 @@ void runProceduralMeshTests()
     }
 
     {
+        expectMeshAssignSmoothNormalsOnCoarseFan();
+    }
+
+    {
         expectEqSize(loftFrameCountFromDefinition("F\n", params), 2, "single F loft uses two knot rings");
         expectEqSize(loftFrameCountFromDefinition("F F\n", params), 3, "F F loft uses three knot rings");
     }
 
     {
-        HostMesh mesh{};
+        Mesh mesh{};
         expectTrue(
             ProceduralMeshBuilder::buildHostMesh("F(2, 1000, 1000)\n", 0, RootTransform{}, mesh),
             "procedural build succeeds for F(2, 1000, 1000)");
@@ -380,7 +429,7 @@ void runProceduralMeshTests()
     }
 
     {
-        HostMesh mesh{};
+        Mesh mesh{};
         expectTrue(
             ProceduralMeshBuilder::buildHostMesh("F(0, 1000)\n", 0, RootTransform{}, mesh),
             "procedural build succeeds for F(0, 1000)");
@@ -389,7 +438,7 @@ void runProceduralMeshTests()
     }
 
     {
-        HostMesh mesh{};
+        Mesh mesh{};
         expectTrue(
             ProceduralMeshBuilder::buildHostMesh("F(0, 1000, 1000)\n", 0, RootTransform{}, mesh),
             "procedural build succeeds for F(0, 1000, 1000)");
@@ -398,7 +447,7 @@ void runProceduralMeshTests()
     }
 
     {
-        HostMesh mesh{};
+        Mesh mesh{};
         expectTrue(
             ProceduralMeshBuilder::buildHostMesh("F(0)\n", 0, RootTransform{}, mesh),
             "procedural build succeeds for F(0)");
@@ -471,7 +520,7 @@ void runProceduralMeshTests()
     }
 
     {
-        HostMesh mesh{};
+        Mesh mesh{};
         const std::string definition =
             "F(800) Yaw(2) F(500) Yaw(1) F(300) Yaw(3) [Pitch(45) F F F][Pitch(-45) F F F]";
         expectTrue(
@@ -491,12 +540,14 @@ void runProceduralMeshTests()
         instance.iterations = 0;
         instances.push_back(std::move(instance));
 
+        Mesh mesh{};
         MeshAccelScene scene;
-        expectTrue(meshSceneBuild(instances, scene), "meshSceneBuild with procedural instance");
+        expectTrue(buildMeshFromInstances(instances, ProceduralBuildParams{}, mesh), "buildMeshFromInstances with procedural instance");
+        expectTrue(scene.build(mesh), "mesh accel scene builds from procedural instance mesh");
     }
 
     {
-        HostMesh mesh{};
+        Mesh mesh{};
         ProceduralBuildParams buildParams{};
         std::string error;
         const bool ok = ProceduralMeshBuilder::buildHostMesh(
