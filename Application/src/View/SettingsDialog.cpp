@@ -19,20 +19,58 @@ constexpr int kMinDebounceMs = 0;
 constexpr int kMaxDebounceMs = 2000;
 constexpr float kMinCreaseAngleDeg = 0.0f;
 constexpr float kMaxCreaseAngleDeg = 180.0f;
-constexpr float kMinCameraLinearThrust = 10.0f;
-constexpr float kMaxCameraLinearThrust = 20000.0f;
-constexpr float kMinCameraLinearDrag = 0.1f;
-constexpr float kMaxCameraLinearDrag = 30.0f;
-constexpr float kMinCameraAngularThrust = 0.1f;
-constexpr float kMaxCameraAngularThrust = 20.0f;
-constexpr float kMinCameraAngularDrag = 0.1f;
-constexpr float kMaxCameraAngularDrag = 30.0f;
-constexpr float kMinCameraMouseSensitivity = 0.01f;
-constexpr float kMaxCameraMouseSensitivity = 2.0f;
+constexpr float kMinCameraLinearSpeed = 1.0f;
+constexpr float kMaxCameraLinearSpeed = 10000.0f;
+constexpr float kMinCameraAngularSpeed = 0.05f;
+constexpr float kMaxCameraAngularSpeed = 4.0f;
+constexpr float kMinCameraMouseSensitivity = 0.0001f;
+constexpr float kMaxCameraMouseSensitivity = 0.05f;
 constexpr int kMinCameraTickIntervalMs = 8;
 constexpr int kMaxCameraTickIntervalMs = 100;
 constexpr int kMinCameraMotionTimingMs = 0;
 constexpr int kMaxCameraMotionTimingMs = 2000;
+constexpr float kMinCameraDefaultPositionMm = -1000000.0f;
+constexpr float kMaxCameraDefaultPositionMm = 1000000.0f;
+constexpr float kMinCameraDefaultAngleDeg = -360.0f;
+constexpr float kMaxCameraDefaultAngleDeg = 360.0f;
+constexpr float kMinCameraDefaultPitchDeg = -89.0f;
+constexpr float kMaxCameraDefaultPitchDeg = 89.0f;
+
+QDoubleSpinBox* makeDefaultPositionSpinBox(
+    QWidget* parent,
+    float value,
+    const QString& axisLabel,
+    const QString& toolTip)
+{
+    auto* spinBox = new QDoubleSpinBox(parent);
+    spinBox->setRange(kMinCameraDefaultPositionMm, kMaxCameraDefaultPositionMm);
+    spinBox->setDecimals(0);
+    spinBox->setSingleStep(100.0);
+    spinBox->setSuffix(QStringLiteral(" mm"));
+    spinBox->setPrefix(axisLabel);
+    spinBox->setToolTip(toolTip);
+    spinBox->setValue(value);
+    return spinBox;
+}
+
+QDoubleSpinBox* makeDefaultAngleSpinBox(
+    QWidget* parent,
+    float value,
+    float minDeg,
+    float maxDeg,
+    const QString& axisLabel,
+    const QString& toolTip)
+{
+    auto* spinBox = new QDoubleSpinBox(parent);
+    spinBox->setRange(minDeg, maxDeg);
+    spinBox->setDecimals(1);
+    spinBox->setSingleStep(5.0);
+    spinBox->setSuffix(QStringLiteral(" °"));
+    spinBox->setPrefix(axisLabel);
+    spinBox->setToolTip(toolTip);
+    spinBox->setValue(value);
+    return spinBox;
+}
 
 QString colorButtonStyleSheet(const QColor& color)
 {
@@ -87,49 +125,32 @@ SettingsDialog::SettingsDialog(QWidget* parent)
     auto* cameraGroup = new QGroupBox(QStringLiteral("Camera movement"), this);
     auto* cameraLayout = new QFormLayout(cameraGroup);
 
-    m_cameraThrustLinearSpinBox = new QDoubleSpinBox(cameraGroup);
-    m_cameraThrustLinearSpinBox->setRange(kMinCameraLinearThrust, kMaxCameraLinearThrust);
-    m_cameraThrustLinearSpinBox->setDecimals(0);
-    m_cameraThrustLinearSpinBox->setSingleStep(100.0);
-    m_cameraThrustLinearSpinBox->setSuffix(QStringLiteral(" mm/s²"));
-    m_cameraThrustLinearSpinBox->setToolTip(
-        QStringLiteral("Linear acceleration in mm/s² when movement keys are held"));
-    m_cameraThrustLinearSpinBox->setValue(cameraSettings.thrustLinear);
-    cameraLayout->addRow(QStringLiteral("Linear thrust:"), m_cameraThrustLinearSpinBox);
+    m_cameraLinearSpeedSpinBox = new QDoubleSpinBox(cameraGroup);
+    m_cameraLinearSpeedSpinBox->setRange(kMinCameraLinearSpeed, kMaxCameraLinearSpeed);
+    m_cameraLinearSpeedSpinBox->setDecimals(0);
+    m_cameraLinearSpeedSpinBox->setSingleStep(50.0);
+    m_cameraLinearSpeedSpinBox->setSuffix(QStringLiteral(" mm/s"));
+    m_cameraLinearSpeedSpinBox->setToolTip(
+        QStringLiteral("Keyboard only: linear travel speed when WASD/QE keys are held"));
+    m_cameraLinearSpeedSpinBox->setValue(cameraSettings.linearSpeedMmPerSec);
+    cameraLayout->addRow(QStringLiteral("Linear speed:"), m_cameraLinearSpeedSpinBox);
 
-    m_cameraDragLinearSpinBox = new QDoubleSpinBox(cameraGroup);
-    m_cameraDragLinearSpinBox->setRange(kMinCameraLinearDrag, kMaxCameraLinearDrag);
-    m_cameraDragLinearSpinBox->setDecimals(2);
-    m_cameraDragLinearSpinBox->setSingleStep(0.1);
-    m_cameraDragLinearSpinBox->setToolTip(
-        QStringLiteral("Velocity damping (1/s). Higher values slow movement faster after keys are released."));
-    m_cameraDragLinearSpinBox->setValue(cameraSettings.dragLinear);
-    cameraLayout->addRow(QStringLiteral("Linear drag:"), m_cameraDragLinearSpinBox);
-
-    m_cameraThrustAngularSpinBox = new QDoubleSpinBox(cameraGroup);
-    m_cameraThrustAngularSpinBox->setRange(kMinCameraAngularThrust, kMaxCameraAngularThrust);
-    m_cameraThrustAngularSpinBox->setDecimals(2);
-    m_cameraThrustAngularSpinBox->setSingleStep(0.1);
-    m_cameraThrustAngularSpinBox->setToolTip(
-        QStringLiteral("Rotational acceleration from arrow keys or mouse drag"));
-    m_cameraThrustAngularSpinBox->setValue(cameraSettings.thrustAngular);
-    cameraLayout->addRow(QStringLiteral("Angular thrust:"), m_cameraThrustAngularSpinBox);
-
-    m_cameraDragAngularSpinBox = new QDoubleSpinBox(cameraGroup);
-    m_cameraDragAngularSpinBox->setRange(kMinCameraAngularDrag, kMaxCameraAngularDrag);
-    m_cameraDragAngularSpinBox->setDecimals(2);
-    m_cameraDragAngularSpinBox->setSingleStep(0.1);
-    m_cameraDragAngularSpinBox->setToolTip(
-        QStringLiteral("How quickly rotation slows after input stops"));
-    m_cameraDragAngularSpinBox->setValue(cameraSettings.dragAngular);
-    cameraLayout->addRow(QStringLiteral("Angular drag:"), m_cameraDragAngularSpinBox);
+    m_cameraAngularSpeedSpinBox = new QDoubleSpinBox(cameraGroup);
+    m_cameraAngularSpeedSpinBox->setRange(kMinCameraAngularSpeed, kMaxCameraAngularSpeed);
+    m_cameraAngularSpeedSpinBox->setDecimals(3);
+    m_cameraAngularSpeedSpinBox->setSingleStep(0.05);
+    m_cameraAngularSpeedSpinBox->setSuffix(QStringLiteral(" rad/s"));
+    m_cameraAngularSpeedSpinBox->setToolTip(
+        QStringLiteral("Keyboard only: rotational speed from arrow keys and Z/X roll"));
+    m_cameraAngularSpeedSpinBox->setValue(cameraSettings.angularSpeedRadPerSec);
+    cameraLayout->addRow(QStringLiteral("Angular speed:"), m_cameraAngularSpeedSpinBox);
 
     m_cameraMouseSensitivitySpinBox = new QDoubleSpinBox(cameraGroup);
     m_cameraMouseSensitivitySpinBox->setRange(kMinCameraMouseSensitivity, kMaxCameraMouseSensitivity);
-    m_cameraMouseSensitivitySpinBox->setDecimals(3);
-    m_cameraMouseSensitivitySpinBox->setSingleStep(0.01);
+    m_cameraMouseSensitivitySpinBox->setDecimals(4);
+    m_cameraMouseSensitivitySpinBox->setSingleStep(0.0005);
     m_cameraMouseSensitivitySpinBox->setToolTip(
-        QStringLiteral("Mouse drag torque scale for yaw and pitch"));
+        QStringLiteral("Mouse drag only: rotation in radians per pixel"));
     m_cameraMouseSensitivitySpinBox->setValue(cameraSettings.mouseSensitivity);
     cameraLayout->addRow(QStringLiteral("Mouse sensitivity:"), m_cameraMouseSensitivitySpinBox);
 
@@ -137,7 +158,7 @@ SettingsDialog::SettingsDialog(QWidget* parent)
     m_cameraTickIntervalSpinBox->setRange(kMinCameraTickIntervalMs, kMaxCameraTickIntervalMs);
     m_cameraTickIntervalSpinBox->setSuffix(QStringLiteral(" ms"));
     m_cameraTickIntervalSpinBox->setToolTip(
-        QStringLiteral("How often camera dynamics are integrated"));
+        QStringLiteral("Fixed integration step for keyboard camera movement"));
     m_cameraTickIntervalSpinBox->setValue(cameraSettings.tickIntervalMs);
     cameraLayout->addRow(QStringLiteral("Update interval:"), m_cameraTickIntervalSpinBox);
 
@@ -158,6 +179,61 @@ SettingsDialog::SettingsDialog(QWidget* parent)
         QStringLiteral("Delay after camera motion stops before a final clean render restart"));
     m_cameraStopDebounceSpinBox->setValue(cameraSettings.motionStopDebounceMs);
     cameraLayout->addRow(QStringLiteral("Reset debounce (stopped):"), m_cameraStopDebounceSpinBox);
+
+    const QString defaultPoseToolTip =
+        QStringLiteral("Applied once at app startup; restart required to take effect");
+
+    auto* defaultPositionRow = new QWidget(cameraGroup);
+    auto* defaultPositionLayout = new QHBoxLayout(defaultPositionRow);
+    defaultPositionLayout->setContentsMargins(0, 0, 0, 0);
+    m_cameraDefaultPositionXSpinBox = makeDefaultPositionSpinBox(
+        defaultPositionRow,
+        cameraSettings.defaultPositionXmm,
+        QStringLiteral("X "),
+        defaultPoseToolTip);
+    m_cameraDefaultPositionYSpinBox = makeDefaultPositionSpinBox(
+        defaultPositionRow,
+        cameraSettings.defaultPositionYmm,
+        QStringLiteral("Y "),
+        defaultPoseToolTip);
+    m_cameraDefaultPositionZSpinBox = makeDefaultPositionSpinBox(
+        defaultPositionRow,
+        cameraSettings.defaultPositionZmm,
+        QStringLiteral("Z "),
+        defaultPoseToolTip);
+    defaultPositionLayout->addWidget(m_cameraDefaultPositionXSpinBox);
+    defaultPositionLayout->addWidget(m_cameraDefaultPositionYSpinBox);
+    defaultPositionLayout->addWidget(m_cameraDefaultPositionZSpinBox);
+    cameraLayout->addRow(QStringLiteral("Default position:"), defaultPositionRow);
+
+    auto* defaultOrientationRow = new QWidget(cameraGroup);
+    auto* defaultOrientationLayout = new QHBoxLayout(defaultOrientationRow);
+    defaultOrientationLayout->setContentsMargins(0, 0, 0, 0);
+    m_cameraDefaultYawSpinBox = makeDefaultAngleSpinBox(
+        defaultOrientationRow,
+        cameraSettings.defaultYawDeg,
+        kMinCameraDefaultAngleDeg,
+        kMaxCameraDefaultAngleDeg,
+        QStringLiteral("Y "),
+        defaultPoseToolTip);
+    m_cameraDefaultPitchSpinBox = makeDefaultAngleSpinBox(
+        defaultOrientationRow,
+        cameraSettings.defaultPitchDeg,
+        kMinCameraDefaultPitchDeg,
+        kMaxCameraDefaultPitchDeg,
+        QStringLiteral("P "),
+        defaultPoseToolTip);
+    m_cameraDefaultRollSpinBox = makeDefaultAngleSpinBox(
+        defaultOrientationRow,
+        cameraSettings.defaultRollDeg,
+        kMinCameraDefaultAngleDeg,
+        kMaxCameraDefaultAngleDeg,
+        QStringLiteral("R "),
+        defaultPoseToolTip);
+    defaultOrientationLayout->addWidget(m_cameraDefaultYawSpinBox);
+    defaultOrientationLayout->addWidget(m_cameraDefaultPitchSpinBox);
+    defaultOrientationLayout->addWidget(m_cameraDefaultRollSpinBox);
+    cameraLayout->addRow(QStringLiteral("Default orientation:"), defaultOrientationRow);
 
     formLayout->addRow(cameraGroup);
 
@@ -201,14 +277,26 @@ SettingsDialog::SettingsDialog(QWidget* parent)
             DebounceElementIds::kPhysicalCamera,
             m_physicalCameraDebounceSpinBox->value());
         CameraDynamicsSettings cameraDynamicsSettings{};
-        cameraDynamicsSettings.thrustLinear = static_cast<float>(m_cameraThrustLinearSpinBox->value());
-        cameraDynamicsSettings.dragLinear = static_cast<float>(m_cameraDragLinearSpinBox->value());
-        cameraDynamicsSettings.thrustAngular = static_cast<float>(m_cameraThrustAngularSpinBox->value());
-        cameraDynamicsSettings.dragAngular = static_cast<float>(m_cameraDragAngularSpinBox->value());
+        cameraDynamicsSettings.linearSpeedMmPerSec =
+            static_cast<float>(m_cameraLinearSpeedSpinBox->value());
+        cameraDynamicsSettings.angularSpeedRadPerSec =
+            static_cast<float>(m_cameraAngularSpeedSpinBox->value());
         cameraDynamicsSettings.mouseSensitivity = static_cast<float>(m_cameraMouseSensitivitySpinBox->value());
         cameraDynamicsSettings.tickIntervalMs = m_cameraTickIntervalSpinBox->value();
         cameraDynamicsSettings.motionResetThrottleMs = m_cameraResetThrottleSpinBox->value();
         cameraDynamicsSettings.motionStopDebounceMs = m_cameraStopDebounceSpinBox->value();
+        cameraDynamicsSettings.defaultPositionXmm =
+            static_cast<float>(m_cameraDefaultPositionXSpinBox->value());
+        cameraDynamicsSettings.defaultPositionYmm =
+            static_cast<float>(m_cameraDefaultPositionYSpinBox->value());
+        cameraDynamicsSettings.defaultPositionZmm =
+            static_cast<float>(m_cameraDefaultPositionZSpinBox->value());
+        cameraDynamicsSettings.defaultYawDeg =
+            static_cast<float>(m_cameraDefaultYawSpinBox->value());
+        cameraDynamicsSettings.defaultPitchDeg =
+            static_cast<float>(m_cameraDefaultPitchSpinBox->value());
+        cameraDynamicsSettings.defaultRollDeg =
+            static_cast<float>(m_cameraDefaultRollSpinBox->value());
         AppSettings::instance().setCameraDynamicsSettings(cameraDynamicsSettings);
         AppSettings::instance().setCreaseAngleDeg(static_cast<float>(m_creaseAngleSpinBox->value()));
         AppSettings::instance().setAccelBvhColor(m_accelBvhColor);

@@ -77,13 +77,14 @@ private slots:
     void onCameraMotionThrottledReset();
     void onCameraMotionStopped();
     void applyCameraDynamicsSettings();
+    void applyDefaultCameraPosition();
 
 private:
     void recreateGpuBuffers();
     void uploadDisplayTexture(int slot, bool initialUpload);
     void releaseGlResources();
     void syncCameraToPathTracer();
-    void syncCameraLive();
+    void notifyCameraMotionChanged();
     void trySetFocusFromClick(const QPoint& widgetPos);
     void applyFocusFromModel();
     void refreshPinnedFocusFromModel();
@@ -124,8 +125,7 @@ private:
     QPoint m_regionDefineAnchor;
     QPoint m_regionDefinePreview;
     QPoint m_lastMousePos;
-    glm::vec2 m_pendingMouseAngularInput{0.0f};
-    float m_mouseSensitivity = 0.15f;
+    float m_mouseSensitivity = 0.001f;
 
     QTimer m_cameraTick;
     QElapsedTimer m_cameraTickTimer;

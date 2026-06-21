@@ -74,14 +74,23 @@ constexpr const char* kLegacyAccelOctreeColorRedKey = "accelOctreeColorRed";
 constexpr const char* kLegacyAccelOctreeColorGreenKey = "accelOctreeColorGreen";
 constexpr const char* kLegacyAccelOctreeColorBlueKey = "accelOctreeColorBlue";
 constexpr const char* kCameraSettingsGroup = "camera";
+constexpr const char* kCameraLinearSpeedKey = "linearSpeedMmPerSec";
+constexpr const char* kCameraAngularSpeedKey = "angularSpeedRadPerSec";
 constexpr const char* kCameraThrustLinearKey = "thrustLinear";
 constexpr const char* kCameraDragLinearKey = "dragLinear";
 constexpr const char* kCameraThrustAngularKey = "thrustAngular";
 constexpr const char* kCameraDragAngularKey = "dragAngular";
 constexpr const char* kCameraMouseSensitivityKey = "mouseSensitivity";
+constexpr const char* kCameraMouseSensitivityRadPerPixelKey = "mouseSensitivityRadPerPixel";
 constexpr const char* kCameraTickIntervalMsKey = "tickIntervalMs";
 constexpr const char* kCameraMotionResetThrottleMsKey = "motionResetThrottleMs";
 constexpr const char* kCameraMotionStopDebounceMsKey = "motionStopDebounceMs";
+constexpr const char* kCameraDefaultPositionXmmKey = "defaultPositionXmm";
+constexpr const char* kCameraDefaultPositionYmmKey = "defaultPositionYmm";
+constexpr const char* kCameraDefaultPositionZmmKey = "defaultPositionZmm";
+constexpr const char* kCameraDefaultYawDegKey = "defaultYawDeg";
+constexpr const char* kCameraDefaultPitchDegKey = "defaultPitchDeg";
+constexpr const char* kCameraDefaultRollDegKey = "defaultRollDeg";
 constexpr const char* kRegionRenderGroup = "regionRender";
 constexpr const char* kRegionRenderEnabledKey = "enabled";
 constexpr const char* kRegionBottomLeftXKey = "bottomLeftX";
@@ -94,20 +103,24 @@ constexpr const char* kRegionRenderColorBlueKey = "colorBlue";
 constexpr int kDefaultRegionRenderColorRed = 255;
 constexpr int kDefaultRegionRenderColorGreen = 255;
 constexpr int kDefaultRegionRenderColorBlue = 128;
-constexpr float kMinCameraLinearThrust = 10.0f;
-constexpr float kMaxCameraLinearThrust = 20000.0f;
-constexpr float kMinCameraLinearDrag = 0.1f;
-constexpr float kMaxCameraLinearDrag = 30.0f;
-constexpr float kMinCameraAngularThrust = 0.1f;
-constexpr float kMaxCameraAngularThrust = 20.0f;
-constexpr float kMinCameraAngularDrag = 0.1f;
-constexpr float kMaxCameraAngularDrag = 30.0f;
-constexpr float kMinCameraMouseSensitivity = 0.01f;
-constexpr float kMaxCameraMouseSensitivity = 2.0f;
+constexpr float kMinCameraLinearSpeed = 1.0f;
+constexpr float kMaxCameraLinearSpeed = 10000.0f;
+constexpr float kMinCameraAngularSpeed = 0.05f;
+constexpr float kMaxCameraAngularSpeed = 4.0f;
+constexpr float kMinCameraMouseSensitivity = 0.0001f;
+constexpr float kMaxCameraMouseSensitivity = 0.05f;
+constexpr float kLegacyMouseSensitivityScaleThreshold = 0.01f;
+constexpr float kLegacyMouseSensitivityToRadPerPixel = 150.0f;
 constexpr int kMinCameraTickIntervalMs = 8;
 constexpr int kMaxCameraTickIntervalMs = 100;
 constexpr int kMinCameraMotionTimingMs = 0;
 constexpr int kMaxCameraMotionTimingMs = 2000;
+constexpr float kMinCameraDefaultPositionMm = -SceneUnits::kDefaultRayTMaxMm;
+constexpr float kMaxCameraDefaultPositionMm = SceneUnits::kDefaultRayTMaxMm;
+constexpr float kMinCameraDefaultAngleDeg = -360.0f;
+constexpr float kMaxCameraDefaultAngleDeg = 360.0f;
+constexpr float kMinCameraDefaultPitchDeg = -89.0f;
+constexpr float kMaxCameraDefaultPitchDeg = 89.0f;
 constexpr int kDefaultEditorFontSize = 9;
 constexpr int kMinEditorFontSize = 6;
 constexpr int kMaxEditorFontSize = 48;
@@ -159,14 +172,18 @@ void defaultRegionRectForRenderSize(int renderW, int renderH, int& bottomLeftX, 
 
 bool CameraDynamicsSettings::operator==(const CameraDynamicsSettings& other) const
 {
-    return thrustLinear == other.thrustLinear
-        && dragLinear == other.dragLinear
-        && thrustAngular == other.thrustAngular
-        && dragAngular == other.dragAngular
+    return linearSpeedMmPerSec == other.linearSpeedMmPerSec
+        && angularSpeedRadPerSec == other.angularSpeedRadPerSec
         && mouseSensitivity == other.mouseSensitivity
         && tickIntervalMs == other.tickIntervalMs
         && motionResetThrottleMs == other.motionResetThrottleMs
-        && motionStopDebounceMs == other.motionStopDebounceMs;
+        && motionStopDebounceMs == other.motionStopDebounceMs
+        && defaultPositionXmm == other.defaultPositionXmm
+        && defaultPositionYmm == other.defaultPositionYmm
+        && defaultPositionZmm == other.defaultPositionZmm
+        && defaultYawDeg == other.defaultYawDeg
+        && defaultPitchDeg == other.defaultPitchDeg
+        && defaultRollDeg == other.defaultRollDeg;
 }
 
 AppSettings* AppSettings::s_instance = nullptr;
@@ -809,13 +826,12 @@ int AppSettings::clampRussianRouletteMinDepth(int value)
 CameraDynamicsSettings AppSettings::clampCameraDynamicsSettings(const CameraDynamicsSettings& settings)
 {
     CameraDynamicsSettings clamped = settings;
-    clamped.thrustLinear =
-        std::max(kMinCameraLinearThrust, std::min(settings.thrustLinear, kMaxCameraLinearThrust));
-    clamped.dragLinear = std::max(kMinCameraLinearDrag, std::min(settings.dragLinear, kMaxCameraLinearDrag));
-    clamped.thrustAngular =
-        std::max(kMinCameraAngularThrust, std::min(settings.thrustAngular, kMaxCameraAngularThrust));
-    clamped.dragAngular =
-        std::max(kMinCameraAngularDrag, std::min(settings.dragAngular, kMaxCameraAngularDrag));
+    clamped.linearSpeedMmPerSec = std::max(
+        kMinCameraLinearSpeed,
+        std::min(settings.linearSpeedMmPerSec, kMaxCameraLinearSpeed));
+    clamped.angularSpeedRadPerSec = std::max(
+        kMinCameraAngularSpeed,
+        std::min(settings.angularSpeedRadPerSec, kMaxCameraAngularSpeed));
     clamped.mouseSensitivity =
         std::max(kMinCameraMouseSensitivity, std::min(settings.mouseSensitivity, kMaxCameraMouseSensitivity));
     clamped.tickIntervalMs =
@@ -826,6 +842,24 @@ CameraDynamicsSettings AppSettings::clampCameraDynamicsSettings(const CameraDyna
     clamped.motionStopDebounceMs = std::max(
         kMinCameraMotionTimingMs,
         std::min(settings.motionStopDebounceMs, kMaxCameraMotionTimingMs));
+    clamped.defaultPositionXmm = std::max(
+        kMinCameraDefaultPositionMm,
+        std::min(settings.defaultPositionXmm, kMaxCameraDefaultPositionMm));
+    clamped.defaultPositionYmm = std::max(
+        kMinCameraDefaultPositionMm,
+        std::min(settings.defaultPositionYmm, kMaxCameraDefaultPositionMm));
+    clamped.defaultPositionZmm = std::max(
+        kMinCameraDefaultPositionMm,
+        std::min(settings.defaultPositionZmm, kMaxCameraDefaultPositionMm));
+    clamped.defaultYawDeg = std::max(
+        kMinCameraDefaultAngleDeg,
+        std::min(settings.defaultYawDeg, kMaxCameraDefaultAngleDeg));
+    clamped.defaultPitchDeg = std::max(
+        kMinCameraDefaultPitchDeg,
+        std::min(settings.defaultPitchDeg, kMaxCameraDefaultPitchDeg));
+    clamped.defaultRollDeg = std::max(
+        kMinCameraDefaultAngleDeg,
+        std::min(settings.defaultRollDeg, kMaxCameraDefaultAngleDeg));
     return clamped;
 }
 
@@ -1071,24 +1105,57 @@ void AppSettings::load()
         const int loaded = value.toInt(&ok);
         return ok ? loaded : fallback;
     };
-    loadedCameraSettings.thrustLinear = loadFloat(kCameraThrustLinearKey, loadedCameraSettings.thrustLinear);
-    loadedCameraSettings.dragLinear = loadFloat(kCameraDragLinearKey, loadedCameraSettings.dragLinear);
-    loadedCameraSettings.thrustAngular = loadFloat(kCameraThrustAngularKey, loadedCameraSettings.thrustAngular);
-    loadedCameraSettings.dragAngular = loadFloat(kCameraDragAngularKey, loadedCameraSettings.dragAngular);
+    loadedCameraSettings.linearSpeedMmPerSec =
+        loadFloat(kCameraLinearSpeedKey, loadedCameraSettings.linearSpeedMmPerSec);
+    loadedCameraSettings.angularSpeedRadPerSec =
+        loadFloat(kCameraAngularSpeedKey, loadedCameraSettings.angularSpeedRadPerSec);
+    if (!settings.contains(kCameraLinearSpeedKey)) {
+        float thrustLinear = loadFloat(kCameraThrustLinearKey, SceneUnits::kDefaultLinearThrustMmPerSec2);
+        float dragLinear = loadFloat(kCameraDragLinearKey, SceneUnits::kDefaultLinearDragPerSec);
+        if (thrustLinear < SceneUnits::kLegacyLinearThrustScaleThreshold) {
+            thrustLinear *= 1000.0f;
+        }
+        if (dragLinear >= SceneUnits::kLegacyMisscaledLinearDragThreshold) {
+            dragLinear /= 1000.0f;
+        }
+        if (dragLinear > 0.0f) {
+            loadedCameraSettings.linearSpeedMmPerSec = thrustLinear / dragLinear;
+        }
+    }
+    if (!settings.contains(kCameraAngularSpeedKey)) {
+        const float thrustAngular = loadFloat(kCameraThrustAngularKey, 2.0f);
+        const float dragAngular = loadFloat(kCameraDragAngularKey, 5.0f);
+        if (dragAngular > 0.0f) {
+            loadedCameraSettings.angularSpeedRadPerSec = thrustAngular / dragAngular;
+        }
+    }
     loadedCameraSettings.mouseSensitivity =
         loadFloat(kCameraMouseSensitivityKey, loadedCameraSettings.mouseSensitivity);
+    const bool mouseSensitivityUsesRadPerPixel =
+        settings.value(kCameraMouseSensitivityRadPerPixelKey, false).toBool();
+    if (!mouseSensitivityUsesRadPerPixel
+        && loadedCameraSettings.mouseSensitivity >= kLegacyMouseSensitivityScaleThreshold) {
+        loadedCameraSettings.mouseSensitivity /=
+            kLegacyMouseSensitivityToRadPerPixel;
+    }
     loadedCameraSettings.tickIntervalMs = loadInt(kCameraTickIntervalMsKey, loadedCameraSettings.tickIntervalMs);
     loadedCameraSettings.motionResetThrottleMs =
         loadInt(kCameraMotionResetThrottleMsKey, loadedCameraSettings.motionResetThrottleMs);
     loadedCameraSettings.motionStopDebounceMs =
         loadInt(kCameraMotionStopDebounceMsKey, loadedCameraSettings.motionStopDebounceMs);
+    loadedCameraSettings.defaultPositionXmm =
+        loadFloat(kCameraDefaultPositionXmmKey, loadedCameraSettings.defaultPositionXmm);
+    loadedCameraSettings.defaultPositionYmm =
+        loadFloat(kCameraDefaultPositionYmmKey, loadedCameraSettings.defaultPositionYmm);
+    loadedCameraSettings.defaultPositionZmm =
+        loadFloat(kCameraDefaultPositionZmmKey, loadedCameraSettings.defaultPositionZmm);
+    loadedCameraSettings.defaultYawDeg =
+        loadFloat(kCameraDefaultYawDegKey, loadedCameraSettings.defaultYawDeg);
+    loadedCameraSettings.defaultPitchDeg =
+        loadFloat(kCameraDefaultPitchDegKey, loadedCameraSettings.defaultPitchDeg);
+    loadedCameraSettings.defaultRollDeg =
+        loadFloat(kCameraDefaultRollDegKey, loadedCameraSettings.defaultRollDeg);
     settings.endGroup();
-    if (loadedCameraSettings.thrustLinear < SceneUnits::kLegacyLinearThrustScaleThreshold) {
-        loadedCameraSettings.thrustLinear *= 1000.0f;
-    }
-    if (loadedCameraSettings.dragLinear >= SceneUnits::kLegacyMisscaledLinearDragThreshold) {
-        loadedCameraSettings.dragLinear /= 1000.0f;
-    }
     m_cameraDynamicsSettings = clampCameraDynamicsSettings(loadedCameraSettings);
 
     settings.beginGroup(kRegionRenderGroup);
@@ -1165,14 +1232,35 @@ void AppSettings::save()
     settings.setValue(kVerticalSplitterStateKey, m_verticalSplitterState);
 
     settings.beginGroup(kCameraSettingsGroup);
-    settings.setValue(kCameraThrustLinearKey, static_cast<double>(m_cameraDynamicsSettings.thrustLinear));
-    settings.setValue(kCameraDragLinearKey, static_cast<double>(m_cameraDynamicsSettings.dragLinear));
-    settings.setValue(kCameraThrustAngularKey, static_cast<double>(m_cameraDynamicsSettings.thrustAngular));
-    settings.setValue(kCameraDragAngularKey, static_cast<double>(m_cameraDynamicsSettings.dragAngular));
+    settings.setValue(
+        kCameraLinearSpeedKey,
+        static_cast<double>(m_cameraDynamicsSettings.linearSpeedMmPerSec));
+    settings.setValue(
+        kCameraAngularSpeedKey,
+        static_cast<double>(m_cameraDynamicsSettings.angularSpeedRadPerSec));
     settings.setValue(kCameraMouseSensitivityKey, static_cast<double>(m_cameraDynamicsSettings.mouseSensitivity));
+    settings.setValue(kCameraMouseSensitivityRadPerPixelKey, true);
     settings.setValue(kCameraTickIntervalMsKey, m_cameraDynamicsSettings.tickIntervalMs);
     settings.setValue(kCameraMotionResetThrottleMsKey, m_cameraDynamicsSettings.motionResetThrottleMs);
     settings.setValue(kCameraMotionStopDebounceMsKey, m_cameraDynamicsSettings.motionStopDebounceMs);
+    settings.setValue(
+        kCameraDefaultPositionXmmKey,
+        static_cast<double>(m_cameraDynamicsSettings.defaultPositionXmm));
+    settings.setValue(
+        kCameraDefaultPositionYmmKey,
+        static_cast<double>(m_cameraDynamicsSettings.defaultPositionYmm));
+    settings.setValue(
+        kCameraDefaultPositionZmmKey,
+        static_cast<double>(m_cameraDynamicsSettings.defaultPositionZmm));
+    settings.setValue(
+        kCameraDefaultYawDegKey,
+        static_cast<double>(m_cameraDynamicsSettings.defaultYawDeg));
+    settings.setValue(
+        kCameraDefaultPitchDegKey,
+        static_cast<double>(m_cameraDynamicsSettings.defaultPitchDeg));
+    settings.setValue(
+        kCameraDefaultRollDegKey,
+        static_cast<double>(m_cameraDynamicsSettings.defaultRollDeg));
     settings.endGroup();
 
     settings.beginGroup(kRegionRenderGroup);

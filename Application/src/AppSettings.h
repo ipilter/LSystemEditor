@@ -21,14 +21,18 @@ inline constexpr const char* kPhysicalCamera = "physicalCamera";
 
 struct CameraDynamicsSettings
 {
-    float thrustLinear = SceneUnits::kDefaultLinearThrustMmPerSec2;
-    float dragLinear = SceneUnits::kDefaultLinearDragPerSec;
-    float thrustAngular = 2.0f;
-    float dragAngular = 5.0f;
-    float mouseSensitivity = 0.15f;
+    float linearSpeedMmPerSec = SceneUnits::kDefaultLinearSpeedMmPerSec;
+    float angularSpeedRadPerSec = SceneUnits::kDefaultAngularSpeedRadPerSec;
+    float mouseSensitivity = 0.001f;
     int tickIntervalMs = 16;
     int motionResetThrottleMs = 250;
     int motionStopDebounceMs = 200;
+    float defaultPositionXmm = 0.0f;
+    float defaultPositionYmm = 0.0f;
+    float defaultPositionZmm = 0.0f;
+    float defaultYawDeg = 0.0f;
+    float defaultPitchDeg = 0.0f;
+    float defaultRollDeg = 0.0f;
 
     bool operator==(const CameraDynamicsSettings& other) const;
     bool operator!=(const CameraDynamicsSettings& other) const { return !(*this == other); }

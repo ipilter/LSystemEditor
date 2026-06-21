@@ -4,6 +4,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstdlib>
+#include <map>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -137,6 +138,40 @@ struct ParsedComponent
     float scalar = 0.f;
 };
 
+enum class NamedValueKind
+{
+    Scalar,
+    FloatList,
+    Texture,
+};
+
+struct NamedValue
+{
+    NamedValueKind kind = NamedValueKind::Scalar;
+    float scalar = 0.f;
+    std::vector<float> floats;
+    TextureDef texture;
+};
+
+using NamedProps = std::map<std::string, NamedValue>;
+
+bool is_named_property_start(std::string_view line, std::size_t pos)
+{
+    std::size_t peek = pos;
+    std::string id;
+    if (!parse_identifier(line, peek, id))
+    {
+        return false;
+    }
+    skip_ws(line, peek);
+    return peek < line.size() && line[peek] == ':';
+}
+
+bool is_texture_kind(std::string_view kind)
+{
+    return kind == "Grid" || kind == "Stripe" || kind == "Noise";
+}
+
 bool parse_brace_float_list(std::string_view line, std::size_t& pos, std::vector<float>& comps)
 {
     skip_ws(line, pos);
@@ -158,7 +193,7 @@ bool parse_brace_float_list(std::string_view line, std::size_t& pos, std::vector
         float v = 0.f;
         if (!parse_float(line, pos, v))
         {
-            material_parse_error(line, "texture block expected number");
+            material_parse_error(line, "expected number");
         }
         comps.push_back(v);
         skip_ws(line, pos);
@@ -172,7 +207,7 @@ bool parse_brace_float_list(std::string_view line, std::size_t& pos, std::vector
             ++pos;
             return true;
         }
-        material_parse_error(line, "texture block expected ',' or '}'");
+        material_parse_error(line, "expected ',' or '}'");
     }
 }
 
@@ -209,6 +244,461 @@ void validate_noise_params(std::string_view line, const std::vector<float>& para
     }
 }
 
+bool parse_texture_block(std::string_view line, std::size_t& pos, TextureDef& out_texture);
+
+bool parse_colon_value(std::string_view line, std::size_t& pos, NamedValue& out_value)
+{
+    skip_ws(line, pos);
+    if (pos >= line.size())
+    {
+        material_parse_error(line, "expected value after ':'");
+    }
+
+    if (line[pos] == '{')
+    {
+        std::size_t peek = pos + 1;
+        skip_ws(line, peek);
+        if (peek < line.size())
+        {
+            std::string maybeKind;
+            std::size_t kindPeek = peek;
+            if (parse_identifier(line, kindPeek, maybeKind) && is_texture_kind(maybeKind))
+            {
+                out_value.kind = NamedValueKind::Texture;
+                return parse_texture_block(line, pos, out_value.texture);
+            }
+        }
+
+        out_value.kind = NamedValueKind::FloatList;
+        return parse_brace_float_list(line, pos, out_value.floats);
+    }
+
+    float scalar = 0.f;
+    if (!parse_float(line, pos, scalar))
+    {
+        material_parse_error(line, "expected number or '{' value");
+    }
+    out_value.kind = NamedValueKind::Scalar;
+    out_value.scalar = scalar;
+    return true;
+}
+
+void apply_rgb_or_gray(NamedValue& out_value, const NamedValue& source, std::string_view line, const char* propName)
+{
+    if (source.kind == NamedValueKind::Scalar)
+    {
+        out_value.kind = NamedValueKind::FloatList;
+        out_value.floats = {source.scalar, source.scalar, source.scalar};
+        return;
+    }
+    if (source.kind == NamedValueKind::FloatList)
+    {
+        if (source.floats.size() != 3u)
+        {
+            material_parse_error(line, "rgb property requires 3 floats or a scalar gray value");
+        }
+        out_value = source;
+        return;
+    }
+    material_parse_error(line, "property requires rgb floats or scalar");
+    (void)propName;
+}
+
+std::vector<float> build_grid_params(std::string_view line, const NamedProps& props)
+{
+    float onR = 1.f;
+    float onG = 1.f;
+    float onB = 1.f;
+    float offR = 0.f;
+    float offG = 0.f;
+    float offB = 0.f;
+    float freqU = 8.f;
+    float freqV = 8.f;
+    float thickness = 0.05f;
+    bool hasFreq = false;
+    bool hasFreqU = false;
+    bool hasFreqV = false;
+    bool hasThickness = false;
+
+    for (const auto& [key, value] : props)
+    {
+        if (key == "on")
+        {
+            NamedValue rgb;
+            apply_rgb_or_gray(rgb, value, line, "on");
+            onR = rgb.floats[0];
+            onG = rgb.floats[1];
+            onB = rgb.floats[2];
+        }
+        else if (key == "off")
+        {
+            NamedValue rgb;
+            apply_rgb_or_gray(rgb, value, line, "off");
+            offR = rgb.floats[0];
+            offG = rgb.floats[1];
+            offB = rgb.floats[2];
+        }
+        else if (key == "freq")
+        {
+            if (value.kind != NamedValueKind::Scalar)
+            {
+                material_parse_error(line, "Grid freq expects a scalar");
+            }
+            hasFreq = true;
+            freqU = value.scalar;
+            freqV = value.scalar;
+        }
+        else if (key == "freqU")
+        {
+            if (value.kind != NamedValueKind::Scalar)
+            {
+                material_parse_error(line, "Grid freqU expects a scalar");
+            }
+            hasFreqU = true;
+            freqU = value.scalar;
+        }
+        else if (key == "freqV")
+        {
+            if (value.kind != NamedValueKind::Scalar)
+            {
+                material_parse_error(line, "Grid freqV expects a scalar");
+            }
+            hasFreqV = true;
+            freqV = value.scalar;
+        }
+        else if (key == "thickness")
+        {
+            if (value.kind != NamedValueKind::Scalar)
+            {
+                material_parse_error(line, "Grid thickness expects a scalar");
+            }
+            hasThickness = true;
+            thickness = value.scalar;
+        }
+        else
+        {
+            material_parse_error(line, "unknown Grid texture property");
+        }
+    }
+
+    if (hasFreqU && !hasFreqV && !hasFreq)
+    {
+        freqV = freqU;
+    }
+    if (hasFreq && !hasFreqU)
+    {
+        freqU = freqV;
+    }
+
+    std::vector<float> params = {onR, onG, onB, offR, offG, offB};
+    if (hasFreqV && (hasFreqU || hasFreq))
+    {
+        params.push_back(freqU);
+        params.push_back(freqV);
+        params.push_back(thickness);
+    }
+    else if (hasFreq || hasFreqU || hasThickness)
+    {
+        params.push_back(freqU);
+        params.push_back(thickness);
+    }
+    return params;
+}
+
+std::vector<float> build_stripe_params(std::string_view line, const NamedProps& props)
+{
+    float freq = 0.f;
+    float thickness = 0.05f;
+    float onValue = 1.f;
+    float offValue = 0.f;
+    bool hasFreq = false;
+    bool hasThickness = false;
+    bool hasOn = false;
+    bool hasOff = false;
+
+    for (const auto& [key, value] : props)
+    {
+        if (key == "freq")
+        {
+            if (value.kind != NamedValueKind::Scalar)
+            {
+                material_parse_error(line, "Stripe freq expects a scalar");
+            }
+            hasFreq = true;
+            freq = value.scalar;
+        }
+        else if (key == "thickness")
+        {
+            if (value.kind != NamedValueKind::Scalar)
+            {
+                material_parse_error(line, "Stripe thickness expects a scalar");
+            }
+            hasThickness = true;
+            thickness = value.scalar;
+        }
+        else if (key == "on")
+        {
+            if (value.kind == NamedValueKind::FloatList && value.floats.size() == 3u)
+            {
+                hasOn = true;
+                onValue = value.floats[0];
+            }
+            else if (value.kind == NamedValueKind::Scalar)
+            {
+                hasOn = true;
+                onValue = value.scalar;
+            }
+            else
+            {
+                material_parse_error(line, "Stripe on expects a scalar");
+            }
+        }
+        else if (key == "off")
+        {
+            if (value.kind == NamedValueKind::FloatList && value.floats.size() == 3u)
+            {
+                hasOff = true;
+                offValue = value.floats[0];
+            }
+            else if (value.kind == NamedValueKind::Scalar)
+            {
+                hasOff = true;
+                offValue = value.scalar;
+            }
+            else
+            {
+                material_parse_error(line, "Stripe off expects a scalar");
+            }
+        }
+        else
+        {
+            material_parse_error(line, "unknown Stripe texture property");
+        }
+    }
+
+    if (!hasFreq)
+    {
+        material_parse_error(line, "Stripe texture requires freq");
+    }
+
+    std::vector<float> params = {freq, thickness};
+    if (hasOn || hasOff)
+    {
+        params.push_back(onValue);
+        params.push_back(offValue);
+    }
+    else if (hasThickness)
+    {
+        params.push_back(onValue);
+    }
+    return params;
+}
+
+std::vector<float> build_noise_params(std::string_view line, const NamedProps& props)
+{
+    float scale = 0.f;
+    float octaves = 1.f;
+    float seed = 0.f;
+    float minValue = 0.f;
+    float maxValue = 1.f;
+    bool hasScale = false;
+    bool hasOctaves = false;
+    bool hasSeed = false;
+    bool hasMin = false;
+    bool hasMax = false;
+
+    for (const auto& [key, value] : props)
+    {
+        if (key == "scale")
+        {
+            if (value.kind != NamedValueKind::Scalar)
+            {
+                material_parse_error(line, "Noise scale expects a scalar");
+            }
+            hasScale = true;
+            scale = value.scalar;
+        }
+        else if (key == "octaves")
+        {
+            if (value.kind != NamedValueKind::Scalar)
+            {
+                material_parse_error(line, "Noise octaves expects a scalar");
+            }
+            hasOctaves = true;
+            octaves = value.scalar;
+        }
+        else if (key == "seed")
+        {
+            if (value.kind != NamedValueKind::Scalar)
+            {
+                material_parse_error(line, "Noise seed expects a scalar");
+            }
+            hasSeed = true;
+            seed = value.scalar;
+        }
+        else if (key == "min")
+        {
+            if (value.kind != NamedValueKind::Scalar)
+            {
+                material_parse_error(line, "Noise min expects a scalar");
+            }
+            hasMin = true;
+            minValue = value.scalar;
+        }
+        else if (key == "max")
+        {
+            if (value.kind != NamedValueKind::Scalar)
+            {
+                material_parse_error(line, "Noise max expects a scalar");
+            }
+            hasMax = true;
+            maxValue = value.scalar;
+        }
+        else
+        {
+            material_parse_error(line, "unknown Noise texture property");
+        }
+    }
+
+    if (!hasScale)
+    {
+        material_parse_error(line, "Noise texture requires scale");
+    }
+
+    std::vector<float> params = {scale};
+    if (hasOctaves || hasSeed || hasMin || hasMax)
+    {
+        params.push_back(octaves);
+        params.push_back(seed);
+        params.push_back(minValue);
+        params.push_back(maxValue);
+    }
+    return params;
+}
+
+std::vector<float> build_texture_params_from_named(
+    std::string_view line, const std::string& kind, const NamedProps& props)
+{
+    if (kind == "Grid")
+    {
+        return build_grid_params(line, props);
+    }
+    if (kind == "Stripe")
+    {
+        return build_stripe_params(line, props);
+    }
+    if (kind == "Noise")
+    {
+        return build_noise_params(line, props);
+    }
+    material_parse_error(line, "unknown texture kind");
+}
+
+bool parse_named_property_entries(std::string_view line, std::size_t& pos, NamedProps& out_props)
+{
+    out_props.clear();
+    for (;;)
+    {
+        skip_ws(line, pos);
+        if (pos < line.size() && line[pos] == '}')
+        {
+            if (out_props.empty())
+            {
+                material_parse_error(line, "named property block requires at least one property");
+            }
+            return true;
+        }
+
+        std::string key;
+        if (!parse_identifier(line, pos, key))
+        {
+            material_parse_error(line, "named property block expected identifier");
+        }
+        if (out_props.find(key) != out_props.end())
+        {
+            material_parse_error(line, "duplicate property key");
+        }
+
+        skip_ws(line, pos);
+        if (pos >= line.size() || line[pos] != ':')
+        {
+            material_parse_error(line, "named property expected ':' after key");
+        }
+        ++pos;
+
+        NamedValue value;
+        if (!parse_colon_value(line, pos, value))
+        {
+            material_parse_error(line, "named property expected value");
+        }
+        out_props.emplace(key, std::move(value));
+
+        skip_ws(line, pos);
+        if (pos < line.size() && line[pos] == ',')
+        {
+            ++pos;
+            continue;
+        }
+        if (pos < line.size() && line[pos] == '}')
+        {
+            if (out_props.empty())
+            {
+                material_parse_error(line, "named property block requires at least one property");
+            }
+            return true;
+        }
+        material_parse_error(line, "named property block expected ',' or '}'");
+    }
+}
+
+bool parse_named_property_map(std::string_view line, std::size_t& pos, NamedProps& out_props)
+{
+    skip_ws(line, pos);
+    if (pos >= line.size() || line[pos] != '{')
+    {
+        return false;
+    }
+    ++pos;
+
+    if (!parse_named_property_entries(line, pos, out_props))
+    {
+        return false;
+    }
+
+    skip_ws(line, pos);
+    if (pos >= line.size() || line[pos] != '}')
+    {
+        material_parse_error(line, "named property block expected closing '}'");
+    }
+    ++pos;
+    return true;
+}
+
+void finalize_named_texture(
+    std::string_view line, const std::string& kind, const NamedProps& props, TextureDef& out_texture)
+{
+    std::vector<float> params = build_texture_params_from_named(line, kind, props);
+    if (kind == "Grid")
+    {
+        validate_grid_params(line, params);
+    }
+    else if (kind == "Stripe")
+    {
+        validate_stripe_params(line, params);
+    }
+    else if (kind == "Noise")
+    {
+        validate_noise_params(line, params);
+    }
+    else
+    {
+        material_parse_error(line, "unknown texture kind");
+    }
+
+    out_texture.kind = kind;
+    out_texture.params = std::move(params);
+}
+
 bool parse_texture_block(std::string_view line, std::size_t& pos, TextureDef& out_texture)
 {
     skip_ws(line, pos);
@@ -224,12 +714,52 @@ bool parse_texture_block(std::string_view line, std::size_t& pos, TextureDef& ou
         return false;
     }
 
+    if (!is_texture_kind(kind))
+    {
+        material_parse_error(line, "unknown texture kind");
+    }
+
     skip_ws(line, pos);
+    if (pos < line.size() && line[pos] == '{')
+    {
+        NamedProps props;
+        if (!parse_named_property_map(line, pos, props))
+        {
+            material_parse_error(line, "texture block expected named properties");
+        }
+        finalize_named_texture(line, kind, props, out_texture);
+        skip_ws(line, pos);
+        if (pos >= line.size() || line[pos] != '}')
+        {
+            material_parse_error(line, "texture block expected closing '}'");
+        }
+        ++pos;
+        return true;
+    }
+
     if (pos >= line.size() || line[pos] != ',')
     {
-        material_parse_error(line, "texture block expected ',' after kind");
+        material_parse_error(line, "texture block expected ',' or '{' after kind");
     }
     ++pos;
+    skip_ws(line, pos);
+
+    if (is_named_property_start(line, pos))
+    {
+        NamedProps props;
+        if (!parse_named_property_entries(line, pos, props))
+        {
+            material_parse_error(line, "texture block expected named properties");
+        }
+        finalize_named_texture(line, kind, props, out_texture);
+        skip_ws(line, pos);
+        if (pos >= line.size() || line[pos] != '}')
+        {
+            material_parse_error(line, "texture block expected closing '}'");
+        }
+        ++pos;
+        return true;
+    }
 
     std::vector<float> params;
     for (;;)
@@ -273,10 +803,6 @@ bool parse_texture_block(std::string_view line, std::size_t& pos, TextureDef& ou
     else if (kind == "Noise")
     {
         validate_noise_params(line, params);
-    }
-    else
-    {
-        material_parse_error(line, "unknown texture kind");
     }
 
     out_texture.kind = kind;
@@ -358,6 +884,98 @@ bool parse_brace_component_list(std::string_view line, std::size_t& pos, std::ve
     }
 }
 
+bool is_named_material_block(std::string_view line, std::size_t pos)
+{
+    skip_ws(line, pos);
+    if (pos >= line.size() || line[pos] != '{')
+    {
+        return false;
+    }
+    ++pos;
+    skip_ws(line, pos);
+    return is_named_property_start(line, pos);
+}
+
+bool parse_named_material_block(std::string_view line, std::size_t& pos, NamedProps& out_props)
+{
+    return parse_named_property_map(line, pos, out_props);
+}
+
+enum class MaterialProperty
+{
+    Albedo,
+    Roughness,
+    Metallic,
+    Transmission,
+    Thin,
+    Ior,
+    Subsurface,
+    Emission,
+    DiffuseRoughness,
+    ScatterRadiusR,
+    ScatterRadiusG,
+    ScatterRadiusB,
+    Specular,
+    Unknown,
+};
+
+MaterialProperty resolve_material_property(std::string_view key)
+{
+    if (key == "albedo" || key == "alb")
+    {
+        return MaterialProperty::Albedo;
+    }
+    if (key == "roughness" || key == "rou")
+    {
+        return MaterialProperty::Roughness;
+    }
+    if (key == "metallic" || key == "met")
+    {
+        return MaterialProperty::Metallic;
+    }
+    if (key == "transmission" || key == "trans")
+    {
+        return MaterialProperty::Transmission;
+    }
+    if (key == "thin")
+    {
+        return MaterialProperty::Thin;
+    }
+    if (key == "ior")
+    {
+        return MaterialProperty::Ior;
+    }
+    if (key == "subsurface" || key == "subs")
+    {
+        return MaterialProperty::Subsurface;
+    }
+    if (key == "emission" || key == "emiss" || key == "em")
+    {
+        return MaterialProperty::Emission;
+    }
+    if (key == "diffuseRoughness" || key == "diffuse" || key == "diffRou")
+    {
+        return MaterialProperty::DiffuseRoughness;
+    }
+    if (key == "scatterRadiusR" || key == "scatterR" || key == "sR")
+    {
+        return MaterialProperty::ScatterRadiusR;
+    }
+    if (key == "scatterRadiusG" || key == "scatterG" || key == "sG")
+    {
+        return MaterialProperty::ScatterRadiusG;
+    }
+    if (key == "scatterRadiusB" || key == "scatterB" || key == "sB")
+    {
+        return MaterialProperty::ScatterRadiusB;
+    }
+    if (key == "specular" || key == "spec")
+    {
+        return MaterialProperty::Specular;
+    }
+    return MaterialProperty::Unknown;
+}
+
 bool all_scalar_components(const std::vector<ParsedComponent>& comps)
 {
     for (const ParsedComponent& component : comps)
@@ -409,7 +1027,6 @@ void assign_legacy_entry(MaterialEntry& entry, const std::vector<float>& comps)
     set_inline_scalar(entry.ior, std::max(1.0e-3f, scalarAt(7u, 1.5f)));
     set_inline_scalar(entry.subsurface, clamp01(scalarAt(8u, 0.f)));
     set_inline_scalar(entry.emission, std::max(0.f, scalarAt(9u, 0.f)));
-    const float roughnessDefault = materialChannelScalar(entry.roughness, 0.5f);
     if (comps.size() > 10u) {
         set_inline_scalar(entry.diffuseRoughness, clamp01(comps[10]));
     } else {
@@ -438,6 +1055,97 @@ void assign_scalar_channel(MaterialChannel& channel, std::size_t slotIndex, floa
     else
     {
         set_inline_scalar(channel, clamp01(value));
+    }
+}
+
+void assign_named_scalar_or_texture(
+    MaterialChannel& channel, std::size_t slotIndex, const NamedValue& value, std::string_view line)
+{
+    if (value.kind == NamedValueKind::Texture)
+    {
+        set_texture_channel(channel, value.texture);
+        return;
+    }
+    if (value.kind != NamedValueKind::Scalar)
+    {
+        material_parse_error(line, "channel expects scalar or texture value");
+    }
+    assign_scalar_channel(channel, slotIndex, value.scalar);
+}
+
+void assign_named_entry(std::string_view line, MaterialEntry& entry, const NamedProps& props)
+{
+    assign_legacy_entry(entry, {});
+
+    for (const auto& [key, value] : props)
+    {
+        switch (resolve_material_property(key))
+        {
+        case MaterialProperty::Albedo:
+            if (value.kind == NamedValueKind::Texture)
+            {
+                set_texture_channel(entry.albedo, value.texture);
+            }
+            else if (value.kind == NamedValueKind::Scalar)
+            {
+                entry.albedo.mode = MaterialChannel::Mode::Inline;
+                const float gray = clamp01(value.scalar);
+                entry.albedo.r = gray;
+                entry.albedo.g = gray;
+                entry.albedo.b = gray;
+            }
+            else if (value.kind == NamedValueKind::FloatList)
+            {
+                if (value.floats.size() != 3u)
+                {
+                    material_parse_error(line, "albedo requires 3 floats or a scalar gray value");
+                }
+                entry.albedo.mode = MaterialChannel::Mode::Inline;
+                entry.albedo.r = clamp01(value.floats[0]);
+                entry.albedo.g = clamp01(value.floats[1]);
+                entry.albedo.b = clamp01(value.floats[2]);
+            }
+            break;
+        case MaterialProperty::Roughness:
+            assign_named_scalar_or_texture(entry.roughness, 1u, value, line);
+            break;
+        case MaterialProperty::Metallic:
+            assign_named_scalar_or_texture(entry.metallic, 2u, value, line);
+            break;
+        case MaterialProperty::Transmission:
+            assign_named_scalar_or_texture(entry.transmission, 3u, value, line);
+            break;
+        case MaterialProperty::Thin:
+            assign_named_scalar_or_texture(entry.thin, 4u, value, line);
+            break;
+        case MaterialProperty::Ior:
+            assign_named_scalar_or_texture(entry.ior, 5u, value, line);
+            break;
+        case MaterialProperty::Subsurface:
+            assign_named_scalar_or_texture(entry.subsurface, 6u, value, line);
+            break;
+        case MaterialProperty::Emission:
+            assign_named_scalar_or_texture(entry.emission, 7u, value, line);
+            break;
+        case MaterialProperty::DiffuseRoughness:
+            assign_named_scalar_or_texture(entry.diffuseRoughness, 8u, value, line);
+            break;
+        case MaterialProperty::ScatterRadiusR:
+            assign_named_scalar_or_texture(entry.scatterRadiusR, 9u, value, line);
+            break;
+        case MaterialProperty::ScatterRadiusG:
+            assign_named_scalar_or_texture(entry.scatterRadiusG, 10u, value, line);
+            break;
+        case MaterialProperty::ScatterRadiusB:
+            assign_named_scalar_or_texture(entry.scatterRadiusB, 11u, value, line);
+            break;
+        case MaterialProperty::Specular:
+            assign_named_scalar_or_texture(entry.specular, 12u, value, line);
+            break;
+        case MaterialProperty::Unknown:
+            material_parse_error(line, "unknown material property");
+            break;
+        }
     }
 }
 
@@ -599,6 +1307,36 @@ bool try_parse_material_line(std::string_view trimmed_line, std::vector<Material
     ++pos;
     skip_ws(trimmed_line, pos);
 
+    MaterialDefinition def;
+    def.id = id;
+
+    if (is_named_material_block(trimmed_line, pos))
+    {
+        NamedProps props;
+        if (!parse_named_material_block(trimmed_line, pos, props))
+        {
+            material_parse_error(
+                trimmed_line,
+                "material declaration expected named properties "
+                "(e.g. albedo: {r,g,b}, roughness: 0.5, emission: 1.0)");
+        }
+
+        skip_ws(trimmed_line, pos);
+        if (pos != trimmed_line.size())
+        {
+            material_parse_error(trimmed_line, "unexpected text after material declaration");
+        }
+
+        if (material_id_defined(definitions, id))
+        {
+            material_parse_error(trimmed_line, "duplicate material id");
+        }
+
+        assign_named_entry(trimmed_line, def.entry, props);
+        definitions.push_back(def);
+        return true;
+    }
+
     std::vector<ParsedComponent> comps;
     if (!parse_brace_component_list(trimmed_line, pos, comps))
     {
@@ -622,8 +1360,6 @@ bool try_parse_material_line(std::string_view trimmed_line, std::vector<Material
         material_parse_error(trimmed_line, "duplicate material id");
     }
 
-    MaterialDefinition def;
-    def.id = id;
     assign_material_entry(trimmed_line, def.entry, comps);
     definitions.push_back(def);
     return true;

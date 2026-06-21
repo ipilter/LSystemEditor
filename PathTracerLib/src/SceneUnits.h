@@ -18,6 +18,9 @@ static constexpr float kUnitsPerMillimeter = 1.0f;
 // Linear drag: velocity damping in 1/s (not mm/s²) — same unit as angular drag.
 static constexpr float kDefaultLinearThrustMmPerSec2 = 2000.0f;
 static constexpr float kDefaultLinearDragPerSec = 4.0f;
+static constexpr float kDefaultLinearSpeedMmPerSec =
+    kDefaultLinearThrustMmPerSec2 / kDefaultLinearDragPerSec;
+static constexpr float kDefaultAngularSpeedRadPerSec = 0.4f;
 static constexpr float kLegacyLinearThrustScaleThreshold = 100.0f;
 static constexpr float kLegacyMisscaledLinearDragThreshold = 100.0f;
 

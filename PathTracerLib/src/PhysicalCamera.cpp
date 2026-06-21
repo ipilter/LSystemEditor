@@ -89,7 +89,7 @@ constexpr IsoPreset kIsoPresets[] = {
 } // namespace
 
 PhysicalCamera::PhysicalCamera()
-    : m_position(0.0f, 500.0f, 1500.0f)
+    : m_position(0.0f, 0.0f, 0.0f)
     , m_orientation(1.0f, 0.0f, 0.0f, 0.0f)
     , m_fovY(0.0f)
     , m_near(0.0f)
@@ -195,6 +195,24 @@ void PhysicalCamera::addEulerDelta(float deltaYaw, float deltaPitch, float delta
 void PhysicalCamera::translateLocal(float rightAmount, float upAmount, float forwardAmount)
 {
     m_position += right() * rightAmount + up() * upAmount + forward() * forwardAmount;
+}
+
+void PhysicalCamera::setPosition(const glm::vec3& position)
+{
+    m_position = position;
+}
+
+void PhysicalCamera::setPosition(float x, float y, float z)
+{
+    m_position = glm::vec3(x, y, z);
+}
+
+void PhysicalCamera::setEulerAngles(float yawRad, float pitchRad, float rollRad)
+{
+    m_yawRad = yawRad;
+    m_pitchRad = glm::clamp(pitchRad, -kMaxPitchRad, kMaxPitchRad);
+    m_rollRad = rollRad;
+    rebuildOrientation();
 }
 
 void PhysicalCamera::setAspect(int imageW, int imageH)

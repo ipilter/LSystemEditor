@@ -72,6 +72,9 @@ public:
     void translateLocal(float rightAmount, float upAmount, float forwardAmount);
 
     glm::vec3 position() const { return m_position; }
+    void setPosition(const glm::vec3& position);
+    void setPosition(float x, float y, float z);
+    void setEulerAngles(float yawRad, float pitchRad, float rollRad);
 
     glm::vec3 focusPoint() const { return m_focusPoint; }
     bool focusValid() const { return m_focusValid; }

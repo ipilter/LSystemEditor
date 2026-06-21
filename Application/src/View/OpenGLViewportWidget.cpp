@@ -205,6 +205,7 @@ OpenGLViewportWidget::OpenGLViewportWidget(QWidget* parent)
 
     connect(&m_cameraTick, &QTimer::timeout, this, &OpenGLViewportWidget::updateCameraDynamics);
     applyCameraDynamicsSettings();
+    applyDefaultCameraPosition();
     m_cameraTick.start();
     m_cameraTickTimer.start();
 
@@ -803,8 +804,11 @@ void OpenGLViewportWidget::mouseMoveEvent(QMouseEvent* event)
     const QPoint delta = event->pos() - m_lastMousePos;
     m_lastMousePos = event->pos();
 
-    m_pendingMouseAngularInput.x += static_cast<float>(-delta.y()) * m_mouseSensitivity;
-    m_pendingMouseAngularInput.y += static_cast<float>(-delta.x()) * m_mouseSensitivity;
+    m_camera.addEulerDelta(
+        static_cast<float>(-delta.x()) * m_mouseSensitivity,
+        static_cast<float>(-delta.y()) * m_mouseSensitivity,
+        0.0f);
+    notifyCameraMotionChanged();
     event->accept();
 }
 
@@ -887,7 +891,6 @@ void OpenGLViewportWidget::keyReleaseEvent(QKeyEvent* event)
 void OpenGLViewportWidget::focusOutEvent(QFocusEvent* event)
 {
     m_inputState.clear();
-    m_pendingMouseAngularInput = glm::vec2(0.0f);
     m_cameraDynamics.reset();
     m_cameraResetThrottle.cancel();
     m_cameraMotionStopDebounce.cancel();
@@ -905,28 +908,50 @@ void OpenGLViewportWidget::applyCameraDynamicsSettings()
     m_cameraMotionStopDebounce.setIntervalMs(settings.motionStopDebounceMs);
 }
 
+void OpenGLViewportWidget::applyDefaultCameraPosition()
+{
+    m_camera.setPosition(m_cameraDynamics.defaultPositionMm());
+    const glm::vec3 orientationDeg = m_cameraDynamics.defaultOrientationDeg();
+    m_camera.setEulerAngles(
+        glm::radians(orientationDeg.x),
+        glm::radians(orientationDeg.y),
+        glm::radians(orientationDeg.z));
+    m_camera.setDefaultFocusPoint();
+    m_cameraDynamics.reset();
+    syncCameraToPathTracer();
+}
+
 void OpenGLViewportWidget::updateCameraDynamics()
 {
-    const float dt = std::min(static_cast<float>(m_cameraTickTimer.elapsed()) / 1000.0f, 0.1f);
-    m_cameraTickTimer.restart();
-    if (dt <= 0.0f) {
+    const CameraDynamicsSettings settings = AppSettings::instance().cameraDynamicsSettings();
+    const float fixedDt = static_cast<float>(settings.tickIntervalMs) / 1000.0f;
+    if (fixedDt <= 0.0f) {
         return;
     }
 
-    glm::vec3 angularInput = m_inputState.angularInput();
-    angularInput.x += m_pendingMouseAngularInput.x;
-    angularInput.y += m_pendingMouseAngularInput.y;
-    m_pendingMouseAngularInput = glm::vec2(0.0f);
+    const qint64 elapsedMs = m_cameraTickTimer.elapsed();
+    m_cameraTickTimer.restart();
 
-    m_cameraDynamics.setThrustScale(m_inputState.boostHeld() ? 2.0f : 1.0f);
+    int subSteps = 1;
+    if (elapsedMs > 0) {
+        subSteps = static_cast<int>(std::lround(static_cast<double>(elapsedMs)
+            / static_cast<double>(settings.tickIntervalMs)));
+        subSteps = std::max(1, std::min(subSteps, 4));
+    }
+
+    m_cameraDynamics.setSpeedScale(m_inputState.boostHeld() ? 2.0f : 1.0f);
     m_cameraDynamics.setLinearInput(m_inputState.linearInput());
-    m_cameraDynamics.setAngularInput(angularInput);
+    m_cameraDynamics.setAngularInput(m_inputState.angularInput());
 
-    if (m_cameraDynamics.step(m_camera, dt)) {
-        refreshPinnedFocusFromModel();
-        syncCameraLive();
-        m_cameraResetThrottle.schedule();
-        m_cameraMotionStopDebounce.schedule();
+    bool moved = false;
+    for (int step = 0; step < subSteps; ++step) {
+        if (m_cameraDynamics.step(m_camera, fixedDt)) {
+            moved = true;
+        }
+    }
+
+    if (moved) {
+        notifyCameraMotionChanged();
     }
 }
 
@@ -1141,10 +1166,12 @@ void OpenGLViewportWidget::refreshPinnedFocusFromModel()
     m_model->syncFocusDistanceMm(m_camera.computeFocusDistance());
 }
 
-void OpenGLViewportWidget::syncCameraLive()
+void OpenGLViewportWidget::notifyCameraMotionChanged()
 {
+    refreshPinnedFocusFromModel();
     syncCameraToPathTracer();
-    update();
+    m_cameraResetThrottle.schedule();
+    m_cameraMotionStopDebounce.schedule();
 }
 
 void OpenGLViewportWidget::resetAccumulationForCamera()
