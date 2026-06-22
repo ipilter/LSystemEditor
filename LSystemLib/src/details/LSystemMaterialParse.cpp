@@ -213,34 +213,35 @@ bool parse_brace_float_list(std::string_view line, std::size_t& pos, std::vector
 
 void validate_grid_params(std::string_view line, const std::vector<float>& params)
 {
-    if (params.size() < 6u || params.size() > 10u)
+    if (params.size() < 8u || params.size() > 11u)
     {
         material_parse_error(
             line,
-            "Grid texture requires 6 to 10 params "
-            "(ar, ag, ab, br, bg, bb, [freq or freqU], [freqV], [lineThickness])");
+            "Grid texture requires 8 to 11 params "
+            "(onR,onG,onB, offR,offG,offB, intensityOn,intensityOff, "
+            "[freq or freqU], [freqV], [thickness])");
     }
 }
 
 void validate_stripe_params(std::string_view line, const std::vector<float>& params)
 {
-    if (params.size() < 2u || params.size() > 4u)
+    if (params.size() < 9u || params.size() > 10u)
     {
         material_parse_error(
             line,
-            "Stripe texture requires 2 to 4 params "
-            "(frequency, lineThickness, [onValue], [offValue])");
+            "Stripe texture requires 9 to 10 params "
+            "(onR,onG,onB, offR,offG,offB, intensityOn,intensityOff, freq, [thickness])");
     }
 }
 
 void validate_noise_params(std::string_view line, const std::vector<float>& params)
 {
-    if (params.size() < 1u || params.size() > 5u)
+    if (params.size() < 9u || params.size() > 11u)
     {
         material_parse_error(
             line,
-            "Noise texture requires 1 to 5 params "
-            "(scale, [octaves], [seed], [minValue], [maxValue])");
+            "Noise texture requires 9 to 11 params "
+            "(onR,onG,onB, offR,offG,offB, intensityOn,intensityOff, scale, [octaves], [seed])");
     }
 }
 
@@ -304,7 +305,7 @@ void apply_rgb_or_gray(NamedValue& out_value, const NamedValue& source, std::str
     (void)propName;
 }
 
-std::vector<float> build_grid_params(std::string_view line, const NamedProps& props)
+struct OnOffIntensities
 {
     float onR = 1.f;
     float onG = 1.f;
@@ -312,6 +313,71 @@ std::vector<float> build_grid_params(std::string_view line, const NamedProps& pr
     float offR = 0.f;
     float offG = 0.f;
     float offB = 0.f;
+    float intensityOn = 1.f;
+    float intensityOff = 1.f;
+};
+
+void parse_on_off_intensities(
+    std::string_view line,
+    const NamedProps& props,
+    OnOffIntensities& out)
+{
+    for (const auto& [key, value] : props)
+    {
+        if (key == "on")
+        {
+            NamedValue rgb;
+            apply_rgb_or_gray(rgb, value, line, "on");
+            out.onR = rgb.floats[0];
+            out.onG = rgb.floats[1];
+            out.onB = rgb.floats[2];
+        }
+        else if (key == "off")
+        {
+            NamedValue rgb;
+            apply_rgb_or_gray(rgb, value, line, "off");
+            out.offR = rgb.floats[0];
+            out.offG = rgb.floats[1];
+            out.offB = rgb.floats[2];
+        }
+        else if (key == "intensityOn")
+        {
+            if (value.kind != NamedValueKind::Scalar)
+            {
+                material_parse_error(line, "intensityOn expects a scalar");
+            }
+            out.intensityOn = value.scalar;
+        }
+        else if (key == "intensityOff")
+        {
+            if (value.kind != NamedValueKind::Scalar)
+            {
+                material_parse_error(line, "intensityOff expects a scalar");
+            }
+            out.intensityOff = value.scalar;
+        }
+    }
+}
+
+std::vector<float> append_on_off_intensities(const OnOffIntensities& colors)
+{
+    return {
+        colors.onR,
+        colors.onG,
+        colors.onB,
+        colors.offR,
+        colors.offG,
+        colors.offB,
+        colors.intensityOn,
+        colors.intensityOff,
+    };
+}
+
+std::vector<float> build_grid_params(std::string_view line, const NamedProps& props)
+{
+    OnOffIntensities colors;
+    parse_on_off_intensities(line, props, colors);
+
     float freqU = 8.f;
     float freqV = 8.f;
     float thickness = 0.05f;
@@ -322,21 +388,9 @@ std::vector<float> build_grid_params(std::string_view line, const NamedProps& pr
 
     for (const auto& [key, value] : props)
     {
-        if (key == "on")
+        if (key == "on" || key == "off" || key == "intensityOn" || key == "intensityOff")
         {
-            NamedValue rgb;
-            apply_rgb_or_gray(rgb, value, line, "on");
-            onR = rgb.floats[0];
-            onG = rgb.floats[1];
-            onB = rgb.floats[2];
-        }
-        else if (key == "off")
-        {
-            NamedValue rgb;
-            apply_rgb_or_gray(rgb, value, line, "off");
-            offR = rgb.floats[0];
-            offG = rgb.floats[1];
-            offB = rgb.floats[2];
+            continue;
         }
         else if (key == "freq")
         {
@@ -390,7 +444,7 @@ std::vector<float> build_grid_params(std::string_view line, const NamedProps& pr
         freqU = freqV;
     }
 
-    std::vector<float> params = {onR, onG, onB, offR, offG, offB};
+    std::vector<float> params = append_on_off_intensities(colors);
     if (hasFreqV && (hasFreqU || hasFreq))
     {
         params.push_back(freqU);
@@ -407,18 +461,21 @@ std::vector<float> build_grid_params(std::string_view line, const NamedProps& pr
 
 std::vector<float> build_stripe_params(std::string_view line, const NamedProps& props)
 {
+    OnOffIntensities colors;
+    parse_on_off_intensities(line, props, colors);
+
     float freq = 0.f;
     float thickness = 0.05f;
-    float onValue = 1.f;
-    float offValue = 0.f;
     bool hasFreq = false;
     bool hasThickness = false;
-    bool hasOn = false;
-    bool hasOff = false;
 
     for (const auto& [key, value] : props)
     {
-        if (key == "freq")
+        if (key == "on" || key == "off" || key == "intensityOn" || key == "intensityOff")
+        {
+            continue;
+        }
+        else if (key == "freq")
         {
             if (value.kind != NamedValueKind::Scalar)
             {
@@ -436,40 +493,6 @@ std::vector<float> build_stripe_params(std::string_view line, const NamedProps& 
             hasThickness = true;
             thickness = value.scalar;
         }
-        else if (key == "on")
-        {
-            if (value.kind == NamedValueKind::FloatList && value.floats.size() == 3u)
-            {
-                hasOn = true;
-                onValue = value.floats[0];
-            }
-            else if (value.kind == NamedValueKind::Scalar)
-            {
-                hasOn = true;
-                onValue = value.scalar;
-            }
-            else
-            {
-                material_parse_error(line, "Stripe on expects a scalar");
-            }
-        }
-        else if (key == "off")
-        {
-            if (value.kind == NamedValueKind::FloatList && value.floats.size() == 3u)
-            {
-                hasOff = true;
-                offValue = value.floats[0];
-            }
-            else if (value.kind == NamedValueKind::Scalar)
-            {
-                hasOff = true;
-                offValue = value.scalar;
-            }
-            else
-            {
-                material_parse_error(line, "Stripe off expects a scalar");
-            }
-        }
         else
         {
             material_parse_error(line, "unknown Stripe texture property");
@@ -481,35 +504,34 @@ std::vector<float> build_stripe_params(std::string_view line, const NamedProps& 
         material_parse_error(line, "Stripe texture requires freq");
     }
 
-    std::vector<float> params = {freq, thickness};
-    if (hasOn || hasOff)
+    std::vector<float> params = append_on_off_intensities(colors);
+    params.push_back(freq);
+    if (hasThickness)
     {
-        params.push_back(onValue);
-        params.push_back(offValue);
-    }
-    else if (hasThickness)
-    {
-        params.push_back(onValue);
+        params.push_back(thickness);
     }
     return params;
 }
 
 std::vector<float> build_noise_params(std::string_view line, const NamedProps& props)
 {
+    OnOffIntensities colors;
+    parse_on_off_intensities(line, props, colors);
+
     float scale = 0.f;
     float octaves = 1.f;
     float seed = 0.f;
-    float minValue = 0.f;
-    float maxValue = 1.f;
     bool hasScale = false;
     bool hasOctaves = false;
     bool hasSeed = false;
-    bool hasMin = false;
-    bool hasMax = false;
 
     for (const auto& [key, value] : props)
     {
-        if (key == "scale")
+        if (key == "on" || key == "off" || key == "intensityOn" || key == "intensityOff")
+        {
+            continue;
+        }
+        else if (key == "scale")
         {
             if (value.kind != NamedValueKind::Scalar)
             {
@@ -536,24 +558,6 @@ std::vector<float> build_noise_params(std::string_view line, const NamedProps& p
             hasSeed = true;
             seed = value.scalar;
         }
-        else if (key == "min")
-        {
-            if (value.kind != NamedValueKind::Scalar)
-            {
-                material_parse_error(line, "Noise min expects a scalar");
-            }
-            hasMin = true;
-            minValue = value.scalar;
-        }
-        else if (key == "max")
-        {
-            if (value.kind != NamedValueKind::Scalar)
-            {
-                material_parse_error(line, "Noise max expects a scalar");
-            }
-            hasMax = true;
-            maxValue = value.scalar;
-        }
         else
         {
             material_parse_error(line, "unknown Noise texture property");
@@ -565,13 +569,12 @@ std::vector<float> build_noise_params(std::string_view line, const NamedProps& p
         material_parse_error(line, "Noise texture requires scale");
     }
 
-    std::vector<float> params = {scale};
-    if (hasOctaves || hasSeed || hasMin || hasMax)
+    std::vector<float> params = append_on_off_intensities(colors);
+    params.push_back(scale);
+    if (hasOctaves || hasSeed)
     {
         params.push_back(octaves);
         params.push_back(seed);
-        params.push_back(minValue);
-        params.push_back(maxValue);
     }
     return params;
 }

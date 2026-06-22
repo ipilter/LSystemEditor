@@ -252,15 +252,15 @@ TEST(LSystemMaterialParse, parses_grid_albedo_texture)
 {
     std::vector<MaterialDefinition> definitions;
     ASSERT_TRUE(try_parse_material_line(
-        "Mat(GridMat) = {{Grid, 1,0,0, 0,1,0, 8, 0.05}, 0.5, 0, 0, 0, 1.5, 0, 0}",
+        "Mat(GridMat) = {{Grid, 1,0,0, 0,1,0, 1,1, 8, 0.05}, 0.5, 0, 0, 0, 1.5, 0, 0}",
         definitions));
     const MaterialEntry* entry = find_material(definitions, "GridMat");
     ASSERT_NE(entry, nullptr);
     EXPECT_EQ(entry->albedo.mode, MaterialChannel::Mode::Texture);
     EXPECT_EQ(entry->albedo.texture.kind, "Grid");
-    ASSERT_EQ(entry->albedo.texture.params.size(), 8u);
-    EXPECT_NEAR(entry->albedo.texture.params[6], 8.f, 1e-5f);
-    EXPECT_NEAR(entry->albedo.texture.params[7], 0.05f, 1e-5f);
+    ASSERT_EQ(entry->albedo.texture.params.size(), 10u);
+    EXPECT_NEAR(entry->albedo.texture.params[8], 8.f, 1e-5f);
+    EXPECT_NEAR(entry->albedo.texture.params[9], 0.05f, 1e-5f);
     EXPECT_NEAR(materialChannelScalar(entry->roughness, 0.5f), 0.5f, 1e-5f);
 }
 
@@ -268,29 +268,29 @@ TEST(LSystemMaterialParse, parses_grid_split_frequency_texture)
 {
     std::vector<MaterialDefinition> definitions;
     ASSERT_TRUE(try_parse_material_line(
-        "Mat(GridSplit) = {{Grid, 0.85,0.85,0.85, 0.05,0.05,0.05, 48, 0.2, 0.015}, 0.6}",
+        "Mat(GridSplit) = {{Grid, 0.85,0.85,0.85, 0.05,0.05,0.05, 1,1, 48, 0.2, 0.015}, 0.6}",
         definitions));
     const MaterialEntry* entry = find_material(definitions, "GridSplit");
     ASSERT_NE(entry, nullptr);
     EXPECT_EQ(entry->albedo.texture.kind, "Grid");
-    ASSERT_EQ(entry->albedo.texture.params.size(), 9u);
-    EXPECT_NEAR(entry->albedo.texture.params[6], 48.f, 1e-5f);
-    EXPECT_NEAR(entry->albedo.texture.params[7], 0.2f, 1e-5f);
-    EXPECT_NEAR(entry->albedo.texture.params[8], 0.015f, 1e-5f);
+    ASSERT_EQ(entry->albedo.texture.params.size(), 11u);
+    EXPECT_NEAR(entry->albedo.texture.params[8], 48.f, 1e-5f);
+    EXPECT_NEAR(entry->albedo.texture.params[9], 0.2f, 1e-5f);
+    EXPECT_NEAR(entry->albedo.texture.params[10], 0.015f, 1e-5f);
 }
 
 TEST(LSystemMaterialParse, parses_stripe_transmission_texture)
 {
     std::vector<MaterialDefinition> definitions;
     ASSERT_TRUE(try_parse_material_line(
-        "Mat(Striped) = {0.8, 0.8, 0.8, 0.5, 0, {Stripe, 10, 0.1}, 0, 1.5, 0, 0}",
+        "Mat(Striped) = {0.8, 0.8, 0.8, 0.5, 0, {Stripe, 1,1,1, 0,0,0, 1,1, 10, 0.1}, 0, 1.5, 0, 0}",
         definitions));
     const MaterialEntry* entry = find_material(definitions, "Striped");
     ASSERT_NE(entry, nullptr);
     EXPECT_EQ(entry->transmission.mode, MaterialChannel::Mode::Texture);
     EXPECT_EQ(entry->transmission.texture.kind, "Stripe");
-    ASSERT_EQ(entry->transmission.texture.params.size(), 2u);
-    EXPECT_NEAR(entry->transmission.texture.params[0], 10.f, 1e-5f);
+    ASSERT_EQ(entry->transmission.texture.params.size(), 10u);
+    EXPECT_NEAR(entry->transmission.texture.params[8], 10.f, 1e-5f);
     EXPECT_NEAR(materialChannelScalar(entry->transmission), 0.f, 1e-5f);
 }
 
@@ -311,7 +311,8 @@ TEST(LSystemMaterialParse, parses_grid_emission_texture)
 {
     std::vector<MaterialDefinition> definitions;
     ASSERT_TRUE(try_parse_material_line(
-        "Mat(GridLamp) = {0.1, 0.1, 0.1, 0.4, 0, 0, 0, 1.5, 0, {Grid, 1,1,1, 1,1,1, 24, 24, 0.02}}",
+        "Mat(GridLamp) = {0.1, 0.1, 0.1, 0.4, 0, 0, 0, 1.5, 0, "
+        "{Grid, 1,1,1, 1,1,1, 1,1, 24, 24, 0.02}}",
         definitions));
     const MaterialEntry* entry = find_material(definitions, "GridLamp");
     ASSERT_NE(entry, nullptr);
@@ -324,15 +325,16 @@ TEST(LSystemMaterialParse, parses_noise_roughness_texture)
 {
     std::vector<MaterialDefinition> definitions;
     ASSERT_TRUE(try_parse_material_line(
-        "Mat(NoisyPlastic) = {0.9, 0.7, 0.94, {Noise, 16, 3, 42, 0.2, 0.9}}",
+        "Mat(NoisyPlastic) = {0.9, 0.7, 0.94, "
+        "{Noise, 0.2,0.2,0.2, 0.9,0.9,0.9, 1,1, 16, 3, 42}}",
         definitions));
     const MaterialEntry* entry = find_material(definitions, "NoisyPlastic");
     ASSERT_NE(entry, nullptr);
     EXPECT_EQ(entry->roughness.mode, MaterialChannel::Mode::Texture);
     EXPECT_EQ(entry->roughness.texture.kind, "Noise");
-    ASSERT_EQ(entry->roughness.texture.params.size(), 5u);
-    EXPECT_NEAR(entry->roughness.texture.params[0], 16.f, 1e-5f);
-    EXPECT_NEAR(entry->roughness.texture.params[4], 0.9f, 1e-5f);
+    ASSERT_EQ(entry->roughness.texture.params.size(), 11u);
+    EXPECT_NEAR(entry->roughness.texture.params[8], 16.f, 1e-5f);
+    EXPECT_NEAR(entry->roughness.texture.params[10], 42.f, 1e-5f);
 }
 
 TEST(LSystemMaterialParse, rejects_invalid_noise_params)
@@ -396,9 +398,9 @@ TEST(LSystemMaterialParse, parses_named_light_material)
     EXPECT_NEAR(materialChannelScalar(e->metallic), 1.f, 1e-5f);
     EXPECT_EQ(e->emission.mode, MaterialChannel::Mode::Texture);
     EXPECT_EQ(e->emission.texture.kind, "Stripe");
-    ASSERT_EQ(e->emission.texture.params.size(), 4u);
-    EXPECT_NEAR(e->emission.texture.params[0], 8.f, 1e-5f);
-    EXPECT_NEAR(e->emission.texture.params[2], 10.f, 1e-5f);
+    ASSERT_EQ(e->emission.texture.params.size(), 10u);
+    EXPECT_NEAR(e->emission.texture.params[0], 10.f, 1e-5f);
+    EXPECT_NEAR(e->emission.texture.params[8], 8.f, 1e-5f);
 }
 
 TEST(LSystemMaterialParse, parses_named_metal_materials)
@@ -430,11 +432,11 @@ TEST(LSystemMaterialParse, parses_named_grid_albedo_full)
     ASSERT_NE(entry, nullptr);
     EXPECT_EQ(entry->albedo.mode, MaterialChannel::Mode::Texture);
     EXPECT_EQ(entry->albedo.texture.kind, "Grid");
-    ASSERT_EQ(entry->albedo.texture.params.size(), 8u);
+    ASSERT_EQ(entry->albedo.texture.params.size(), 10u);
     EXPECT_NEAR(entry->albedo.texture.params[0], 1.f, 1e-5f);
     EXPECT_NEAR(entry->albedo.texture.params[4], 1.f, 1e-5f);
-    EXPECT_NEAR(entry->albedo.texture.params[6], 8.f, 1e-5f);
-    EXPECT_NEAR(entry->albedo.texture.params[7], 0.05f, 1e-5f);
+    EXPECT_NEAR(entry->albedo.texture.params[8], 8.f, 1e-5f);
+    EXPECT_NEAR(entry->albedo.texture.params[9], 0.05f, 1e-5f);
 }
 
 TEST(LSystemMaterialParse, parses_named_grid_partial_defaults)
@@ -445,10 +447,11 @@ TEST(LSystemMaterialParse, parses_named_grid_partial_defaults)
         definitions));
     const MaterialEntry* entry = find_material(definitions, "PartialGrid");
     ASSERT_NE(entry, nullptr);
-    ASSERT_EQ(entry->albedo.texture.params.size(), 8u);
+    ASSERT_EQ(entry->albedo.texture.params.size(), 10u);
     EXPECT_NEAR(entry->albedo.texture.params[0], 1.f, 1e-5f);
     EXPECT_NEAR(entry->albedo.texture.params[3], 0.f, 1e-5f);
-    EXPECT_NEAR(entry->albedo.texture.params[6], 8.f, 1e-5f);
+    EXPECT_NEAR(entry->albedo.texture.params[6], 1.f, 1e-5f);
+    EXPECT_NEAR(entry->albedo.texture.params[8], 8.f, 1e-5f);
 }
 
 TEST(LSystemMaterialParse, parses_named_grid_split_frequency)
@@ -460,10 +463,10 @@ TEST(LSystemMaterialParse, parses_named_grid_split_frequency)
         definitions));
     const MaterialEntry* entry = find_material(definitions, "SplitGrid");
     ASSERT_NE(entry, nullptr);
-    ASSERT_EQ(entry->albedo.texture.params.size(), 9u);
-    EXPECT_NEAR(entry->albedo.texture.params[6], 48.f, 1e-5f);
-    EXPECT_NEAR(entry->albedo.texture.params[7], 0.2f, 1e-5f);
-    EXPECT_NEAR(entry->albedo.texture.params[8], 0.015f, 1e-5f);
+    ASSERT_EQ(entry->albedo.texture.params.size(), 11u);
+    EXPECT_NEAR(entry->albedo.texture.params[8], 48.f, 1e-5f);
+    EXPECT_NEAR(entry->albedo.texture.params[9], 0.2f, 1e-5f);
+    EXPECT_NEAR(entry->albedo.texture.params[10], 0.015f, 1e-5f);
 }
 
 TEST(LSystemMaterialParse, parses_named_stripe_compact_texture)
@@ -476,15 +479,17 @@ TEST(LSystemMaterialParse, parses_named_stripe_compact_texture)
     ASSERT_NE(entry, nullptr);
     EXPECT_EQ(entry->transmission.mode, MaterialChannel::Mode::Texture);
     EXPECT_EQ(entry->transmission.texture.kind, "Stripe");
-    ASSERT_EQ(entry->transmission.texture.params.size(), 4u);
+    ASSERT_EQ(entry->transmission.texture.params.size(), 10u);
     EXPECT_NEAR(entry->transmission.texture.params[0], 10.f, 1e-5f);
+    EXPECT_NEAR(entry->transmission.texture.params[8], 10.f, 1e-5f);
 }
 
 TEST(LSystemMaterialParse, parses_named_noise_full_and_partial)
 {
     std::vector<MaterialDefinition> definitions;
     ASSERT_TRUE(try_parse_material_line(
-        "Mat(FullNoise) = {albedo: {0.9, 0.7, 0.94}, roughness: {Noise, scale:16, octaves:3, seed:42, min:0.2, max:0.9}}",
+        "Mat(FullNoise) = {albedo: {0.9, 0.7, 0.94}, "
+        "roughness: {Noise, scale:16, octaves:3, seed:42, off:0.2, on:0.9}}",
         definitions));
     ASSERT_TRUE(try_parse_material_line(
         "Mat(PartialNoise) = {albedo: {0.5, 0.5, 0.5}, roughness: {Noise, scale: 8}}",
@@ -493,10 +498,12 @@ TEST(LSystemMaterialParse, parses_named_noise_full_and_partial)
     const MaterialEntry* partial = find_material(definitions, "PartialNoise");
     ASSERT_NE(full, nullptr);
     ASSERT_NE(partial, nullptr);
-    ASSERT_EQ(full->roughness.texture.params.size(), 5u);
-    EXPECT_NEAR(full->roughness.texture.params[4], 0.9f, 1e-5f);
-    ASSERT_EQ(partial->roughness.texture.params.size(), 1u);
-    EXPECT_NEAR(partial->roughness.texture.params[0], 8.f, 1e-5f);
+    ASSERT_EQ(full->roughness.texture.params.size(), 11u);
+    EXPECT_NEAR(full->roughness.texture.params[0], 0.9f, 1e-5f);
+    EXPECT_NEAR(full->roughness.texture.params[3], 0.2f, 1e-5f);
+    EXPECT_NEAR(full->roughness.texture.params[8], 16.f, 1e-5f);
+    ASSERT_EQ(partial->roughness.texture.params.size(), 9u);
+    EXPECT_NEAR(partial->roughness.texture.params[8], 8.f, 1e-5f);
 }
 
 TEST(LSystemMaterialParse, rejects_named_duplicate_property)

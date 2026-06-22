@@ -24,49 +24,76 @@ void expectNear(float actual, float expected, float tolerance, const char* messa
 }
 
 TextureDescGpu makeGridTexture(
-    float ar,
-    float ag,
-    float ab,
-    float br,
-    float bg,
-    float bb,
+    float onR,
+    float onG,
+    float onB,
+    float offR,
+    float offG,
+    float offB,
     float frequency,
-    float thickness)
+    float thickness,
+    float intensityOn = 1.0f,
+    float intensityOff = 1.0f)
 {
     TextureDescGpu desc{};
     desc.kind = static_cast<uint32_t>(TextureKind::Grid2D);
     desc.p0 = make_float4(frequency, frequency, thickness, 0.0f);
-    desc.p1 = make_float4(ar, ag, ab, 0.0f);
-    desc.p2 = make_float4(br, bg, bb, 0.0f);
+    desc.p1 = make_float4(onR, onG, onB, intensityOn);
+    desc.p2 = make_float4(offR, offG, offB, intensityOff);
     return desc;
 }
 
-TextureDescGpu makeStripeTexture(float frequency, float thickness, float onValue, float offValue)
+TextureDescGpu makeStripeTexture(
+    float frequency,
+    float thickness,
+    float onValue,
+    float offValue,
+    float intensityOn = 1.0f,
+    float intensityOff = 1.0f)
 {
     TextureDescGpu desc{};
     desc.kind = static_cast<uint32_t>(TextureKind::Stripe1D);
-    desc.p0 = make_float4(frequency, thickness, onValue, offValue);
+    desc.p0 = make_float4(frequency, thickness, 0.0f, 0.0f);
+    desc.p1 = make_float4(onValue, onValue, onValue, intensityOn);
+    desc.p2 = make_float4(offValue, offValue, offValue, intensityOff);
     return desc;
 }
 
-void testGridReturnsColorAOffGridLines()
+TextureDescGpu makeNoiseTexture(
+    float onValue,
+    float offValue,
+    float scale,
+    float octaves = 1.0f,
+    float seed = 0.0f,
+    float intensityOn = 1.0f,
+    float intensityOff = 1.0f)
+{
+    TextureDescGpu desc{};
+    desc.kind = static_cast<uint32_t>(TextureKind::Noise2D);
+    desc.p0 = make_float4(scale, octaves, seed, 0.0f);
+    desc.p1 = make_float4(onValue, onValue, onValue, intensityOn);
+    desc.p2 = make_float4(offValue, offValue, offValue, intensityOff);
+    return desc;
+}
+
+void testGridReturnsOnColorOffGridLines()
 {
     const TextureDescGpu grid = makeGridTexture(1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 4.0f, 0.05f);
     const TextureEvalContext ctx{Vec2{0.3f, 0.3f}, 0.3f};
     const Vec3 color = evalProceduralRgb(grid, ctx);
-    expectNear(color.x, 1.0f, 1e-5f, "grid color A red");
-    expectNear(color.y, 0.0f, 1e-5f, "grid color A green");
-    expectNear(color.z, 0.0f, 1e-5f, "grid color A blue");
+    expectNear(color.x, 1.0f, 1e-5f, "grid on color red off lines");
+    expectNear(color.y, 0.0f, 1e-5f, "grid on color green off lines");
+    expectNear(color.z, 0.0f, 1e-5f, "grid on color blue off lines");
 }
 
-void testGridReturnsColorBOnGridLines()
+void testGridReturnsOffColorOnGridLines()
 {
     const TextureDescGpu grid = makeGridTexture(1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 4.0f, 0.05f);
     const TextureEvalContext ctx{Vec2{0.0f, 0.0f}, 0.0f};
     const Vec3 color = evalProceduralRgb(grid, ctx);
-    expectNear(color.x, 0.0f, 1e-5f, "grid color B red");
-    expectNear(color.y, 1.0f, 1e-5f, "grid color B green");
-    expectNear(color.z, 0.0f, 1e-5f, "grid color B blue");
+    expectNear(color.x, 0.0f, 1e-5f, "grid off color red on lines");
+    expectNear(color.y, 1.0f, 1e-5f, "grid off color green on lines");
+    expectNear(color.z, 0.0f, 1e-5f, "grid off color blue on lines");
 }
 
 void testGridSplitFrequencyUsesSeparateAxes()
@@ -74,8 +101,8 @@ void testGridSplitFrequencyUsesSeparateAxes()
     TextureDescGpu splitGrid{};
     splitGrid.kind = static_cast<uint32_t>(TextureKind::Grid2D);
     splitGrid.p0 = make_float4(20.0f, 2.0f, 0.05f, 0.0f);
-    splitGrid.p1 = make_float4(1.0f, 0.0f, 0.0f, 0.0f);
-    splitGrid.p2 = make_float4(0.0f, 1.0f, 0.0f, 0.0f);
+    splitGrid.p1 = make_float4(1.0f, 0.0f, 0.0f, 1.0f);
+    splitGrid.p2 = make_float4(0.0f, 1.0f, 0.0f, 1.0f);
 
     const TextureDescGpu uniformGrid = makeGridTexture(1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 20.0f, 0.05f);
     const TextureEvalContext ctx{Vec2{0.03f, 0.02f}, 0.0f};
@@ -130,16 +157,12 @@ void testResolveMaterialAppliesGridAlbedoTexture()
 
 void testGridScalarUsesOnOffValues()
 {
-    TextureDescGpu grid{};
-    grid.kind = static_cast<uint32_t>(TextureKind::Grid2D);
-    grid.p0 = make_float4(4.0f, 4.0f, 0.05f, 2.0f);
-    grid.p1 = make_float4(0.0f, 0.0f, 0.0f, 0.0f);
-    grid.p2 = make_float4(0.0f, 0.0f, 0.0f, 0.5f);
+    const TextureDescGpu grid = makeGridTexture(2.0f, 2.0f, 2.0f, 0.5f, 0.5f, 0.5f, 4.0f, 0.05f);
 
     const TextureEvalContext onLine{Vec2{0.0f, 0.0f}, 0.0f};
     const TextureEvalContext offLine{Vec2{0.3f, 0.3f}, 0.3f};
-    expectNear(evalProceduralScalar(grid, onLine), 2.0f, 1e-5f, "grid scalar on value");
-    expectNear(evalProceduralScalar(grid, offLine), 0.5f, 1e-5f, "grid scalar off value");
+    expectNear(evalProceduralScalar(grid, onLine), 0.5f, 1e-5f, "grid scalar off value on line");
+    expectNear(evalProceduralScalar(grid, offLine), 2.0f, 1e-5f, "grid scalar on value off line");
 }
 
 void testMultiplyEmissionWithGridMask()
@@ -150,7 +173,7 @@ void testMultiplyEmissionWithGridMask()
 
     const TextureDescGpu bank[] = {
         {},
-        makeGridTexture(1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 4.0f, 0.05f),
+        makeGridTexture(0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f, 4.0f, 0.05f),
     };
 
     const TextureEvalContext onLine{Vec2{0.0f, 0.0f}, 0.0f};
@@ -186,11 +209,7 @@ void testNoiseRoughnessMultiply()
     material.roughness = 1.0f;
     material.roughnessTex = 1u;
 
-    TextureDescGpu noise{};
-    noise.kind = static_cast<uint32_t>(TextureKind::Noise2D);
-    noise.p0 = make_float4(4.0f, 1.0f, 42.0f, 0.2f);
-    noise.p1 = make_float4(0.8f, 0.0f, 0.0f, 0.0f);
-
+    const TextureDescGpu noise = makeNoiseTexture(0.8f, 0.2f, 4.0f, 1.0f, 42.0f);
     const TextureDescGpu bank[] = {{}, noise};
     const TextureEvalContext ctx{Vec2{0.25f, 0.75f}, 0.25f};
     const ResolvedMaterial resolved = resolveMaterial(material, ctx, bank, 2u);
@@ -198,12 +217,33 @@ void testNoiseRoughnessMultiply()
     expectTrue(resolved.roughness <= 0.8f + 1e-5f, "noise roughness max bound");
 }
 
+void testNoiseAlbedoRgbIsNonZero()
+{
+    const TextureDescGpu noise = makeNoiseTexture(1.0f, 0.0f, 16.0f, 4.0f, 0.0f);
+    const TextureEvalContext ctx{Vec2{0.25f, 0.75f}, 0.25f};
+    const Vec3 color = evalProceduralRgb(noise, ctx);
+    expectTrue(color.x > 0.0f || color.y > 0.0f || color.z > 0.0f, "noise albedo rgb non-zero");
+}
+
+void testNoiseEmissionIntensityBoost()
+{
+    MaterialGpu material{};
+    material.emission = 0.0f;
+    material.emissionTex = 1u;
+
+    const TextureDescGpu noise = makeNoiseTexture(1.0f, 0.0f, 16.0f, 4.0f, 0.0f, 50.0f, 0.0f);
+    const TextureDescGpu bank[] = {{}, noise};
+    const TextureEvalContext ctx{Vec2{0.25f, 0.75f}, 0.25f};
+    const ResolvedMaterial resolved = resolveMaterial(material, ctx, bank, 2u);
+    expectTrue(resolved.emission > 1.0f, "noise emission intensity boost");
+}
+
 } // namespace
 
 int main()
 {
-    testGridReturnsColorAOffGridLines();
-    testGridReturnsColorBOnGridLines();
+    testGridReturnsOnColorOffGridLines();
+    testGridReturnsOffColorOnGridLines();
     testGridSplitFrequencyUsesSeparateAxes();
     testStripeAlternatesScalarValues();
     testResolveMaterialUsesInlineWithoutTextureIndex();
@@ -212,6 +252,8 @@ int main()
     testMultiplyEmissionWithGridMask();
     testInlineZeroEmissionUsesStripeReplace();
     testNoiseRoughnessMultiply();
+    testNoiseAlbedoRgbIsNonZero();
+    testNoiseEmissionIntensityBoost();
 
     if (gFailures == 0) {
         std::cout << "All procedural texture tests passed.\n";

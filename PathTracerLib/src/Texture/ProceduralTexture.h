@@ -76,10 +76,8 @@ PROCEDURAL_TEXTURE_FN float evalStripeMask(const TextureDescGpu& desc, TextureEv
 {
     const float freq = desc.p0.x;
     const float thickness = desc.p0.y;
-    const float onValue = desc.p0.z;
-    const float offValue = desc.p0.w;
     const float stripeCoord = proceduralFract(ctx.u1d * freq);
-    return stripeCoord < thickness ? onValue : offValue;
+    return stripeCoord < thickness ? 1.0f : 0.0f;
 }
 
 PROCEDURAL_TEXTURE_FN float evalNoiseMask01(const TextureDescGpu& desc, TextureEvalContext ctx)
@@ -105,6 +103,31 @@ PROCEDURAL_TEXTURE_FN float evalNoiseMask01(const TextureDescGpu& desc, TextureE
     return weightSum > 0.0f ? total / weightSum : 0.0f;
 }
 
+PROCEDURAL_TEXTURE_FN Vec3 evalOnOffRgb(const TextureDescGpu& desc, float mask)
+{
+    const Vec3 onColor = vecMake3(
+        desc.p1.x * desc.p1.w,
+        desc.p1.y * desc.p1.w,
+        desc.p1.z * desc.p1.w);
+    const Vec3 offColor = vecMake3(
+        desc.p2.x * desc.p2.w,
+        desc.p2.y * desc.p2.w,
+        desc.p2.z * desc.p2.w);
+    return vecMake3(
+        offColor.x + (onColor.x - offColor.x) * mask,
+        offColor.y + (onColor.y - offColor.y) * mask,
+        offColor.z + (onColor.z - offColor.z) * mask);
+}
+
+PROCEDURAL_TEXTURE_FN float evalOnOffScalar(const TextureDescGpu& desc, float mask)
+{
+    const float onValue =
+        (desc.p1.x * 0.2126f + desc.p1.y * 0.7152f + desc.p1.z * 0.0722f) * desc.p1.w;
+    const float offValue =
+        (desc.p2.x * 0.2126f + desc.p2.y * 0.7152f + desc.p2.z * 0.0722f) * desc.p2.w;
+    return offValue + (onValue - offValue) * mask;
+}
+
 PROCEDURAL_TEXTURE_FN float evalTextureMask(const TextureDescGpu& desc, TextureEvalContext ctx)
 {
     switch (static_cast<TextureKind>(desc.kind)) {
@@ -127,23 +150,11 @@ PROCEDURAL_TEXTURE_FN float evalProceduralScalar(
     case TextureKind::ConstantScalar:
         return desc.p0.x;
     case TextureKind::Stripe1D:
-        return evalStripeMask(desc, ctx);
-    case TextureKind::Grid2D: {
-        const float mask = evalGridMask(desc, ctx);
-        float onValue = desc.p0.w;
-        float offValue = desc.p2.w;
-        if (onValue == 0.0f && offValue == 0.0f) {
-            onValue = 1.0f;
-            offValue = 0.0f;
-        }
-        return offValue + (onValue - offValue) * mask;
-    }
-    case TextureKind::Noise2D: {
-        const float minValue = desc.p0.w;
-        const float maxValue = desc.p1.x;
-        const float noise = evalNoiseMask01(desc, ctx);
-        return minValue + (maxValue - minValue) * noise;
-    }
+        return evalOnOffScalar(desc, evalStripeMask(desc, ctx));
+    case TextureKind::Grid2D:
+        return evalOnOffScalar(desc, 1.0f - evalGridMask(desc, ctx));
+    case TextureKind::Noise2D:
+        return evalOnOffScalar(desc, evalNoiseMask01(desc, ctx));
     default:
         return 0.0f;
     }
@@ -156,15 +167,12 @@ PROCEDURAL_TEXTURE_FN Vec3 evalProceduralRgb(
     switch (static_cast<TextureKind>(desc.kind)) {
     case TextureKind::ConstantRgb:
         return vecMake3(desc.p0.x, desc.p0.y, desc.p0.z);
-    case TextureKind::Grid2D: {
-        const float mask = evalGridMask(desc, ctx);
-        const Vec3 colorA = vecMake3(desc.p1.x, desc.p1.y, desc.p1.z);
-        const Vec3 colorB = vecMake3(desc.p2.x, desc.p2.y, desc.p2.z);
-        return vecMake3(
-            colorA.x + (colorB.x - colorA.x) * mask,
-            colorA.y + (colorB.y - colorA.y) * mask,
-            colorA.z + (colorB.z - colorA.z) * mask);
-    }
+    case TextureKind::Grid2D:
+        return evalOnOffRgb(desc, 1.0f - evalGridMask(desc, ctx));
+    case TextureKind::Stripe1D:
+        return evalOnOffRgb(desc, evalStripeMask(desc, ctx));
+    case TextureKind::Noise2D:
+        return evalOnOffRgb(desc, evalNoiseMask01(desc, ctx));
     default:
         return vecMake3(0.0f, 0.0f, 0.0f);
     }
