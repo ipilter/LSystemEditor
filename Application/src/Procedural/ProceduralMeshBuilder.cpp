@@ -170,6 +170,27 @@ void assignMaterialIndex(Mesh& mesh, const uint32_t materialIndex)
     }
 }
 
+void applyRootTransformToMesh(Mesh& mesh, const RootTransform& root)
+{
+    for (MeshTriangle& tri : mesh.triangles) {
+        tri.v0 = vecAdd3(
+            vecRotateYawPitchRoll(tri.v0, root.rotationDeg.x, root.rotationDeg.y, root.rotationDeg.z),
+            root.translation);
+        tri.v1 = vecAdd3(
+            vecRotateYawPitchRoll(tri.v1, root.rotationDeg.x, root.rotationDeg.y, root.rotationDeg.z),
+            root.translation);
+        tri.v2 = vecAdd3(
+            vecRotateYawPitchRoll(tri.v2, root.rotationDeg.x, root.rotationDeg.y, root.rotationDeg.z),
+            root.translation);
+        tri.n0 = vecNormalize3(
+            vecRotateYawPitchRoll(tri.n0, root.rotationDeg.x, root.rotationDeg.y, root.rotationDeg.z));
+        tri.n1 = vecNormalize3(
+            vecRotateYawPitchRoll(tri.n1, root.rotationDeg.x, root.rotationDeg.y, root.rotationDeg.z));
+        tri.n2 = vecNormalize3(
+            vecRotateYawPitchRoll(tri.n2, root.rotationDeg.x, root.rotationDeg.y, root.rotationDeg.z));
+    }
+}
+
 } // namespace
 
 bool ProceduralMeshBuilder::buildHostMesh(
@@ -202,23 +223,12 @@ bool ProceduralMeshBuilder::buildHostMesh(
     buildMaterialTable(eval.materials, outMesh.materials, outMesh.textures, lsystemIdToIndex);
 
     for (const TurtleSegment& segment : turtleOutput.segments) {
-        manifold::Manifold segmentMesh = loftOrSphereFromSegment(segment, params);
-        if (!isValidManifold(segmentMesh)) {
-            continue;
-        }
-
-        segmentMesh = applyRootTransform(segmentMesh, root);
-        if (!isValidManifold(segmentMesh)) {
-            continue;
-        }
-
-        Mesh piece = renderMeshFromManifold(
-            segmentMesh,
-            params,
-            characteristicRadiusFromSegment(segment, params));
+        Mesh piece = renderMeshFromSegment(segment, params);
         if (piece.triangles.empty()) {
             continue;
         }
+
+        applyRootTransformToMesh(piece, root);
 
         const uint32_t materialIndex = remapMaterialId(lsystemIdToIndex, segment.materialId);
         assignMaterialIndex(piece, materialIndex);

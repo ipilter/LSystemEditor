@@ -35,6 +35,7 @@ void testDefaultFocusPointOneMeterAhead()
     expectNear(camera.focusPoint().y, expected.y, 1.0e-2f, "default focus Y");
     expectNear(camera.focusPoint().z, expected.z, 1.0e-2f, "default focus Z");
     expectNear(camera.computeFocusDistance(), PhysicalCamera::kDefaultFocusDistance, 1.0e-2f, "default focus distance");
+    expectNear(PhysicalCamera::kDefaultFocusDistance, 1000.0f, 1.0e-2f, "default focus distance is 1 m");
 }
 
 void testPinholeWhenFocusCleared()
@@ -215,6 +216,40 @@ void testRefreshFocusDistanceFromPointAfterRotation()
     expectNear(camera.focusPoint().x, pinnedPoint.x, 1.0e-2f, "pinned focus point unchanged after rotation");
 }
 
+void testOrbitAroundPointKeepsPivotFixed()
+{
+    PhysicalCamera camera{};
+    camera.setPosition(0.0f, 500.0f, 2000.0f);
+    const glm::vec3 pivot = glm::vec3(0.0f, 0.0f, 0.0f);
+    camera.setFocusPoint(pivot);
+    const float initialRadius = glm::length(camera.position() - pivot);
+
+    camera.orbitAroundPoint(pivot, glm::radians(30.0f), glm::radians(-15.0f));
+
+    expectNear(camera.focusPoint().x, pivot.x, 1.0e-2f, "orbit focus point X");
+    expectNear(camera.focusPoint().y, pivot.y, 1.0e-2f, "orbit focus point Y");
+    expectNear(camera.focusPoint().z, pivot.z, 1.0e-2f, "orbit focus point Z");
+    expectNear(glm::length(camera.position() - pivot), initialRadius, 1.0e-2f, "orbit preserves radius");
+
+    const glm::vec3 toPivot = glm::normalize(pivot - camera.position());
+    expectNear(camera.forward().x, toPivot.x, 1.0e-3f, "orbit forward X toward pivot");
+    expectNear(camera.forward().y, toPivot.y, 1.0e-3f, "orbit forward Y toward pivot");
+    expectNear(camera.forward().z, toPivot.z, 1.0e-3f, "orbit forward Z toward pivot");
+    expectNear(camera.computeFocusDistance(), initialRadius, 1.0e-2f, "orbit focus distance matches radius");
+}
+
+void testOrbitAroundPointChangesPosition()
+{
+    PhysicalCamera camera{};
+    const glm::vec3 initialPosition = camera.position();
+    const glm::vec3 pivot = camera.position() + camera.forward() * 2500.0f;
+
+    camera.orbitAroundPoint(pivot, glm::radians(45.0f), 0.0f);
+
+    expectTrue(glm::length(camera.position() - initialPosition) > 1.0f, "orbit should move camera position");
+    expectTrue(glm::length(camera.forward() - glm::vec3(0.0f, 0.0f, -1.0f)) > 1.0e-3f, "orbit should change orientation");
+}
+
 } // namespace
 
 int main()
@@ -235,6 +270,8 @@ int main()
     testFocusDistanceUnchangedAfterRotation();
     testRefreshFocusDistanceFromPointAfterTranslation();
     testRefreshFocusDistanceFromPointAfterRotation();
+    testOrbitAroundPointKeepsPivotFixed();
+    testOrbitAroundPointChangesPosition();
 
     if (gFailures == 0) {
         std::cout << "All camera sampling tests passed.\n";

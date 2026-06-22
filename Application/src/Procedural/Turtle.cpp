@@ -229,7 +229,7 @@ public:
                 continue;
             }
 
-            if ((symbolNameIs(sym, "Pitch") || symbolNameIs(sym, "Pich")) && hasArg) {
+            if (symbolNameIs(sym, "Pitch") && hasArg) {
                 applyPitch(m_pose, arg);
                 continue;
             }

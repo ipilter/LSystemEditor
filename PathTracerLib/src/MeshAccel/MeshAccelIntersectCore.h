@@ -131,6 +131,9 @@ MESH_ACCEL_CORE_FN bool meshAccelRayTriangle(
         n = geomNormal;
     } else {
         n = vecScale3(n, 1.0f / shadingNormalLen);
+        if (vecDot3(n, geomNormal) < 0.0f) {
+            n = geomNormal;
+        }
     }
     if (vecDot3(n, rd) > 0.0f) {
         n = vecScale3(n, -1.0f);

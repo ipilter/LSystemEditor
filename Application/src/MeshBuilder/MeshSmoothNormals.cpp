@@ -137,7 +137,16 @@ void meshAssignSmoothNormals(Mesh& mesh, float creaseAngleDeg)
             if (vecLength3(sum) <= 1.0e-8f) {
                 smoothNormal = sourceNormal;
             }
-            triangleCornerNormal(mesh.triangles[ref.triIndex], ref.corner) = smoothNormal;
+
+            Vec3& cornerNormal = triangleCornerNormal(mesh.triangles[ref.triIndex], ref.corner);
+            const Vec3 existingNormal = cornerNormal;
+            if (vecLength3(existingNormal) > 1.0e-4f) {
+                const Vec3 existingUnit = vecNormalize3(existingNormal);
+                if (vecDot3(existingUnit, smoothNormal) < cosThreshold) {
+                    continue;
+                }
+            }
+            cornerNormal = smoothNormal;
         }
     }
 }

@@ -45,7 +45,7 @@ public:
     static constexpr float kMaxShutterSpeedSeconds = 120.0f;
     static constexpr float kDisplayMiddleGray = 0.18f;
     static constexpr float kDefaultFarPlane = SceneUnits::kDefaultRayTMaxMm;
-    static constexpr float kDefaultFocusDistance = 1000.0f;
+    static constexpr float kDefaultFocusDistance = SceneUnits::kOriginGizmoAxisLengthMm;
     static constexpr float kSensorHeightMm = 23.9f;
     static constexpr float kMinFocalLengthMm = 14.0f;
     static constexpr float kMaxFocalLengthMm = 1000.0f;
@@ -69,6 +69,7 @@ public:
     void moveDown(float distance);
     void yawPitch(float deltaYaw, float deltaPitch);
     void addEulerDelta(float deltaYaw, float deltaPitch, float deltaRoll);
+    void orbitAroundPoint(const glm::vec3& pivot, float deltaYaw, float deltaPitch);
     void translateLocal(float rightAmount, float upAmount, float forwardAmount);
 
     glm::vec3 position() const { return m_position; }
@@ -126,6 +127,7 @@ public:
 
 private:
     void rebuildOrientation();
+    void syncEulerFromDirection(const glm::vec3& direction);
     void updateOpticsFromFocalLengthMm();
 
     glm::vec3 m_position;

@@ -26,14 +26,6 @@ Vec3 ringVertex(const PathFrame& frame, int segmentIndex, int circularSegments)
         vecAdd3(vecScale3(frame.normal, c * frame.radius), vecScale3(frame.binormal, s * frame.radius)));
 }
 
-Vec2 planarCapUv(int segmentIndex, int circularSegments)
-{
-    const float angle = static_cast<float>(segmentIndex) * 6.283185307f / static_cast<float>(circularSegments);
-    const float c = std::cos(angle);
-    const float s = std::sin(angle);
-    return Vec2{0.5f + 0.5f * s, 0.5f + 0.5f * c};
-}
-
 uint32_t ringIndex(int ring, int segment, int circularSegments)
 {
     return static_cast<uint32_t>(ring * circularSegments + segment);
@@ -58,6 +50,113 @@ void appendVertex(std::vector<float>& vertProperties, Vec3 position, float u, fl
     vertProperties.push_back(v);
 }
 
+Vec3 faceNormalFromVertices(Vec3 v0, Vec3 v1, Vec3 v2)
+{
+    return vecNormalize3(vecCross3(vecSub3(v1, v0), vecSub3(v2, v0)));
+}
+
+Vec2 planarCapUv(int segmentIndex, int circularSegments)
+{
+    const float angle = static_cast<float>(segmentIndex) * 6.283185307f / static_cast<float>(circularSegments);
+    const float c = std::cos(angle);
+    const float s = std::sin(angle);
+    return Vec2{0.5f + 0.5f * s, 0.5f + 0.5f * c};
+}
+
+void appendHostTriangle(
+    Mesh& mesh,
+    Vec3 v0,
+    Vec3 v1,
+    Vec3 v2,
+    Vec2 uv0,
+    Vec2 uv1,
+    Vec2 uv2)
+{
+    const Vec3 faceNormal = faceNormalFromVertices(v0, v1, v2);
+    MeshTriangle tri{};
+    tri.v0 = v0;
+    tri.v1 = v1;
+    tri.v2 = v2;
+    tri.n0 = faceNormal;
+    tri.n1 = faceNormal;
+    tri.n2 = faceNormal;
+    tri.uv0 = uv0;
+    tri.uv1 = uv1;
+    tri.uv2 = uv2;
+    mesh.triangles.push_back(tri);
+}
+
+Mesh buildRingLoftHostMesh(const std::vector<PathFrame>& frames, int circularSegments)
+{
+    Mesh mesh{};
+    if (frames.size() < 2 || circularSegments < 3) {
+        return mesh;
+    }
+
+    const int ringCount = static_cast<int>(frames.size());
+    const int lastRing = ringCount - 1;
+    const float invRingSpan = ringCount > 1 ? 1.0f / static_cast<float>(ringCount - 1) : 0.0f;
+
+    auto vertexAt = [&](int ring, int segment) -> Vec3 {
+        const PathFrame& frame = frames[static_cast<size_t>(ring)];
+        return ringVertex(frame, segment, circularSegments);
+    };
+
+    auto uvAt = [&](int ring, int segment) -> Vec2 {
+        const float uCoord = static_cast<float>(segment) / static_cast<float>(circularSegments);
+        const float vCoord = static_cast<float>(ring) * invRingSpan;
+        return Vec2{uCoord, vCoord};
+    };
+
+    for (int ring = 0; ring < ringCount - 1; ++ring) {
+        for (int segment = 0; segment < circularSegments; ++segment) {
+            const int nextSegment = (segment + 1) % circularSegments;
+            const Vec3 v0 = vertexAt(ring, segment);
+            const Vec3 v1 = vertexAt(ring, nextSegment);
+            const Vec3 v2 = vertexAt(ring + 1, nextSegment);
+            const Vec3 v3 = vertexAt(ring + 1, segment);
+            const Vec2 uv0 = uvAt(ring, segment);
+            const Vec2 uv1 = uvAt(ring, nextSegment);
+            const Vec2 uv2 = uvAt(ring + 1, nextSegment);
+            const Vec2 uv3 = uvAt(ring + 1, segment);
+            appendHostTriangle(mesh, v0, v1, v3, uv0, uv1, uv3);
+            appendHostTriangle(mesh, v1, v2, v3, uv1, uv2, uv3);
+        }
+    }
+
+    const Vec3 startCenter = frames.front().position;
+    const Vec3 endCenter = frames.back().position;
+    for (int segment = 0; segment < circularSegments; ++segment) {
+        const int nextSegment = (segment + 1) % circularSegments;
+        const Vec3 rim0 = vertexAt(0, segment);
+        const Vec3 rim1 = vertexAt(0, nextSegment);
+        appendHostTriangle(
+            mesh,
+            startCenter,
+            rim1,
+            rim0,
+            Vec2{0.5f, 0.5f},
+            planarCapUv(nextSegment, circularSegments),
+            planarCapUv(segment, circularSegments));
+    }
+
+    for (int segment = 0; segment < circularSegments; ++segment) {
+        const int nextSegment = (segment + 1) % circularSegments;
+        const Vec3 rim0 = vertexAt(lastRing, segment);
+        const Vec3 rim1 = vertexAt(lastRing, nextSegment);
+        appendHostTriangle(
+            mesh,
+            endCenter,
+            rim0,
+            rim1,
+            Vec2{0.5f, 0.5f},
+            planarCapUv(segment, circularSegments),
+            planarCapUv(nextSegment, circularSegments));
+    }
+
+    return mesh;
+}
+
 manifold::Manifold buildRingLoftMesh(const std::vector<PathFrame>& frames, int circularSegments)
 {
     if (frames.size() < 2 || circularSegments < 3) {
@@ -66,15 +165,12 @@ manifold::Manifold buildRingLoftMesh(const std::vector<PathFrame>& frames, int c
 
     const int ringCount = static_cast<int>(frames.size());
     const int sideVertexCount = ringCount * circularSegments;
-    const uint32_t startCapRimBase = static_cast<uint32_t>(sideVertexCount);
-    const uint32_t endCapRimBase = startCapRimBase + static_cast<uint32_t>(circularSegments);
-    const uint32_t startCapCenter = endCapRimBase + static_cast<uint32_t>(circularSegments);
+    const uint32_t startCapCenter = static_cast<uint32_t>(sideVertexCount);
     const uint32_t endCapCenter = startCapCenter + 1u;
     const int lastRing = ringCount - 1;
     const float invRingSpan = ringCount > 1 ? 1.0f / static_cast<float>(ringCount - 1) : 0.0f;
 
-    const size_t totalVertices =
-        static_cast<size_t>(sideVertexCount + 2 * circularSegments + 2);
+    const size_t totalVertices = static_cast<size_t>(sideVertexCount + 2);
     std::vector<float> vertProperties;
     vertProperties.reserve(totalVertices * 8);
     std::vector<uint32_t> triVerts;
@@ -94,38 +190,9 @@ manifold::Manifold buildRingLoftMesh(const std::vector<PathFrame>& frames, int c
     }
 
     const PathFrame& startFrame = frames.front();
-    for (int segment = 0; segment < circularSegments; ++segment) {
-        const Vec2 capUv = planarCapUv(segment, circularSegments);
-        appendVertex(
-            vertProperties,
-            ringVertex(startFrame, segment, circularSegments),
-            capUv.x,
-            capUv.y);
-    }
-
     const PathFrame& endFrame = frames.back();
-    for (int segment = 0; segment < circularSegments; ++segment) {
-        const Vec2 capUv = planarCapUv(segment, circularSegments);
-        appendVertex(
-            vertProperties,
-            ringVertex(endFrame, segment, circularSegments),
-            capUv.x,
-            capUv.y);
-    }
-
     appendVertex(vertProperties, startFrame.position, 0.5f, 0.5f);
     appendVertex(vertProperties, endFrame.position, 0.5f, 0.5f);
-
-    std::vector<uint32_t> mergeFromVert;
-    std::vector<uint32_t> mergeToVert;
-    mergeFromVert.reserve(static_cast<size_t>(circularSegments * 2));
-    mergeToVert.reserve(static_cast<size_t>(circularSegments * 2));
-    for (int segment = 0; segment < circularSegments; ++segment) {
-        mergeFromVert.push_back(startCapRimBase + static_cast<uint32_t>(segment));
-        mergeToVert.push_back(ringIndex(0, segment, circularSegments));
-        mergeFromVert.push_back(endCapRimBase + static_cast<uint32_t>(segment));
-        mergeToVert.push_back(ringIndex(lastRing, segment, circularSegments));
-    }
 
     for (int ring = 0; ring < ringCount - 1; ++ring) {
         for (int segment = 0; segment < circularSegments; ++segment) {
@@ -144,8 +211,8 @@ manifold::Manifold buildRingLoftMesh(const std::vector<PathFrame>& frames, int c
         appendTriangle(
             triVerts,
             startCapCenter,
-            startCapRimBase + static_cast<uint32_t>(nextSegment),
-            startCapRimBase + static_cast<uint32_t>(segment));
+            ringIndex(0, nextSegment, circularSegments),
+            ringIndex(0, segment, circularSegments));
     }
 
     for (int segment = 0; segment < circularSegments; ++segment) {
@@ -153,18 +220,20 @@ manifold::Manifold buildRingLoftMesh(const std::vector<PathFrame>& frames, int c
         appendTriangle(
             triVerts,
             endCapCenter,
-            endCapRimBase + static_cast<uint32_t>(segment),
-            endCapRimBase + static_cast<uint32_t>(nextSegment));
+            ringIndex(lastRing, segment, circularSegments),
+            ringIndex(lastRing, nextSegment, circularSegments));
     }
 
     manifold::MeshGL mesh{};
     mesh.numProp = 8;
     mesh.vertProperties = std::move(vertProperties);
     mesh.triVerts = std::move(triVerts);
-    mesh.mergeFromVert = std::move(mergeFromVert);
-    mesh.mergeToVert = std::move(mergeToVert);
 
     manifold::Manifold result(mesh);
+    if (result.Status() != manifold::Manifold::Error::NoError) {
+        return manifold::Manifold();
+    }
+
     return result;
 }
 
@@ -278,13 +347,33 @@ Mesh renderMeshFromManifold(
 
 Mesh renderMeshFromSegment(const TurtleSegment& segment, const ProceduralBuildParams& params)
 {
-    const manifold::Manifold segmentMesh = loftOrSphereFromSegment(segment, params);
-    if (!isValidManifold(segmentMesh)) {
+    SplinePath path;
+    if (!path.buildFromSegment(segment, params.hermiteTension)) {
         return Mesh{};
     }
 
-    return renderMeshFromManifold(
-        segmentMesh,
-        params,
-        characteristicRadiusFromSegment(segment, params));
+    if (path.totalArcLength() <= 1e-6f) {
+        const manifold::Manifold segmentMesh = loftOrSphereFromSegment(segment, params);
+        if (!isValidManifold(segmentMesh)) {
+            return Mesh{};
+        }
+
+        return renderMeshFromManifold(
+            segmentMesh,
+            params,
+            characteristicRadiusFromSegment(segment, params));
+    }
+
+    const std::vector<PathFrame> frames = path.computeLoftFrames(params.samplesPerSpan);
+    if (frames.size() < 2) {
+        return Mesh{};
+    }
+
+    Mesh hostMesh = buildRingLoftHostMesh(frames, params.circularSegments);
+    if (hostMesh.triangles.empty()) {
+        return Mesh{};
+    }
+
+    meshAssignSmoothNormals(hostMesh, params.creaseAngleDeg);
+    return hostMesh;
 }

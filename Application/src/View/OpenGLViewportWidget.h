@@ -88,6 +88,7 @@ private:
     void trySetFocusFromClick(const QPoint& widgetPos);
     void applyFocusFromModel();
     void refreshPinnedFocusFromModel();
+    glm::vec3 resolveOrbitPivot() const;
     void resetAccumulationForCamera();
     void onCameraChanged();
     void rebuildBoundsOverlay();
@@ -119,12 +120,14 @@ private:
 
     QColor m_clearColor;
     bool m_looking = false;
+    bool m_orbiting = false;
     bool m_quadPanning = false;
     bool m_regionDefining = false;
     bool m_regionDefineHasAnchor = false;
     QPoint m_regionDefineAnchor;
     QPoint m_regionDefinePreview;
     QPoint m_lastMousePos;
+    glm::vec3 m_orbitPivot{};
     float m_mouseSensitivity = 0.001f;
 
     QTimer m_cameraTick;

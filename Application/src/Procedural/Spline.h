@@ -33,6 +33,9 @@ private:
     static Vec3 hermitePoint(const HermiteSpan& span, float t);
     static Vec3 hermiteTangent(const HermiteSpan& span, float t);
     static bool spanNeedsRefinement(const HermiteSpan& span, int samplesPerSpan);
+    static bool spanNeedsRadiusRefinement(const HermiteSpan& span);
+    static float spanRadiusSlope(const HermiteSpan& span);
+    static int spanRingIntervalCount(const HermiteSpan& span, int samplesPerSpan, bool adjacentRadiusSpan);
 
     std::vector<HermiteSpan> m_spans;
 };

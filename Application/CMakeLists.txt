@@ -2,28 +2,25 @@ set(PATHTRACER_APPLICATION_DIR "${CMAKE_CURRENT_LIST_DIR}")
 set(APPLICATION_DIR "${PATHTRACER_APPLICATION_DIR}")
 set(APPLICATION_SRC_DIR "${PATHTRACER_APPLICATION_DIR}/src")
 
-set(PATHTRACER_MESH_BUILDER_SOURCES
-    "${APPLICATION_SRC_DIR}/MeshBuilder/ManifoldMeshConvert.cpp"
-    "${APPLICATION_SRC_DIR}/MeshBuilder/MeshSmoothNormals.cpp"
-    "${APPLICATION_SRC_DIR}/Procedural/Turtle.cpp"
-    "${APPLICATION_SRC_DIR}/Procedural/Spline.cpp"
-    "${APPLICATION_SRC_DIR}/Procedural/Loft.cpp"
-    "${APPLICATION_SRC_DIR}/Procedural/ProceduralAssembly.cpp"
-    "${APPLICATION_SRC_DIR}/Procedural/ProceduralMeshBuilder.cpp"
-    "${APPLICATION_SRC_DIR}/Procedural/ProceduralSceneMeshBuilder.cpp")
-
-add_library(pathtracer_mesh_builder STATIC ${PATHTRACER_MESH_BUILDER_SOURCES})
-
+file(GLOB_RECURSE PATHTRACER_MESH_BUILDER_CPP CONFIGURE_DEPENDS
+    "${APPLICATION_SRC_DIR}/MeshBuilder/*.cpp"
+    "${APPLICATION_SRC_DIR}/Procedural/*.cpp")
 file(GLOB_RECURSE PATHTRACER_MESH_BUILDER_HEADERS CONFIGURE_DEPENDS
     "${APPLICATION_SRC_DIR}/MeshBuilder/*.h"
     "${APPLICATION_SRC_DIR}/Procedural/*.h")
 
+add_library(pathtracer_mesh_builder STATIC ${PATHTRACER_MESH_BUILDER_CPP})
+
 target_sources(pathtracer_mesh_builder PRIVATE ${PATHTRACER_MESH_BUILDER_HEADERS})
 set_source_files_properties(${PATHTRACER_MESH_BUILDER_HEADERS} PROPERTIES HEADER_FILE_ONLY TRUE)
 
-source_group(TREE "${APPLICATION_SRC_DIR}" PREFIX "" FILES
-    ${PATHTRACER_MESH_BUILDER_SOURCES}
+source_group(TREE "${APPLICATION_DIR}" PREFIX "" FILES
+    ${PATHTRACER_MESH_BUILDER_CPP}
     ${PATHTRACER_MESH_BUILDER_HEADERS})
+
+target_sources(pathtracer_mesh_builder PRIVATE "${APPLICATION_DIR}/CMakeLists.txt")
+set_source_files_properties("${APPLICATION_DIR}/CMakeLists.txt" PROPERTIES HEADER_FILE_ONLY TRUE)
+source_group("" FILES "${APPLICATION_DIR}/CMakeLists.txt")
 
 target_include_directories(pathtracer_mesh_builder PUBLIC
     "${APPLICATION_SRC_DIR}"
@@ -44,14 +41,40 @@ function(application_add_pathtracer_executable)
         message(FATAL_ERROR "PathTracerLib must be configured before creating the pathtracer executable.")
     endif()
 
-    file(GLOB_RECURSE APPLICATION_APP_SOURCES CONFIGURE_DEPENDS
-        "${_application_src_dir}/*.cpp"
+    file(GLOB_RECURSE APPLICATION_APP_CPP CONFIGURE_DEPENDS
+        "${_application_src_dir}/*.cpp")
+    file(GLOB_RECURSE APPLICATION_APP_HEADERS CONFIGURE_DEPENDS
         "${_application_src_dir}/*.h")
 
-    list(FILTER APPLICATION_APP_SOURCES EXCLUDE REGEX ".*/MeshBuilder/.*")
-    list(FILTER APPLICATION_APP_SOURCES EXCLUDE REGEX ".*/Procedural/.*")
+    list(FILTER APPLICATION_APP_CPP EXCLUDE REGEX ".*/MeshBuilder/.*")
+    list(FILTER APPLICATION_APP_CPP EXCLUDE REGEX ".*/Procedural/.*")
+    list(FILTER APPLICATION_APP_HEADERS EXCLUDE REGEX ".*/MeshBuilder/.*")
+    list(FILTER APPLICATION_APP_HEADERS EXCLUDE REGEX ".*/Procedural/.*")
 
-    add_executable(pathtracer WIN32 ${APPLICATION_APP_SOURCES})
+    file(GLOB_RECURSE APPLICATION_MESH_BUILDER_CPP CONFIGURE_DEPENDS
+        "${_application_src_dir}/MeshBuilder/*.cpp"
+        "${_application_src_dir}/Procedural/*.cpp")
+    file(GLOB_RECURSE APPLICATION_MESH_BUILDER_HEADERS CONFIGURE_DEPENDS
+        "${_application_src_dir}/MeshBuilder/*.h"
+        "${_application_src_dir}/Procedural/*.h")
+
+    add_executable(pathtracer WIN32 ${APPLICATION_APP_CPP})
+
+    target_sources(pathtracer PRIVATE ${APPLICATION_APP_HEADERS})
+    set_source_files_properties(${APPLICATION_APP_HEADERS} PROPERTIES HEADER_FILE_ONLY TRUE)
+
+    # Mirror MeshBuilder/Procedural files in the executable project for Solution Explorer.
+    target_sources(pathtracer PRIVATE
+        ${APPLICATION_MESH_BUILDER_CPP}
+        ${APPLICATION_MESH_BUILDER_HEADERS})
+    set_source_files_properties(
+        ${APPLICATION_MESH_BUILDER_CPP}
+        ${APPLICATION_MESH_BUILDER_HEADERS}
+        PROPERTIES EXCLUDE_FROM_BUILD TRUE)
+    set_source_files_properties(
+        ${APPLICATION_MESH_BUILDER_HEADERS}
+        PROPERTIES HEADER_FILE_ONLY TRUE)
+
     target_include_directories(pathtracer PRIVATE
         "${_application_src_dir}"
         "${_application_src_dir}/View"
@@ -75,11 +98,22 @@ function(application_add_pathtracer_executable)
         AUTOMOC ON
         FOLDER "Application")
 
-    source_group(TREE "${_application_src_dir}" PREFIX "" FILES ${APPLICATION_APP_SOURCES})
+    source_group(TREE "${_application_dir}" PREFIX "" FILES
+        ${APPLICATION_APP_CPP}
+        ${APPLICATION_APP_HEADERS}
+        ${APPLICATION_MESH_BUILDER_CPP}
+        ${APPLICATION_MESH_BUILDER_HEADERS})
 
-    target_sources(pathtracer PRIVATE "${CMAKE_SOURCE_DIR}/CMakeLists.txt")
-    set_source_files_properties("${CMAKE_SOURCE_DIR}/CMakeLists.txt" PROPERTIES HEADER_FILE_ONLY TRUE)
-    source_group("" FILES "${CMAKE_SOURCE_DIR}/CMakeLists.txt")
+    target_sources(pathtracer PRIVATE
+        "${CMAKE_SOURCE_DIR}/CMakeLists.txt"
+        "${_application_dir}/CMakeLists.txt")
+    set_source_files_properties(
+        "${CMAKE_SOURCE_DIR}/CMakeLists.txt"
+        "${_application_dir}/CMakeLists.txt"
+        PROPERTIES HEADER_FILE_ONLY TRUE)
+    source_group("" FILES
+        "${CMAKE_SOURCE_DIR}/CMakeLists.txt"
+        "${_application_dir}/CMakeLists.txt")
 
     find_program(WINDEPLOYQT_EXECUTABLE windeployqt
         HINTS "$ENV{QTDIR}/bin"
@@ -119,9 +153,11 @@ function(application_add_pathtracer_tests)
         message(FATAL_ERROR "PathTracerLib must be configured before creating application tests.")
     endif()
 
-    add_executable(mesh_accel_tests
+    set(MESH_ACCEL_TEST_SOURCES
         "${CMAKE_SOURCE_DIR}/PathTracerLib/tests/MeshAccelTests.cpp"
         "${_application_dir}/tests/ProceduralMeshTests.cpp")
+
+    add_executable(mesh_accel_tests ${MESH_ACCEL_TEST_SOURCES})
     target_link_libraries(mesh_accel_tests PRIVATE PathTracerLib pathtracer_mesh_builder Qt6::Gui)
     target_include_directories(mesh_accel_tests PRIVATE
         "${CMAKE_SOURCE_DIR}/PathTracerLib/src"
@@ -133,5 +169,15 @@ function(application_add_pathtracer_tests)
         "${_application_src_dir}/Model"
         "${CMAKE_SOURCE_DIR}/PathTracerLib/tests")
     set_target_properties(mesh_accel_tests PROPERTIES FOLDER "Application/tests")
+
+    source_group(TREE "${CMAKE_SOURCE_DIR}/PathTracerLib" PREFIX "PathTracerLib" FILES
+        "${CMAKE_SOURCE_DIR}/PathTracerLib/tests/MeshAccelTests.cpp")
+    source_group(TREE "${_application_dir}" PREFIX "" FILES
+        "${_application_dir}/tests/ProceduralMeshTests.cpp")
+
+    target_sources(mesh_accel_tests PRIVATE "${_application_dir}/CMakeLists.txt")
+    set_source_files_properties("${_application_dir}/CMakeLists.txt" PROPERTIES HEADER_FILE_ONLY TRUE)
+    source_group("" FILES "${_application_dir}/CMakeLists.txt")
+
     add_test(NAME MeshAccel COMMAND mesh_accel_tests)
 endfunction()

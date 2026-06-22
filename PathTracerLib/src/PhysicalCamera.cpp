@@ -192,6 +192,54 @@ void PhysicalCamera::addEulerDelta(float deltaYaw, float deltaPitch, float delta
     rebuildOrientation();
 }
 
+void PhysicalCamera::orbitAroundPoint(const glm::vec3& pivot, float deltaYaw, float deltaPitch)
+{
+    glm::vec3 offset = m_position - pivot;
+    const float radius = glm::length(offset);
+    if (radius < SceneUnits::kMinRayEpsilonMm) {
+        return;
+    }
+
+    const glm::vec3 worldUp(0.0f, 1.0f, 0.0f);
+
+    if (std::abs(deltaYaw) > 0.0f) {
+        offset = glm::vec3(glm::rotate(glm::mat4(1.0f), deltaYaw, worldUp) * glm::vec4(offset, 1.0f));
+    }
+
+    if (std::abs(deltaPitch) > 0.0f) {
+        glm::vec3 pitchAxis = glm::cross(worldUp, offset);
+        const float pitchAxisLen = glm::length(pitchAxis);
+        if (pitchAxisLen > 1.0e-6f) {
+            pitchAxis /= pitchAxisLen;
+            offset = glm::vec3(glm::rotate(glm::mat4(1.0f), deltaPitch, pitchAxis) * glm::vec4(offset, 1.0f));
+        }
+    }
+
+    const glm::vec3 dirFromPivot = glm::normalize(offset);
+    const float maxElevation = std::sin(kMaxPitchRad);
+    if (std::abs(dirFromPivot.y) > maxElevation) {
+        const glm::vec3 horizontal(dirFromPivot.x, 0.0f, dirFromPivot.z);
+        const float horizontalLen = glm::length(horizontal);
+        if (horizontalLen > 1.0e-6f) {
+            const float clampedY = glm::clamp(dirFromPivot.y, -maxElevation, maxElevation);
+            const float horizontalScale = std::sqrt(std::max(0.0f, 1.0f - clampedY * clampedY));
+            const glm::vec3 clampedDir = glm::normalize(glm::vec3(
+                horizontal.x / horizontalLen * horizontalScale,
+                clampedY,
+                horizontal.z / horizontalLen * horizontalScale));
+            offset = clampedDir * radius;
+        }
+    }
+
+    m_position = pivot + offset;
+
+    const glm::vec3 lookDirection = glm::normalize(pivot - m_position);
+    syncEulerFromDirection(lookDirection);
+
+    m_focusPoint = pivot;
+    refreshFocusDistanceFromPoint();
+}
+
 void PhysicalCamera::translateLocal(float rightAmount, float upAmount, float forwardAmount)
 {
     m_position += right() * rightAmount + up() * upAmount + forward() * forwardAmount;
@@ -537,4 +585,13 @@ void PhysicalCamera::rebuildOrientation()
     const glm::quat pitchQuat = glm::angleAxis(m_pitchRad, glm::vec3(1.0f, 0.0f, 0.0f));
     const glm::quat rollQuat = glm::angleAxis(m_rollRad, glm::vec3(0.0f, 0.0f, 1.0f));
     m_orientation = glm::normalize(yawQuat * pitchQuat * rollQuat);
+}
+
+void PhysicalCamera::syncEulerFromDirection(const glm::vec3& direction)
+{
+    const glm::vec3 fwd = glm::normalize(direction);
+    m_rollRad = 0.0f;
+    m_pitchRad = glm::clamp(std::asin(glm::clamp(fwd.y, -1.0f, 1.0f)), -kMaxPitchRad, kMaxPitchRad);
+    m_yawRad = std::atan2(-fwd.x, -fwd.z);
+    rebuildOrientation();
 }

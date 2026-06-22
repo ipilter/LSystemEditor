@@ -4,6 +4,7 @@
 #include "AppSettings.h"
 #include "OpenGLViewportWidget.h"
 #include "PhysicalCamera.h"
+#include "SceneUnits.h"
 #include "RenderAccumulationState.h"
 #include "ZoomablePlainTextEdit.h"
 
@@ -341,7 +342,7 @@ MainView::MainView(QWidget* parent)
     auto* focusDistanceRow = new QHBoxLayout();
     focusDistanceRow->addWidget(new QLabel(QStringLiteral("Focus distance:"), physicalCameraGroup));
     m_focusDistanceSpinBox = new QDoubleSpinBox(physicalCameraGroup);
-    m_focusDistanceSpinBox->setRange(PhysicalCamera::kMinFocalLengthMm, 500'000.0);
+    m_focusDistanceSpinBox->setRange(PhysicalCamera::kMinFocalLengthMm, SceneUnits::kDefaultRayTMaxMm);
     m_focusDistanceSpinBox->setDecimals(0);
     m_focusDistanceSpinBox->setSingleStep(10.0);
     m_focusDistanceSpinBox->setSuffix(QStringLiteral(" mm"));
@@ -430,11 +431,11 @@ MainView::MainView(QWidget* parent)
       "# Legacy positional syntax still supported: {r,g,b, [roughness], [metallic], ...}\n\n"
       "Mat(Wax) = {albedo: {0.9, 0.95, 0.2}, roughness: 0.8, subsurface: 0.8, diffuseRoughness: 0.7, scatterRadiusR: 0.05, scatterRadiusG: 0.04, scatterRadiusB: 0.02, specular: 0.2}\n"
       "Mat(Leaf) = {albedo: {0.2, 0.8, 0.1}, roughness: 0.5, transmission: 1, thin: 1, ior: 1.5, subsurface: 0.2, diffuseRoughness: 0.5, scatterRadiusR: 0.01, scatterRadiusG: 0.02, scatterRadiusB: 0.005, specular: 1.0}\n"
-      "Mat(Grid) = {albedo: {Grid, on: {0.95, 0.95, 0.95}, off: {0.1, 0.1, 0.1}, freqU: 100, freqV: 100, thickness: 0.25}, roughness: 0.7}\n"
-      "Mat(Light) = {albedo: {0.9, 0.8, 0.7}, roughness: 0.65, metallic: 1, emission: {Stripe, freq: 20, thickness: 0.25, on: 100, off: 0}}\n"
+      "Mat(Grid) = {albedo: {Grid, on: {0.95, 0.95, 0.95}, off: {0.1, 0.1, 0.1}, freq: 400, thickness: 0.05}, roughness: 0.5}\n"
+      "Mat(Light) = {albedo: {0.9, 0.8, 0.7}, roughness: 0.65, metallic: 1, emission: {Stripe, freq: 20, thickness: 0.25, on: 50, off: 0}}\n"
       "Mat(Metal) = {albedo: {0.9, 0.5, 0.2}, roughness: 0.15, metallic: 1, ior: 1.45}\n"
-      "Mat(Glass) = {albedo: {0.810, 0.929, 0.78}, roughness: 0.35, transmission: 1, ior: 1.45}\n"
-      "Mat(Diffuse) = {albedo: {0.9, 0.9, 0.9}, roughness: 1.0}\n"
+      "Mat(Glass) = {albedo: {0.810, 0.929, 0.78}, roughness: 0.15, transmission: 0.95, ior: 1.42}\n"
+      "Mat(Diffuse) = {albedo: {0.9, 0.9, 0.9}, roughness: 0.90}\n"
       "Mat(Plastic) = {albedo: {0.99, 0.7, 0.94}, roughness: 0.1, ior: 1.5, subsurface: 1}\n\n"
       "Mat(Pearl) = {albedo: {0.9, 0.8, 0.7}, roughness: 0.35, subsurface: 0.85}\n\n"
       "Mat(Grid)\n"
@@ -442,22 +443,23 @@ MainView::MainView(QWidget* parent)
       "f(100)\n\n"
       "Mat(Diffuse)\n"
       "F(0, 100)\n\n"
-      "Pitch(-90) f(200) Pitch(90)\n"
+      "f(500)\n"
       "Mat(Light)\n"
       "F(0, 100)\n\n"
-      "Pitch(-90) f(200) Pitch(90)\n"
+      "f(-500)\n"
+      "Pitch(-90) f(250) Pitch(90)\n"
       "Mat(Glass)\n"
       "F(0, 100)\n\n"
-      "Pitch(-90) f(200) Pitch(90)\n"
+      "Pitch(-90) f(250) Pitch(90)\n"
       "Mat(Metal)\n"
       "F(0, 100)\n\n"
-      "Pitch(-90) f(200) Pitch(90)\n"
+      "Pitch(-90) f(250) Pitch(90)\n"
       "Mat(Plastic)\n"
       "F(0, 100)\n"
-      "Pitch(-90) f(200) Pitch(90)\n"
+      "Pitch(-90) f(250) Pitch(90)\n"
       "Mat(Wax)\n"
       "F(0, 100)\n"
-      "Pitch(-90) f(200) Pitch(90)\n"
+      "Pitch(-90) f(250) Pitch(90)\n"
       "Mat(Pearl)\n"
       "F(0, 100)\n"
     ));

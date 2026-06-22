@@ -411,7 +411,9 @@ void OpenGLViewportWidget::setFocusDistanceMm(float distanceMm)
         return;
     }
 
-    const float clamped = std::max(PhysicalCamera::kMinFocalLengthMm, std::min(distanceMm, 500'000.0f));
+    const float clamped = std::max(
+        PhysicalCamera::kMinFocalLengthMm,
+        std::min(distanceMm, SceneUnits::kDefaultRayTMaxMm));
     if (std::fabs(m_camera.computeFocusDistance() - clamped) < 1.0e-3f) {
         return;
     }
@@ -749,23 +751,38 @@ void OpenGLViewportWidget::mousePressEvent(QMouseEvent* event)
         return;
     }
 
-    if (event->button() != Qt::LeftButton) {
-        return;
-    }
+    if (event->button() == Qt::LeftButton) {
+        setFocus();
+        m_lastMousePos = event->pos();
 
-    setFocus();
-    m_lastMousePos = event->pos();
-
-    if (event->modifiers() & Qt::ControlModifier) {
-        if (isWidgetPosInLetterbox(event->pos(), nullptr, nullptr, nullptr, nullptr)) {
-            m_quadPanning = true;
+        if (event->modifiers() & Qt::ControlModifier) {
+            if (isWidgetPosInLetterbox(event->pos(), nullptr, nullptr, nullptr, nullptr)) {
+                m_quadPanning = true;
+            }
+            event->accept();
+            return;
         }
+
         event->accept();
         return;
     }
 
-    m_looking = true;
-    event->accept();
+    if (event->button() == Qt::RightButton) {
+        setFocus();
+        m_lastMousePos = event->pos();
+        m_looking = true;
+        event->accept();
+        return;
+    }
+
+    if (event->button() == Qt::MiddleButton) {
+        setFocus();
+        m_lastMousePos = event->pos();
+        m_orbitPivot = resolveOrbitPivot();
+        m_orbiting = true;
+        event->accept();
+        return;
+    }
 }
 
 void OpenGLViewportWidget::mouseMoveEvent(QMouseEvent* event)
@@ -797,6 +814,19 @@ void OpenGLViewportWidget::mouseMoveEvent(QMouseEvent* event)
         return;
     }
 
+    if (m_orbiting) {
+        const QPoint delta = event->pos() - m_lastMousePos;
+        m_lastMousePos = event->pos();
+
+        m_camera.orbitAroundPoint(
+            m_orbitPivot,
+            static_cast<float>(-delta.x()) * m_mouseSensitivity,
+            static_cast<float>(-delta.y()) * m_mouseSensitivity);
+        notifyCameraMotionChanged();
+        event->accept();
+        return;
+    }
+
     if (!m_looking) {
         return;
     }
@@ -815,8 +845,13 @@ void OpenGLViewportWidget::mouseMoveEvent(QMouseEvent* event)
 void OpenGLViewportWidget::mouseReleaseEvent(QMouseEvent* event)
 {
     if (event->button() == Qt::LeftButton) {
-        m_looking = false;
         m_quadPanning = false;
+        event->accept();
+    } else if (event->button() == Qt::RightButton) {
+        m_looking = false;
+        event->accept();
+    } else if (event->button() == Qt::MiddleButton) {
+        m_orbiting = false;
         event->accept();
     }
 }
@@ -895,6 +930,7 @@ void OpenGLViewportWidget::focusOutEvent(QFocusEvent* event)
     m_cameraResetThrottle.cancel();
     m_cameraMotionStopDebounce.cancel();
     m_looking = false;
+    m_orbiting = false;
     QOpenGLWidget::focusOutEvent(event);
 }
 
@@ -1166,6 +1202,15 @@ void OpenGLViewportWidget::refreshPinnedFocusFromModel()
     m_model->syncFocusDistanceMm(m_camera.computeFocusDistance());
 }
 
+glm::vec3 OpenGLViewportWidget::resolveOrbitPivot() const
+{
+    if (m_model != nullptr && m_model->focusPointPinned()) {
+        return m_model->focusPoint();
+    }
+
+    return m_camera.position() + m_camera.forward() * PhysicalCamera::kDefaultFocusDistance;
+}
+
 void OpenGLViewportWidget::notifyCameraMotionChanged()
 {
     refreshPinnedFocusFromModel();
@@ -1206,6 +1251,7 @@ void OpenGLViewportWidget::setRegionDefineMode(bool active)
     m_regionDefining = active;
     m_regionDefineHasAnchor = false;
     m_looking = false;
+    m_orbiting = false;
     emit regionDefineModeChanged(active);
     update();
 }

@@ -3,6 +3,7 @@
 #include "AppSettings.h"
 #include "Brdf/BrdfDebug.h"
 #include "PhysicalCamera.h"
+#include "SceneUnits.h"
 
 #include <algorithm>
 
@@ -25,7 +26,7 @@ constexpr int kMaxMinSamples = 10'000;
 constexpr float kMinRelativeErrorThreshold = 0.001f;
 constexpr float kMaxRelativeErrorThreshold = 1.0f;
 constexpr float kMinFocusDistanceMm = PhysicalCamera::kMinFocalLengthMm;
-constexpr float kMaxFocusDistanceMm = 500'000.0f;
+constexpr float kMaxFocusDistanceMm = SceneUnits::kDefaultRayTMaxMm;
 } // namespace
 
 SceneModel::SceneModel(QObject* parent)

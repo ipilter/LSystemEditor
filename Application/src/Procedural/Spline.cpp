@@ -189,6 +189,48 @@ std::vector<PathFrame> SplinePath::computeParallelTransportFrames(int samplesPer
     return parallelTransportFramesFromSamples(points);
 }
 
+float SplinePath::spanRadiusSlope(const HermiteSpan& span)
+{
+    if (span.chordLength <= 1e-6f) {
+        return 0.0f;
+    }
+    return (span.r1 - span.r0) / span.chordLength;
+}
+
+bool SplinePath::spanNeedsRadiusRefinement(const HermiteSpan& span)
+{
+    constexpr float kMinRadiusSlope = 0.15f;
+    if (span.chordLength <= 1e-6f) {
+        return false;
+    }
+    return std::fabs(span.r1 - span.r0) / span.chordLength > kMinRadiusSlope;
+}
+
+int SplinePath::spanRingIntervalCount(const HermiteSpan& span, int samplesPerSpan, bool adjacentRadiusSpan)
+{
+    const int perSpan = samplesPerSpan < 2 ? 2 : samplesPerSpan;
+    const bool refineHermite = spanNeedsRefinement(span, perSpan);
+    const bool refineRadius = spanNeedsRadiusRefinement(span);
+    if (!refineHermite && !refineRadius && !adjacentRadiusSpan) {
+        return 1;
+    }
+
+    int intervals = perSpan - 1;
+    if (refineRadius || adjacentRadiusSpan) {
+        constexpr float kMaxRingSpacingMm = 25.0f;
+        constexpr float kMaxRadiusStepMm = 12.0f;
+        const int byLength = static_cast<int>(std::ceil(span.chordLength / kMaxRingSpacingMm));
+        const int byRadius =
+            static_cast<int>(std::ceil(std::fabs(span.r1 - span.r0) / kMaxRadiusStepMm));
+        intervals = std::max(intervals, std::max(byLength, byRadius));
+        if (adjacentRadiusSpan && !refineRadius) {
+            intervals = std::max(intervals, static_cast<int>(std::ceil(span.chordLength / kMaxRingSpacingMm)));
+        }
+    }
+
+    return intervals < 1 ? 1 : intervals;
+}
+
 bool SplinePath::spanNeedsRefinement(const HermiteSpan& span, int samplesPerSpan)
 {
     if (samplesPerSpan <= 2) {
@@ -233,16 +275,24 @@ std::vector<PathFrame> SplinePath::computeLoftFrames(int samplesPerSpan) const
                 LoftSamplePoint{span.p0, vecNormalize3(span.m0), span.r0});
         }
 
-        if (spanNeedsRefinement(span, perSpan)) {
-            for (int step = 1; step < perSpan - 1; ++step) {
-                const float t = static_cast<float>(step) / static_cast<float>(perSpan - 1);
-                appendLoftSample(
-                    points,
-                    LoftSamplePoint{
-                        hermitePoint(span, t),
-                        hermiteTangent(span, t),
-                        vecLerp(span.r0, span.r1, t)});
+        const bool useLinearPath = !spanNeedsRefinement(span, perSpan);
+        const bool adjacentRadiusSpan =
+            (spanIndex > 0 && spanNeedsRadiusRefinement(m_spans[spanIndex - 1]))
+            || (spanIndex + 1 < m_spans.size() && spanNeedsRadiusRefinement(m_spans[spanIndex + 1]));
+        const int intervals = spanRingIntervalCount(span, perSpan, adjacentRadiusSpan);
+        for (int step = 1; step < intervals; ++step) {
+            const float t = static_cast<float>(step) / static_cast<float>(intervals);
+            LoftSamplePoint sample{};
+            if (useLinearPath) {
+                sample.position = vecAdd3(vecScale3(span.p0, 1.0f - t), vecScale3(span.p1, t));
+                sample.tangent = vecNormalize3(vecSub3(span.p1, span.p0));
+                sample.radius = vecLerp(span.r0, span.r1, t);
+            } else {
+                sample.position = hermitePoint(span, t);
+                sample.tangent = hermiteTangent(span, t);
+                sample.radius = vecLerp(span.r0, span.r1, t);
             }
+            appendLoftSample(points, sample);
         }
 
         appendLoftSample(

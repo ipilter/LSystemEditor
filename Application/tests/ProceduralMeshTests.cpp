@@ -13,6 +13,8 @@
 #include <cstdlib>
 #include <iostream>
 #include <memory>
+#include <string>
+#include <unordered_map>
 #include <vector>
 
 extern int gFailures;
@@ -166,6 +168,220 @@ Vec3 horizontalRadialNormal(Vec3 centroid)
         return vecMake3(0.0f, 0.0f, 0.0f);
     }
     return vecScale3(vecMake3(centroid.x, centroid.y, 0.0f), 1.0f / length);
+}
+
+struct TrianglePositionKey
+{
+    int64_t v0 = 0;
+    int64_t v1 = 0;
+    int64_t v2 = 0;
+
+    bool operator==(const TrianglePositionKey& other) const
+    {
+        return v0 == other.v0 && v1 == other.v1 && v2 == other.v2;
+    }
+};
+
+struct TrianglePositionKeyHash
+{
+    size_t operator()(const TrianglePositionKey& key) const
+    {
+        const size_t h0 = static_cast<size_t>(key.v0) * 73856093u;
+        const size_t h1 = static_cast<size_t>(key.v1) * 19349663u;
+        const size_t h2 = static_cast<size_t>(key.v2) * 83492791u;
+        return h0 ^ h1 ^ h2;
+    }
+};
+
+int64_t quantizeComponent(float value, float cellSize)
+{
+    return static_cast<int64_t>(std::floor(value / cellSize + 0.5f));
+}
+
+int64_t quantizeVec3Key(Vec3 position, float cellSize)
+{
+    const int64_t x = quantizeComponent(position.x, cellSize);
+    const int64_t y = quantizeComponent(position.y, cellSize);
+    const int64_t z = quantizeComponent(position.z, cellSize);
+    return x ^ (y << 21) ^ (z << 42);
+}
+
+TrianglePositionKey sortedTrianglePositionKey(Vec3 a, Vec3 b, Vec3 c, float cellSize)
+{
+    int64_t keys[3] = {
+        quantizeVec3Key(a, cellSize),
+        quantizeVec3Key(b, cellSize),
+        quantizeVec3Key(c, cellSize),
+    };
+
+    if (keys[0] > keys[1]) {
+        std::swap(keys[0], keys[1]);
+    }
+    if (keys[1] > keys[2]) {
+        std::swap(keys[1], keys[2]);
+    }
+    if (keys[0] > keys[1]) {
+        std::swap(keys[0], keys[1]);
+    }
+
+    return TrianglePositionKey{keys[0], keys[1], keys[2]};
+}
+
+bool meshHasDuplicatePositionTriangles(const Mesh& mesh, float cellSize = 0.01f)
+{
+    std::unordered_map<TrianglePositionKey, int, TrianglePositionKeyHash> seen;
+    seen.reserve(mesh.triangles.size());
+    for (const MeshTriangle& tri : mesh.triangles) {
+        const TrianglePositionKey key = sortedTrianglePositionKey(tri.v0, tri.v1, tri.v2, cellSize);
+        if (seen.find(key) != seen.end()) {
+            return true;
+        }
+        seen.emplace(key, 1);
+    }
+    return false;
+}
+
+bool meshAllTriangleShadingNormalsValid(const MeshAccelScene& scene, float minLength = 0.9f)
+{
+    for (const TriangleGpu& tri : scene.trianglesHost()) {
+        if (vecLength3(centroidInterpolatedNormal(tri)) < minLength) {
+            return false;
+        }
+    }
+    return true;
+}
+
+float meshMaxSideEdgeLength(const Mesh& mesh, float axisCenterThreshold = 1.0f)
+{
+    float maxLength = 0.0f;
+    for (const MeshTriangle& tri : mesh.triangles) {
+        const auto radialDistance = [](Vec3 position) {
+            return vecLength3(vecMake3(position.x, position.y, 0.0f));
+        };
+
+        if (radialDistance(tri.v0) <= axisCenterThreshold || radialDistance(tri.v1) <= axisCenterThreshold
+            || radialDistance(tri.v2) <= axisCenterThreshold) {
+            continue;
+        }
+
+        maxLength = std::max(maxLength, vecLength3(vecSub3(tri.v1, tri.v0)));
+        maxLength = std::max(maxLength, vecLength3(vecSub3(tri.v2, tri.v1)));
+        maxLength = std::max(maxLength, vecLength3(vecSub3(tri.v0, tri.v2)));
+    }
+    return maxLength;
+}
+
+bool meshHasOutwardSideNormalsOnTaper(
+    const MeshAccelScene& scene,
+    float zMin,
+    float zMax,
+    float minRadial,
+    float minOutwardDot = 0.2f)
+{
+    for (const TriangleGpu& tri : scene.trianglesHost()) {
+        const Vec3 centroid = triangleCentroid(tri);
+        if (centroid.z < zMin || centroid.z > zMax) {
+            continue;
+        }
+
+        const Vec3 axisPoint = vecMake3(0.0f, 0.0f, centroid.z);
+        const Vec3 outward = vecNormalize3(vecSub3(centroid, axisPoint));
+        if (vecLength3(outward) < 0.5f || vecLength3(vecMake3(centroid.x, centroid.y, 0.0f)) < minRadial) {
+            continue;
+        }
+
+        const Vec3 normal = centroidInterpolatedNormal(tri);
+        if (vecDot3(normal, outward) >= minOutwardDot) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool meshHasShoulderNormalSplit(const MeshAccelScene& scene, float shoulderZ, float creaseAngleDeg)
+{
+    const float cosThreshold = std::cos(creaseAngleDeg * 3.14159265f / 180.0f);
+    std::vector<Vec3> upperNormals;
+    std::vector<Vec3> lowerNormals;
+
+    for (const TriangleGpu& tri : scene.trianglesHost()) {
+        const Vec3 centroid = triangleCentroid(tri);
+        const float radial = vecLength3(vecMake3(centroid.x, centroid.y, 0.0f));
+        if (radial < 50.0f) {
+            continue;
+        }
+
+        const Vec3 normal = centroidInterpolatedNormal(tri);
+        if (centroid.z > shoulderZ && centroid.z < shoulderZ + 50.0f) {
+            upperNormals.push_back(normal);
+        }
+        if (centroid.z < shoulderZ && centroid.z > shoulderZ - 80.0f) {
+            lowerNormals.push_back(normal);
+        }
+    }
+
+    if (upperNormals.empty() || lowerNormals.empty()) {
+        return false;
+    }
+
+    for (const Vec3& upperNormal : upperNormals) {
+        for (const Vec3& lowerNormal : lowerNormals) {
+            if (vecDot3(upperNormal, lowerNormal) < cosThreshold) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+void expectPearlSpindleMesh(const char* definition, const char* labelPrefix, size_t minLoftFrames)
+{
+    ProceduralBuildParams buildParams{};
+    buildParams.creaseAngleDeg = 50.0f;
+    buildParams.circularSegments = 32;
+
+    Mesh mesh{};
+    expectTrue(
+        ProceduralMeshBuilder::buildHostMesh(definition, 0, RootTransform{}, mesh, buildParams),
+        (std::string(labelPrefix) + " build succeeds").c_str());
+
+    expectTrue(!mesh.triangles.empty(), (std::string(labelPrefix) + " mesh has triangles").c_str());
+    expectTrue(
+        !meshHasDuplicatePositionTriangles(mesh),
+        (std::string(labelPrefix) + " mesh has no duplicate position triangles").c_str());
+    expectTrue(
+        meshMaxSideEdgeLength(mesh) <= 55.0f,
+        (std::string(labelPrefix) + " mesh side edges stay within ring spacing").c_str());
+
+    const size_t loftFrames = loftFrameCountFromDefinition(definition, buildParams.turtle, 4, 0);
+    expectGeSize(loftFrames, minLoftFrames, (std::string(labelPrefix) + " loft uses radius refinement rings").c_str());
+
+    MeshAccelScene scene;
+    expectTrue(scene.build(mesh), (std::string(labelPrefix) + " mesh accel scene builds").c_str());
+    expectTrue(
+        meshAllTriangleShadingNormalsValid(scene),
+        (std::string(labelPrefix) + " mesh has valid shading normals").c_str());
+    expectTrue(
+        meshHasOutwardSideNormalsOnTaper(scene, -290.0f, -110.0f, 15.0f, 0.05f),
+        (std::string(labelPrefix) + " steep taper uses outward-facing normals").c_str());
+}
+
+void expectPearlSpindleShoulderCrease(const char* definition, float shoulderZ)
+{
+    ProceduralBuildParams buildParams{};
+    buildParams.creaseAngleDeg = 50.0f;
+    buildParams.circularSegments = 32;
+
+    Mesh mesh{};
+    expectTrue(
+        ProceduralMeshBuilder::buildHostMesh(definition, 0, RootTransform{}, mesh, buildParams),
+        "pearl spindle shoulder crease build succeeds");
+
+    MeshAccelScene scene;
+    expectTrue(scene.build(mesh), "pearl spindle shoulder crease scene builds");
+    expectTrue(
+        meshHasShoulderNormalSplit(scene, shoulderZ, buildParams.creaseAngleDeg),
+        "pearl spindle shoulder keeps hard crease split normals");
 }
 
 void expectSingleFCylinderOutwardNormals()
@@ -411,6 +627,22 @@ void runProceduralMeshTests()
     {
         expectEqSize(loftFrameCountFromDefinition("F\n", params), 2, "single F loft uses two knot rings");
         expectEqSize(loftFrameCountFromDefinition("F F\n", params), 3, "F F loft uses three knot rings");
+    }
+
+    {
+        constexpr const char* pearlSpindle3 =
+            "[F(100, 10)\n"
+            "F(200, 100)\n"
+            "F(100, 10)]";
+        expectPearlSpindleMesh(pearlSpindle3, "pearl spindle three-span", 15);
+        expectPearlSpindleShoulderCrease(pearlSpindle3, -100.0f);
+    }
+
+    {
+        constexpr const char* pearlSpindle2 =
+            "[F(100, 10)\n"
+            "F(200, 100)]";
+        expectPearlSpindleMesh(pearlSpindle2, "pearl spindle two-span", 10);
     }
 
     {
