@@ -220,8 +220,10 @@ SPECTRAL_CORE_FN float spectralGlassAbsorptionAtWavelength(
 
 SPECTRAL_CORE_FN float spectralGlassIor(const MaterialGpu& material, float lambdaNm)
 {
-    (void)lambdaNm;
-    return vecMax2(material.ior, 1.0e-3f);
+    return spectralIorAtWavelength(
+        vecMax2(material.ior, 1.0e-3f),
+        material.abbeNumber,
+        lambdaNm);
 }
 
 SPECTRAL_CORE_FN float spectralEnvironmentRadianceAtWavelength(Vec3 rgb, float lambdaNm)

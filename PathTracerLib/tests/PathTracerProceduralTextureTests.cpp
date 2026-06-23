@@ -238,6 +238,21 @@ void testNoiseEmissionIntensityBoost()
     expectTrue(resolved.emission > 1.0f, "noise emission intensity boost");
 }
 
+void testEstimateEmissiveLuminanceFromStripeTexture()
+{
+    MaterialGpu material{};
+    material.r = 0.9f;
+    material.g = 0.8f;
+    material.b = 0.7f;
+    material.emission = 0.0f;
+    material.emissionTex = 1u;
+
+    const TextureDescGpu stripe = makeStripeTexture(20.0f, 0.25f, 1.0f, 0.0f, 50.0f, 0.0f);
+    const TextureDescGpu bank[] = {{}, stripe};
+    const float luminance = estimateMaterialEmissionLuminance(material, bank, 2u);
+    expectTrue(luminance > 0.0f, "stripe emission texture contributes to light sampling estimate");
+}
+
 } // namespace
 
 int main()
@@ -254,6 +269,7 @@ int main()
     testNoiseRoughnessMultiply();
     testNoiseAlbedoRgbIsNonZero();
     testNoiseEmissionIntensityBoost();
+    testEstimateEmissiveLuminanceFromStripeTexture();
 
     if (gFailures == 0) {
         std::cout << "All procedural texture tests passed.\n";

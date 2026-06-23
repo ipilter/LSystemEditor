@@ -241,6 +241,7 @@ PROCEDURAL_TEXTURE_FN float resolveChannelScalar(
 }
 
 PROCEDURAL_TEXTURE_FN Vec3 resolveChannelRgb(
+    MaterialChannelId channelId,
     float inlineR,
     float inlineG,
     float inlineB,
@@ -254,7 +255,10 @@ PROCEDURAL_TEXTURE_FN Vec3 resolveChannelRgb(
     }
 
     const Vec3 textureValue = evalProceduralRgb(bank[textureIndex], ctx);
-    const ChannelComposition composition = channelDefaultComposition(MaterialChannelId::Albedo);
+    const ChannelComposition composition = channelDefaultComposition(
+        channelId,
+        inlineR,
+        textureIndex);
     return applyChannelCompositionRgb(
         inlineR,
         inlineG,
@@ -277,6 +281,7 @@ PROCEDURAL_TEXTURE_FN void resolveChannel(
 {
     if (channelValueKind(channelId) == ChannelValueKind::Rgb) {
         const Vec3 rgb = resolveChannelRgb(
+            channelId,
             inlineR,
             inlineG,
             inlineB,
@@ -284,9 +289,25 @@ PROCEDURAL_TEXTURE_FN void resolveChannel(
             bank,
             bankCount,
             ctx);
-        outResolved.r = rgb.x;
-        outResolved.g = rgb.y;
-        outResolved.b = rgb.z;
+        switch (channelId) {
+        case MaterialChannelId::Albedo:
+            outResolved.r = rgb.x;
+            outResolved.g = rgb.y;
+            outResolved.b = rgb.z;
+            break;
+        case MaterialChannelId::SigmaA:
+            outResolved.sigmaAr = vecMax2(0.0f, rgb.x);
+            outResolved.sigmaAg = vecMax2(0.0f, rgb.y);
+            outResolved.sigmaAb = vecMax2(0.0f, rgb.z);
+            break;
+        case MaterialChannelId::SigmaS:
+            outResolved.sigmaSr = vecMax2(0.0f, rgb.x);
+            outResolved.sigmaSg = vecMax2(0.0f, rgb.y);
+            outResolved.sigmaSb = vecMax2(0.0f, rgb.z);
+            break;
+        default:
+            break;
+        }
         return;
     }
 
@@ -305,17 +326,8 @@ PROCEDURAL_TEXTURE_FN void resolveChannel(
     case MaterialChannelId::Metallic:
         outResolved.metallic = proceduralClamp01(scalar);
         break;
-    case MaterialChannelId::Transmission:
-        outResolved.transmission = proceduralClamp01(scalar);
-        break;
-    case MaterialChannelId::Thin:
-        outResolved.thin = proceduralClamp01(scalar);
-        break;
     case MaterialChannelId::Ior:
         outResolved.ior = fmaxf(1.0e-3f, scalar);
-        break;
-    case MaterialChannelId::Subsurface:
-        outResolved.subsurface = proceduralClamp01(scalar);
         break;
     case MaterialChannelId::Emission:
         outResolved.emission = fmaxf(0.0f, scalar);
@@ -323,14 +335,8 @@ PROCEDURAL_TEXTURE_FN void resolveChannel(
     case MaterialChannelId::DiffuseRoughness:
         outResolved.diffuseRoughness = scalar;
         break;
-    case MaterialChannelId::ScatterRadiusR:
-        outResolved.scatterRadiusR = fmaxf(0.0f, scalar);
-        break;
-    case MaterialChannelId::ScatterRadiusG:
-        outResolved.scatterRadiusG = fmaxf(0.0f, scalar);
-        break;
-    case MaterialChannelId::ScatterRadiusB:
-        outResolved.scatterRadiusB = fmaxf(0.0f, scalar);
+    case MaterialChannelId::MediumG:
+        outResolved.mediumG = fmaxf(-1.0f, fminf(1.0f, scalar));
         break;
     case MaterialChannelId::Specular:
         outResolved.specular = proceduralClamp01(scalar);
@@ -382,50 +388,6 @@ PROCEDURAL_TEXTURE_FN ResolvedMaterial resolveLayer(
         ctx,
         resolved);
     resolveChannel(
-        MaterialChannelId::Transmission,
-        0.0f,
-        0.0f,
-        0.0f,
-        material.transmission,
-        material.transmissionTex,
-        bank,
-        bankCount,
-        ctx,
-        resolved);
-    resolveChannel(
-        MaterialChannelId::Thin,
-        0.0f,
-        0.0f,
-        0.0f,
-        material.thin,
-        material.thinTex,
-        bank,
-        bankCount,
-        ctx,
-        resolved);
-    resolveChannel(
-        MaterialChannelId::Ior,
-        0.0f,
-        0.0f,
-        0.0f,
-        material.ior,
-        material.iorTex,
-        bank,
-        bankCount,
-        ctx,
-        resolved);
-    resolveChannel(
-        MaterialChannelId::Subsurface,
-        0.0f,
-        0.0f,
-        0.0f,
-        material.subsurface,
-        material.subsurfaceTex,
-        bank,
-        bankCount,
-        ctx,
-        resolved);
-    resolveChannel(
         MaterialChannelId::Emission,
         0.0f,
         0.0f,
@@ -453,39 +415,6 @@ PROCEDURAL_TEXTURE_FN ResolvedMaterial resolveLayer(
         resolved.diffuseRoughness = proceduralClamp01(resolved.diffuseRoughness);
     }
     resolveChannel(
-        MaterialChannelId::ScatterRadiusR,
-        0.0f,
-        0.0f,
-        0.0f,
-        material.scatterRadiusR,
-        material.scatterRadiusRTex,
-        bank,
-        bankCount,
-        ctx,
-        resolved);
-    resolveChannel(
-        MaterialChannelId::ScatterRadiusG,
-        0.0f,
-        0.0f,
-        0.0f,
-        material.scatterRadiusG,
-        material.scatterRadiusGTex,
-        bank,
-        bankCount,
-        ctx,
-        resolved);
-    resolveChannel(
-        MaterialChannelId::ScatterRadiusB,
-        0.0f,
-        0.0f,
-        0.0f,
-        material.scatterRadiusB,
-        material.scatterRadiusBTex,
-        bank,
-        bankCount,
-        ctx,
-        resolved);
-    resolveChannel(
         MaterialChannelId::Specular,
         0.0f,
         0.0f,
@@ -496,6 +425,51 @@ PROCEDURAL_TEXTURE_FN ResolvedMaterial resolveLayer(
         bankCount,
         ctx,
         resolved);
+    resolveChannel(
+        MaterialChannelId::SigmaA,
+        material.sigmaAr,
+        material.sigmaAg,
+        material.sigmaAb,
+        0.0f,
+        material.sigmaATex,
+        bank,
+        bankCount,
+        ctx,
+        resolved);
+    resolveChannel(
+        MaterialChannelId::SigmaS,
+        material.sigmaSr,
+        material.sigmaSg,
+        material.sigmaSb,
+        0.0f,
+        material.sigmaSTex,
+        bank,
+        bankCount,
+        ctx,
+        resolved);
+    resolveChannel(
+        MaterialChannelId::MediumG,
+        0.0f,
+        0.0f,
+        0.0f,
+        material.mediumG,
+        material.mediumGTex,
+        bank,
+        bankCount,
+        ctx,
+        resolved);
+    resolveChannel(
+        MaterialChannelId::Ior,
+        0.0f,
+        0.0f,
+        0.0f,
+        material.ior,
+        material.iorTex,
+        bank,
+        bankCount,
+        ctx,
+        resolved);
+    resolved.abbeNumber = material.abbeNumber;
 
     return resolved;
 }
@@ -517,17 +491,47 @@ PROCEDURAL_TEXTURE_FN MaterialGpu materialFromResolved(const ResolvedMaterial& r
     material.b = resolved.b;
     material.roughness = resolved.roughness;
     material.metallic = resolved.metallic;
-    material.transmission = resolved.transmission;
-    material.thin = resolved.thin;
-    material.ior = resolved.ior;
-    material.subsurface = resolved.subsurface;
     material.emission = resolved.emission;
     material.diffuseRoughness = resolved.diffuseRoughness;
-    material.scatterRadiusR = resolved.scatterRadiusR;
-    material.scatterRadiusG = resolved.scatterRadiusG;
-    material.scatterRadiusB = resolved.scatterRadiusB;
     material.specular = resolved.specular;
+    material.sigmaAr = resolved.sigmaAr;
+    material.sigmaAg = resolved.sigmaAg;
+    material.sigmaAb = resolved.sigmaAb;
+    material.sigmaSr = resolved.sigmaSr;
+    material.sigmaSg = resolved.sigmaSg;
+    material.sigmaSb = resolved.sigmaSb;
+    material.mediumG = resolved.mediumG;
+    material.ior = resolved.ior;
+    material.abbeNumber = resolved.abbeNumber;
     return material;
+}
+
+PROCEDURAL_TEXTURE_FN float proceduralTextureMaxScalar(const TextureDescGpu& desc)
+{
+    const float atOff = evalOnOffScalar(desc, 0.0f);
+    const float atOn = evalOnOffScalar(desc, 1.0f);
+    return vecMax2(atOff, atOn);
+}
+
+PROCEDURAL_TEXTURE_FN float estimateMaterialEmissionLuminance(
+    const MaterialGpu& material,
+    const TextureDescGpu* textures,
+    uint32_t textureCount)
+{
+    const float albedoLuminance =
+        0.2126f * material.r + 0.7152f * material.g + 0.0722f * material.b;
+
+    float emissionScalar = material.emission;
+    if (material.emissionTex != 0u && textures != nullptr && material.emissionTex < textureCount) {
+        const float textureMax = proceduralTextureMaxScalar(textures[material.emissionTex]);
+        const ChannelComposition composition = channelDefaultComposition(
+            MaterialChannelId::Emission,
+            material.emission,
+            material.emissionTex);
+        emissionScalar = applyChannelCompositionScalar(material.emission, textureMax, composition);
+    }
+
+    return emissionScalar * albedoLuminance;
 }
 
 #undef PROCEDURAL_TEXTURE_FN

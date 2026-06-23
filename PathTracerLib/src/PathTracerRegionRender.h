@@ -23,7 +23,7 @@ inline int regionPixelCount(const QRect& region)
     if (region.isEmpty()) {
         return 0;
     }
-    return region.width() * region.height();
+    return (region.right() - region.left() + 1) * (region.bottom() - region.top() + 1);
 }
 
 inline std::vector<int> buildRegionActiveIndices(const QRect& region, int width)

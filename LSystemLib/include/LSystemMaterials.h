@@ -33,16 +33,14 @@ struct MaterialEntry
     MaterialChannel albedo;
     MaterialChannel roughness;
     MaterialChannel metallic;
-    MaterialChannel transmission;
-    MaterialChannel thin;
-    MaterialChannel ior;
-    MaterialChannel subsurface;
-    MaterialChannel emission;
     MaterialChannel diffuseRoughness;
-    MaterialChannel scatterRadiusR;
-    MaterialChannel scatterRadiusG;
-    MaterialChannel scatterRadiusB;
     MaterialChannel specular;
+    MaterialChannel emission;
+    MaterialChannel sigmaA;
+    MaterialChannel sigmaS;
+    MaterialChannel mediumG;
+    MaterialChannel ior;
+    MaterialChannel abbe;
 };
 
 /** @brief One material definition collected during L-system parse. */
@@ -72,3 +70,6 @@ inline float materialChannelB(const MaterialChannel& channel, float defaultValue
 {
     return channel.mode == MaterialChannel::Mode::Inline ? channel.b : defaultValue;
 }
+
+/** @brief Default sigmaS (/mm) when omitted; opaque surface shortcut (no volume transport). */
+inline constexpr float kMaterialDefaultSigmaS = 1000.0f;

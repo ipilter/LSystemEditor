@@ -346,7 +346,7 @@ F(h,r) -> [Yaw(22.5)F(h*0.7,r*0.55)][Yaw(0-22.5)F(h*0.7,r*0.55)])"));
 TEST(LSystemEvaluatorTest, EvaluateFromDefinition_ReturnsGenerationAndMaterials)
 {
     const LSystemEvaluationResult result = LSystemEvaluator::evaluate(
-        "Mat(0) = {0.5, 0.6, 0.7, 0.8}\n"
+        "Mat(0) = {albedo: {0.5, 0.6, 0.7}, roughness: 0.8}\n"
         "F\n"
         "F -> F F\n",
         1);
@@ -362,8 +362,8 @@ TEST(LSystemEvaluatorTest, EvaluateFromDefinition_ReturnsGenerationAndMaterials)
 TEST(LSystemEvaluatorTest, NamedMaterialInRuleSuccessor_PreservesIdent)
 {
     const LSystemEvaluationResult result = LSystemEvaluator::evaluate(
-        "Mat(bark) = {0.72, 0.45, 0.20, 0.3}\n"
-        "Mat(leaf) = {0.95, 0.95, 0.95, 0.0}\n"
+        "Mat(bark) = {albedo: {0.72, 0.45, 0.20}, roughness: 0.3}\n"
+        "Mat(leaf) = {albedo: {0.95, 0.95, 0.95}, roughness: 0.0}\n"
         "F(5, 0.5, 0.45)\n"
         "F(h, r1, r2) : r1 > 0.05 : 1.0 ->\n"
         "    Mat(bark)\n"

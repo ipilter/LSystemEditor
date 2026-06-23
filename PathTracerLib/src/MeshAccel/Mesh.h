@@ -98,17 +98,8 @@ inline void meshAppend(Mesh& dst, const Mesh& src, const uint32_t materialIndexO
         if (material.metallicTex != 0u) {
             material.metallicTex += textureIndexOffset;
         }
-        if (material.transmissionTex != 0u) {
-            material.transmissionTex += textureIndexOffset;
-        }
-        if (material.thinTex != 0u) {
-            material.thinTex += textureIndexOffset;
-        }
         if (material.iorTex != 0u) {
             material.iorTex += textureIndexOffset;
-        }
-        if (material.subsurfaceTex != 0u) {
-            material.subsurfaceTex += textureIndexOffset;
         }
         if (material.emissionTex != 0u) {
             material.emissionTex += textureIndexOffset;
@@ -116,14 +107,14 @@ inline void meshAppend(Mesh& dst, const Mesh& src, const uint32_t materialIndexO
         if (material.diffuseRoughnessTex != 0u) {
             material.diffuseRoughnessTex += textureIndexOffset;
         }
-        if (material.scatterRadiusRTex != 0u) {
-            material.scatterRadiusRTex += textureIndexOffset;
+        if (material.sigmaATex != 0u) {
+            material.sigmaATex += textureIndexOffset;
         }
-        if (material.scatterRadiusGTex != 0u) {
-            material.scatterRadiusGTex += textureIndexOffset;
+        if (material.sigmaSTex != 0u) {
+            material.sigmaSTex += textureIndexOffset;
         }
-        if (material.scatterRadiusBTex != 0u) {
-            material.scatterRadiusBTex += textureIndexOffset;
+        if (material.mediumGTex != 0u) {
+            material.mediumGTex += textureIndexOffset;
         }
         if (material.specularTex != 0u) {
             material.specularTex += textureIndexOffset;

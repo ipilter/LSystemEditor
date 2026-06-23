@@ -4,6 +4,7 @@
 #include "LSystemEvaluator.h"
 #include "LSystemMaterials.h"
 #include "Loft.h"
+#include "Medium/MediumProperties.h"
 #include "Texture/TexturePack.h"
 #include "Turtle.h"
 
@@ -14,6 +15,10 @@
 #include <unordered_map>
 
 namespace {
+
+static_assert(
+    kMaterialDefaultSigmaS == MediumDetail::kOpaqueSigmaS,
+    "L-system default sigmaS must match opaque medium shortcut");
 
 bool isValidManifold(const manifold::Manifold& mesh)
 {
@@ -72,29 +77,28 @@ MaterialGpu toMaterialGpu(const MaterialEntry& entry, std::vector<TextureDescGpu
     material.roughness = materialChannelScalar(entry.roughness, 0.5f);
     material.metallic = materialChannelScalar(entry.metallic);
     material.emission = materialChannelScalar(entry.emission);
-    material.ior = materialChannelScalar(entry.ior, 1.5f);
-    material.transmission = materialChannelScalar(entry.transmission);
-    material.thin = materialChannelScalar(entry.thin);
-    material.subsurface = materialChannelScalar(entry.subsurface);
     material.diffuseRoughness = materialChannelScalar(entry.diffuseRoughness, -1.0f);
-    material.scatterRadiusR = materialChannelScalar(entry.scatterRadiusR);
-    material.scatterRadiusG = materialChannelScalar(entry.scatterRadiusG);
-    material.scatterRadiusB = materialChannelScalar(entry.scatterRadiusB);
     material.specular = materialChannelScalar(entry.specular, 1.0f);
+    material.sigmaAr = materialChannelR(entry.sigmaA, 0.0f);
+    material.sigmaAg = materialChannelG(entry.sigmaA, 0.0f);
+    material.sigmaAb = materialChannelB(entry.sigmaA, 0.0f);
+    material.sigmaSr = materialChannelR(entry.sigmaS, MediumDetail::kOpaqueSigmaS);
+    material.sigmaSg = materialChannelG(entry.sigmaS, MediumDetail::kOpaqueSigmaS);
+    material.sigmaSb = materialChannelB(entry.sigmaS, MediumDetail::kOpaqueSigmaS);
+    material.mediumG = materialChannelScalar(entry.mediumG);
+    material.ior = materialChannelScalar(entry.ior, 1.5f);
+    material.abbeNumber = materialChannelScalar(entry.abbe, 58.0f);
 
     material.albedoTex = channelTextureIndex(entry.albedo, bank);
     material.roughnessTex = channelTextureIndex(entry.roughness, bank);
     material.metallicTex = channelTextureIndex(entry.metallic, bank);
-    material.transmissionTex = channelTextureIndex(entry.transmission, bank);
-    material.thinTex = channelTextureIndex(entry.thin, bank);
-    material.iorTex = channelTextureIndex(entry.ior, bank);
-    material.subsurfaceTex = channelTextureIndex(entry.subsurface, bank);
     material.emissionTex = channelTextureIndex(entry.emission, bank);
     material.diffuseRoughnessTex = channelTextureIndex(entry.diffuseRoughness, bank);
-    material.scatterRadiusRTex = channelTextureIndex(entry.scatterRadiusR, bank);
-    material.scatterRadiusGTex = channelTextureIndex(entry.scatterRadiusG, bank);
-    material.scatterRadiusBTex = channelTextureIndex(entry.scatterRadiusB, bank);
     material.specularTex = channelTextureIndex(entry.specular, bank);
+    material.sigmaATex = channelTextureIndex(entry.sigmaA, bank);
+    material.sigmaSTex = channelTextureIndex(entry.sigmaS, bank);
+    material.mediumGTex = channelTextureIndex(entry.mediumG, bank);
+    material.iorTex = channelTextureIndex(entry.ior, bank);
     return material;
 }
 
@@ -108,14 +112,12 @@ MaterialGpu defaultMaterialGpu()
     material.metallic = 0.0f;
     material.emission = 0.0f;
     material.ior = 1.5f;
-    material.transmission = 0.0f;
-    material.thin = 0.0f;
-    material.subsurface = 0.0f;
+    material.abbeNumber = 58.0f;
     material.diffuseRoughness = -1.0f;
-    material.scatterRadiusR = 0.0f;
-    material.scatterRadiusG = 0.0f;
-    material.scatterRadiusB = 0.0f;
     material.specular = 1.0f;
+    material.sigmaSr = MediumDetail::kOpaqueSigmaS;
+    material.sigmaSg = MediumDetail::kOpaqueSigmaS;
+    material.sigmaSb = MediumDetail::kOpaqueSigmaS;
     return material;
 }
 

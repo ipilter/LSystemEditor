@@ -5,6 +5,7 @@
 #include "MeshAccel/MeshAccelTypes.h"
 #include "RenderTypes.h"
 #include "SceneUnits.h"
+#include "Spectral/SpectralCore.h"
 
 #include <cmath>
 
@@ -74,6 +75,23 @@ LIGHT_CORE_FN Vec3 lightEvalEnvironmentOrBackground(
         return lightEvalEnvironment(env, direction);
     }
     return lightSolidEnvironmentRadiance(params);
+}
+
+LIGHT_CORE_FN float lightEvalEnvironmentSpectral(
+    const EnvironmentMapGpu* env,
+    const RenderParamsGpu* params,
+    Vec3 direction,
+    float lambdaNm)
+{
+    const Vec3 rgb = lightEvalEnvironmentOrBackground(env, params, direction);
+    return spectralEnvironmentRadianceAtWavelength(rgb, lambdaNm);
+}
+
+LIGHT_CORE_FN float lightEmissiveRadianceSpectral(const MaterialGpu& material, float lambdaNm)
+{
+    const float albedo = spectralRgbReflectanceAtWavelength(
+        material.r, material.g, material.b, lambdaNm);
+    return albedo * material.emission;
 }
 
 LIGHT_CORE_FN int lightFindCdfRow(const float* cdf, int count, float u)

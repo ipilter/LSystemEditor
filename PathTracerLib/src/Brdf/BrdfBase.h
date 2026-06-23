@@ -24,16 +24,10 @@ struct BrdfSampleResult
     Vec3 direction{};
     float pdf = 0.0f;
     bool valid = false;
-    /** @brief True when the sampled path transmits through the surface (glass refraction). */
+    /** @brief True when the sampled path transmits through the surface (refraction). */
     bool transmitted = false;
     /** @brief IOR of the medium the ray travels in after this bounce. */
     float nextMediumEta = 1.0f;
-    /** @brief True when the subsurface lobe was sampled (Burley exit reconnect). */
-    bool subsurfaceScatter = false;
-    /** @brief Tangent-plane offset from hit point toward subsurface exit (world space). */
-    Vec3 subsurfaceExitOffset{};
-    /** @brief Number of internal volume scatters performed before Burley exit (Tier B). */
-    int subsurfaceInternalSteps = 0;
 };
 
 struct BrdfContext
@@ -47,6 +41,14 @@ struct BrdfContext
     float wavelengthNm = 550.0f;
     /** @brief BrdfDebugFlags bit mask; 0 = normal behavior. */
     int debugFlags = 0;
+};
+
+/** @brief Hero-wavelength spectral state carried along a path. */
+struct PathSpectralState
+{
+    float wavelengthNm = 550.0f;
+    float wavelengthPdf = 1.0f;
+    float throughput = 1.0f;
 };
 
 template<typename Derived>
@@ -140,6 +142,14 @@ BRDF_BASE_FN Vec3 brdfSchlickF(float cosTheta, Vec3 f0)
     const float t2 = t * t;
     const float t5 = t2 * t2 * t;
     return vecAdd3(vecScale3(f0, 1.0f - t5), vecMake3(t5, t5, t5));
+}
+
+BRDF_BASE_FN float brdfSchlickFScalar(float cosTheta, float f0)
+{
+    const float t = vecMax2(0.0f, vecMin2(1.0f, 1.0f - cosTheta));
+    const float t2 = t * t;
+    const float t5 = t2 * t2 * t;
+    return f0 + (1.0f - f0) * t5;
 }
 
 BRDF_BASE_FN Vec3 brdfSampleGGXHalfLocal(float alpha, float u1, float u2, float& pdf)
@@ -263,20 +273,6 @@ BRDF_BASE_FN float brdfGgxEnergyCompensation(float roughness, float cosTheta)
     const float Ess = 1.0f - alpha * (0.3316f + 0.3237f * alpha);
     const float Ems = (1.0f - Ess) * (1.0f - cosClamped);
     return 1.0f + Ems / vecMax2(Ess, 1.0e-4f);
-}
-
-BRDF_BASE_FN Vec3 brdfScatterRadius(const MaterialGpu& material)
-{
-    return vecMake3(
-        vecMax2(0.0f, material.scatterRadiusR),
-        vecMax2(0.0f, material.scatterRadiusG),
-        vecMax2(0.0f, material.scatterRadiusB));
-}
-
-BRDF_BASE_FN float brdfMaxScatterRadius(const MaterialGpu& material)
-{
-    const Vec3 radius = brdfScatterRadius(material);
-    return vecMax2(vecMax2(radius.x, radius.y), radius.z);
 }
 
 #undef BRDF_BASE_FN

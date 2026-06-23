@@ -106,6 +106,11 @@ private:
     int effectiveDisplayRefreshIntervalMs() const;
     GLuint compileShader(GLenum type, const char* source);
     GLuint linkProgram(GLuint vertexShader, GLuint fragmentShader);
+    void beginCameraDrag(const QPoint& widgetPos);
+    void endCameraDrag();
+    QPoint cameraDragWarpCenter() const;
+    void applyCameraDragDelta(const QPoint& delta);
+    void warpCameraDragCursor();
 
     SceneModel* m_model = nullptr;
     PathTracer m_pathTracer;
@@ -121,6 +126,7 @@ private:
     QColor m_clearColor;
     bool m_looking = false;
     bool m_orbiting = false;
+    bool m_cameraDragActive = false;
     bool m_quadPanning = false;
     bool m_regionDefining = false;
     bool m_regionDefineHasAnchor = false;

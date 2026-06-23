@@ -4,6 +4,8 @@
 #include "Procedural/Turtle.h"
 #include "Geometry/MathCore.h"
 #include "LSystemEvaluator.h"
+#include "LSystemMaterials.h"
+#include "Medium/MediumProperties.h"
 #include "MeshAccel/Mesh.h"
 #include "MeshAccel/MeshAccelScene.h"
 #include "MeshAccel/MeshAccelTypes.h"
@@ -763,6 +765,16 @@ void runProceduralMeshTests()
         MeshAccelScene scene;
         expectTrue(scene.build(mesh), "mesh accel scene builds from procedural mesh");
         expectTrue(!scene.trianglesHost().empty(), "procedural mesh triangle count positive");
+    }
+
+    {
+        Mesh mesh{};
+        expectTrue(
+            ProceduralMeshBuilder::buildHostMesh("F\n", 0, RootTransform{}, mesh),
+            "procedural build with implicit default material succeeds");
+        expectTrue(!mesh.materials.empty(), "implicit default material table is populated");
+        expectNear(mesh.materials[0].sigmaSr, kMaterialDefaultSigmaS, 1.0f, "default material sigmaS is opaque");
+        expectTrue(mediumIsOpaque(mediumFromMaterial(mesh.materials[0])), "default material uses opaque sigmaS");
     }
 
     {

@@ -34,7 +34,7 @@ void testNormalizeRegionRectClampsToRenderSize()
 
 void testBuildRegionActiveIndicesMatchesRowMajorLayout()
 {
-    const QRect region(1, 2, 3, 3);
+    const QRect region(QPoint(1, 2), QPoint(3, 3));
     const auto indices = PathTracerRegionRender::buildRegionActiveIndices(region, 8);
     expectTrue(indices.size() == 6U, "region index count");
     expectTrue(indices[0] == 2 * 8 + 1, "first index");
@@ -45,7 +45,7 @@ void testBuildRegionActiveIndicesMatchesRowMajorLayout()
 
 void testRegionPixelCountUsesInclusiveBounds()
 {
-    const QRect region(0, 0, 1, 1);
+    const QRect region(QPoint(0, 0), QPoint(1, 1));
     expectTrue(PathTracerRegionRender::regionPixelCount(region) == 4, "2x2 inclusive pixel count");
 }
 

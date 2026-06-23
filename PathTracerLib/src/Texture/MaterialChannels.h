@@ -7,16 +7,13 @@ enum class MaterialChannelId : uint8_t
     Albedo,
     Roughness,
     Metallic,
-    Transmission,
-    Thin,
-    Ior,
-    Subsurface,
-    Emission,
     DiffuseRoughness,
-    ScatterRadiusR,
-    ScatterRadiusG,
-    ScatterRadiusB,
     Specular,
+    Emission,
+    SigmaA,
+    SigmaS,
+    MediumG,
+    Ior,
     Count
 };
 
@@ -46,16 +43,18 @@ struct ResolvedMaterial
     float b = 0.8f;
     float roughness = 0.5f;
     float metallic = 0.0f;
-    float transmission = 0.0f;
-    float thin = 0.0f;
-    float ior = 1.5f;
-    float subsurface = 0.0f;
     float emission = 0.0f;
     float diffuseRoughness = 0.5f;
-    float scatterRadiusR = 0.0f;
-    float scatterRadiusG = 0.0f;
-    float scatterRadiusB = 0.0f;
     float specular = 1.0f;
+    float sigmaAr = 0.0f;
+    float sigmaAg = 0.0f;
+    float sigmaAb = 0.0f;
+    float sigmaSr = 0.0f;
+    float sigmaSg = 0.0f;
+    float sigmaSb = 0.0f;
+    float mediumG = 0.0f;
+    float ior = 1.5f;
+    float abbeNumber = 58.0f;
 };
 
 #if defined(__CUDACC__)
@@ -66,7 +65,10 @@ struct ResolvedMaterial
 
 MATERIAL_CHANNELS_FN ChannelValueKind channelValueKind(MaterialChannelId id)
 {
-    return id == MaterialChannelId::Albedo ? ChannelValueKind::Rgb : ChannelValueKind::Scalar;
+    if (id == MaterialChannelId::Albedo || id == MaterialChannelId::SigmaA || id == MaterialChannelId::SigmaS) {
+        return ChannelValueKind::Rgb;
+    }
+    return ChannelValueKind::Scalar;
 }
 
 MATERIAL_CHANNELS_FN ChannelComposition channelDefaultComposition(
@@ -74,7 +76,7 @@ MATERIAL_CHANNELS_FN ChannelComposition channelDefaultComposition(
     float inlineScalar = 0.0f,
     uint32_t textureIndex = 0u)
 {
-    if (id == MaterialChannelId::Albedo) {
+    if (id == MaterialChannelId::Albedo || id == MaterialChannelId::SigmaA || id == MaterialChannelId::SigmaS) {
         return ChannelComposition::Replace;
     }
     if (textureIndex != 0u && inlineScalar == 0.0f) {

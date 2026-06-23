@@ -1,5 +1,7 @@
 #include "LSystemMaterialParse.h"
 
+#include "LSystemMaterials.h"
+
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -130,13 +132,6 @@ bool parse_identifier(std::string_view line, std::size_t& pos, std::string& out_
 {
     return parse_material_id_token(line, pos, out_id);
 }
-
-struct ParsedComponent
-{
-    bool isTexture = false;
-    TextureDef texture;
-    float scalar = 0.f;
-};
 
 enum class NamedValueKind
 {
@@ -439,19 +434,23 @@ std::vector<float> build_grid_params(std::string_view line, const NamedProps& pr
     {
         freqV = freqU;
     }
+    if (hasFreqV && !hasFreqU && !hasFreq)
+    {
+        freqU = freqV;
+    }
     if (hasFreq && !hasFreqU)
     {
         freqU = freqV;
     }
 
     std::vector<float> params = append_on_off_intensities(colors);
-    if (hasFreqV && (hasFreqU || hasFreq))
+    if (hasFreqV || hasFreqU || hasFreq)
     {
         params.push_back(freqU);
         params.push_back(freqV);
         params.push_back(thickness);
     }
-    else if (hasFreq || hasFreqU || hasThickness)
+    else if (hasThickness)
     {
         params.push_back(freqU);
         params.push_back(thickness);
@@ -813,80 +812,6 @@ bool parse_texture_block(std::string_view line, std::size_t& pos, TextureDef& ou
     return true;
 }
 
-bool parse_component(std::string_view line, std::size_t& pos, ParsedComponent& out_component)
-{
-    skip_ws(line, pos);
-    if (pos >= line.size())
-    {
-        return false;
-    }
-
-    if (line[pos] == '{')
-    {
-        std::size_t peek = pos + 1;
-        skip_ws(line, peek);
-        if (peek < line.size())
-        {
-            const unsigned char next = static_cast<unsigned char>(line[peek]);
-            if (std::isalpha(next) || line[peek] == '_')
-            {
-                out_component.isTexture = true;
-                return parse_texture_block(line, pos, out_component.texture);
-            }
-        }
-    }
-
-    float value = 0.f;
-    if (!parse_float(line, pos, value))
-    {
-        return false;
-    }
-
-    out_component.scalar = value;
-    return true;
-}
-
-bool parse_brace_component_list(std::string_view line, std::size_t& pos, std::vector<ParsedComponent>& comps)
-{
-    skip_ws(line, pos);
-    if (pos >= line.size() || line[pos] != '{')
-    {
-        return false;
-    }
-    ++pos;
-
-    comps.clear();
-    for (;;)
-    {
-        skip_ws(line, pos);
-        if (pos < line.size() && line[pos] == '}')
-        {
-            ++pos;
-            return true;
-        }
-
-        ParsedComponent component;
-        if (!parse_component(line, pos, component))
-        {
-            material_parse_error(line, "material declaration expected component");
-        }
-        comps.push_back(component);
-
-        skip_ws(line, pos);
-        if (pos < line.size() && line[pos] == ',')
-        {
-            ++pos;
-            continue;
-        }
-        if (pos < line.size() && line[pos] == '}')
-        {
-            ++pos;
-            return true;
-        }
-        material_parse_error(line, "material declaration expected ',' or '}'");
-    }
-}
-
 bool is_named_material_block(std::string_view line, std::size_t pos)
 {
     skip_ws(line, pos);
@@ -909,16 +834,14 @@ enum class MaterialProperty
     Albedo,
     Roughness,
     Metallic,
-    Transmission,
-    Thin,
-    Ior,
-    Subsurface,
-    Emission,
     DiffuseRoughness,
-    ScatterRadiusR,
-    ScatterRadiusG,
-    ScatterRadiusB,
     Specular,
+    Emission,
+    SigmaA,
+    SigmaS,
+    MediumG,
+    Ior,
+    Abbe,
     Unknown,
 };
 
@@ -936,59 +859,39 @@ MaterialProperty resolve_material_property(std::string_view key)
     {
         return MaterialProperty::Metallic;
     }
-    if (key == "transmission" || key == "trans")
-    {
-        return MaterialProperty::Transmission;
-    }
-    if (key == "thin")
-    {
-        return MaterialProperty::Thin;
-    }
-    if (key == "ior")
-    {
-        return MaterialProperty::Ior;
-    }
-    if (key == "subsurface" || key == "subs")
-    {
-        return MaterialProperty::Subsurface;
-    }
-    if (key == "emission" || key == "emiss" || key == "em")
-    {
-        return MaterialProperty::Emission;
-    }
     if (key == "diffuseRoughness" || key == "diffuse" || key == "diffRou")
     {
         return MaterialProperty::DiffuseRoughness;
-    }
-    if (key == "scatterRadiusR" || key == "scatterR" || key == "sR")
-    {
-        return MaterialProperty::ScatterRadiusR;
-    }
-    if (key == "scatterRadiusG" || key == "scatterG" || key == "sG")
-    {
-        return MaterialProperty::ScatterRadiusG;
-    }
-    if (key == "scatterRadiusB" || key == "scatterB" || key == "sB")
-    {
-        return MaterialProperty::ScatterRadiusB;
     }
     if (key == "specular" || key == "spec")
     {
         return MaterialProperty::Specular;
     }
-    return MaterialProperty::Unknown;
-}
-
-bool all_scalar_components(const std::vector<ParsedComponent>& comps)
-{
-    for (const ParsedComponent& component : comps)
+    if (key == "emission" || key == "emiss" || key == "em")
     {
-        if (component.isTexture)
-        {
-            return false;
-        }
+        return MaterialProperty::Emission;
     }
-    return true;
+    if (key == "sigmaA" || key == "absorption" || key == "abs")
+    {
+        return MaterialProperty::SigmaA;
+    }
+    if (key == "sigmaS" || key == "scattering" || key == "scatter" || key == "scat")
+    {
+        return MaterialProperty::SigmaS;
+    }
+    if (key == "g" || key == "anisotropy" || key == "asymmetry")
+    {
+        return MaterialProperty::MediumG;
+    }
+    if (key == "ior")
+    {
+        return MaterialProperty::Ior;
+    }
+    if (key == "abbe" || key == "dispersion")
+    {
+        return MaterialProperty::Abbe;
+    }
+    return MaterialProperty::Unknown;
 }
 
 void set_inline_scalar(MaterialChannel& channel, float value)
@@ -997,72 +900,62 @@ void set_inline_scalar(MaterialChannel& channel, float value)
     channel.scalar = value;
 }
 
+void set_inline_rgb(MaterialChannel& channel, float r, float g, float b)
+{
+    channel.mode = MaterialChannel::Mode::Inline;
+    channel.r = r;
+    channel.g = g;
+    channel.b = b;
+}
+
 void set_texture_channel(MaterialChannel& channel, const TextureDef& texture)
 {
     channel.mode = MaterialChannel::Mode::Texture;
     channel.texture = texture;
 }
 
-void assign_legacy_entry(MaterialEntry& entry, const std::vector<float>& comps)
+void init_default_entry(MaterialEntry& entry)
 {
-    entry.albedo.mode = MaterialChannel::Mode::Inline;
-    if (comps.size() >= 3u)
-    {
-        entry.albedo.r = clamp01(comps[0]);
-        entry.albedo.g = clamp01(comps[1]);
-        entry.albedo.b = clamp01(comps[2]);
-    }
-    else
-    {
-        entry.albedo.r = 0.8f;
-        entry.albedo.g = 0.8f;
-        entry.albedo.b = 0.8f;
-    }
-
-    const auto scalarAt = [&comps](std::size_t index, float defaultValue) -> float {
-        return index < comps.size() ? comps[index] : defaultValue;
-    };
-
-    set_inline_scalar(entry.roughness, clamp01(scalarAt(3u, 0.5f)));
-    set_inline_scalar(entry.metallic, clamp01(scalarAt(4u, 0.f)));
-    set_inline_scalar(entry.transmission, clamp01(scalarAt(5u, 0.f)));
-    set_inline_scalar(entry.thin, clamp01(scalarAt(6u, 0.f)));
-    set_inline_scalar(entry.ior, std::max(1.0e-3f, scalarAt(7u, 1.5f)));
-    set_inline_scalar(entry.subsurface, clamp01(scalarAt(8u, 0.f)));
-    set_inline_scalar(entry.emission, std::max(0.f, scalarAt(9u, 0.f)));
-    if (comps.size() > 10u) {
-        set_inline_scalar(entry.diffuseRoughness, clamp01(comps[10]));
-    } else {
-        set_inline_scalar(entry.diffuseRoughness, -1.f);
-    }
-    set_inline_scalar(entry.scatterRadiusR, std::max(0.f, scalarAt(11u, 0.f)));
-    set_inline_scalar(entry.scatterRadiusG, std::max(0.f, scalarAt(12u, 0.f)));
-    set_inline_scalar(entry.scatterRadiusB, std::max(0.f, scalarAt(13u, 0.f)));
-    set_inline_scalar(entry.specular, clamp01(scalarAt(14u, 1.f)));
+    set_inline_rgb(entry.albedo, 0.8f, 0.8f, 0.8f);
+    set_inline_scalar(entry.roughness, 0.5f);
+    set_inline_scalar(entry.metallic, 0.f);
+    set_inline_scalar(entry.diffuseRoughness, -1.f);
+    set_inline_scalar(entry.specular, 1.f);
+    set_inline_scalar(entry.emission, 0.f);
+    set_inline_rgb(entry.sigmaA, 0.f, 0.f, 0.f);
+    set_inline_rgb(entry.sigmaS, kMaterialDefaultSigmaS, kMaterialDefaultSigmaS, kMaterialDefaultSigmaS);
+    set_inline_scalar(entry.mediumG, 0.f);
+    set_inline_scalar(entry.ior, 1.5f);
+    set_inline_scalar(entry.abbe, 58.f);
 }
 
-void assign_scalar_channel(MaterialChannel& channel, std::size_t slotIndex, float value)
+void assign_scalar_channel(MaterialChannel& channel, MaterialProperty property, float value)
 {
-    if (slotIndex == 5u)
+    switch (property)
     {
+    case MaterialProperty::Ior:
         set_inline_scalar(channel, std::max(1.0e-3f, value));
-    }
-    else if (slotIndex == 7u)
-    {
+        break;
+    case MaterialProperty::Abbe:
+        set_inline_scalar(channel, std::max(1.0f, value));
+        break;
+    case MaterialProperty::Emission:
         set_inline_scalar(channel, std::max(0.f, value));
-    }
-    else if (slotIndex >= 9u && slotIndex <= 11u)
-    {
-        set_inline_scalar(channel, std::max(0.f, value));
-    }
-    else
-    {
+        break;
+    case MaterialProperty::MediumG:
+        set_inline_scalar(channel, std::max(-1.f, std::min(1.f, value)));
+        break;
+    case MaterialProperty::DiffuseRoughness:
+        set_inline_scalar(channel, value);
+        break;
+    default:
         set_inline_scalar(channel, clamp01(value));
+        break;
     }
 }
 
 void assign_named_scalar_or_texture(
-    MaterialChannel& channel, std::size_t slotIndex, const NamedValue& value, std::string_view line)
+    MaterialChannel& channel, MaterialProperty property, const NamedValue& value, std::string_view line)
 {
     if (value.kind == NamedValueKind::Texture)
     {
@@ -1073,187 +966,94 @@ void assign_named_scalar_or_texture(
     {
         material_parse_error(line, "channel expects scalar or texture value");
     }
-    assign_scalar_channel(channel, slotIndex, value.scalar);
+    assign_scalar_channel(channel, property, value.scalar);
+}
+
+void assign_named_rgb_or_texture(
+    MaterialChannel& channel,
+    const NamedValue& value,
+    std::string_view line,
+    bool clampAlbedo)
+{
+    if (value.kind == NamedValueKind::Texture)
+    {
+        set_texture_channel(channel, value.texture);
+        return;
+    }
+    if (value.kind == NamedValueKind::Scalar)
+    {
+        const float v = clampAlbedo ? clamp01(value.scalar) : std::max(0.f, value.scalar);
+        set_inline_rgb(channel, v, v, v);
+        return;
+    }
+    if (value.kind != NamedValueKind::FloatList || value.floats.size() != 3u)
+    {
+        material_parse_error(line, "channel requires scalar, 3 floats, or a texture value");
+    }
+    if (clampAlbedo)
+    {
+        set_inline_rgb(
+            channel,
+            clamp01(value.floats[0]),
+            clamp01(value.floats[1]),
+            clamp01(value.floats[2]));
+    }
+    else
+    {
+        set_inline_rgb(
+            channel,
+            std::max(0.f, value.floats[0]),
+            std::max(0.f, value.floats[1]),
+            std::max(0.f, value.floats[2]));
+    }
 }
 
 void assign_named_entry(std::string_view line, MaterialEntry& entry, const NamedProps& props)
 {
-    assign_legacy_entry(entry, {});
+    init_default_entry(entry);
 
     for (const auto& [key, value] : props)
     {
         switch (resolve_material_property(key))
         {
         case MaterialProperty::Albedo:
-            if (value.kind == NamedValueKind::Texture)
-            {
-                set_texture_channel(entry.albedo, value.texture);
-            }
-            else if (value.kind == NamedValueKind::Scalar)
-            {
-                entry.albedo.mode = MaterialChannel::Mode::Inline;
-                const float gray = clamp01(value.scalar);
-                entry.albedo.r = gray;
-                entry.albedo.g = gray;
-                entry.albedo.b = gray;
-            }
-            else if (value.kind == NamedValueKind::FloatList)
-            {
-                if (value.floats.size() != 3u)
-                {
-                    material_parse_error(line, "albedo requires 3 floats or a scalar gray value");
-                }
-                entry.albedo.mode = MaterialChannel::Mode::Inline;
-                entry.albedo.r = clamp01(value.floats[0]);
-                entry.albedo.g = clamp01(value.floats[1]);
-                entry.albedo.b = clamp01(value.floats[2]);
-            }
+            assign_named_rgb_or_texture(entry.albedo, value, line, true);
             break;
         case MaterialProperty::Roughness:
-            assign_named_scalar_or_texture(entry.roughness, 1u, value, line);
+            assign_named_scalar_or_texture(entry.roughness, MaterialProperty::Roughness, value, line);
             break;
         case MaterialProperty::Metallic:
-            assign_named_scalar_or_texture(entry.metallic, 2u, value, line);
-            break;
-        case MaterialProperty::Transmission:
-            assign_named_scalar_or_texture(entry.transmission, 3u, value, line);
-            break;
-        case MaterialProperty::Thin:
-            assign_named_scalar_or_texture(entry.thin, 4u, value, line);
-            break;
-        case MaterialProperty::Ior:
-            assign_named_scalar_or_texture(entry.ior, 5u, value, line);
-            break;
-        case MaterialProperty::Subsurface:
-            assign_named_scalar_or_texture(entry.subsurface, 6u, value, line);
-            break;
-        case MaterialProperty::Emission:
-            assign_named_scalar_or_texture(entry.emission, 7u, value, line);
+            assign_named_scalar_or_texture(entry.metallic, MaterialProperty::Metallic, value, line);
             break;
         case MaterialProperty::DiffuseRoughness:
-            assign_named_scalar_or_texture(entry.diffuseRoughness, 8u, value, line);
-            break;
-        case MaterialProperty::ScatterRadiusR:
-            assign_named_scalar_or_texture(entry.scatterRadiusR, 9u, value, line);
-            break;
-        case MaterialProperty::ScatterRadiusG:
-            assign_named_scalar_or_texture(entry.scatterRadiusG, 10u, value, line);
-            break;
-        case MaterialProperty::ScatterRadiusB:
-            assign_named_scalar_or_texture(entry.scatterRadiusB, 11u, value, line);
+            assign_named_scalar_or_texture(entry.diffuseRoughness, MaterialProperty::DiffuseRoughness, value, line);
             break;
         case MaterialProperty::Specular:
-            assign_named_scalar_or_texture(entry.specular, 12u, value, line);
+            assign_named_scalar_or_texture(entry.specular, MaterialProperty::Specular, value, line);
+            break;
+        case MaterialProperty::Emission:
+            assign_named_scalar_or_texture(entry.emission, MaterialProperty::Emission, value, line);
+            break;
+        case MaterialProperty::SigmaA:
+            assign_named_rgb_or_texture(entry.sigmaA, value, line, false);
+            break;
+        case MaterialProperty::SigmaS:
+            assign_named_rgb_or_texture(entry.sigmaS, value, line, false);
+            break;
+        case MaterialProperty::MediumG:
+            assign_named_scalar_or_texture(entry.mediumG, MaterialProperty::MediumG, value, line);
+            break;
+        case MaterialProperty::Ior:
+            assign_named_scalar_or_texture(entry.ior, MaterialProperty::Ior, value, line);
+            break;
+        case MaterialProperty::Abbe:
+            assign_named_scalar_or_texture(entry.abbe, MaterialProperty::Abbe, value, line);
             break;
         case MaterialProperty::Unknown:
             material_parse_error(line, "unknown material property");
             break;
         }
     }
-}
-
-void assign_component_entry(std::string_view line, MaterialEntry& entry, const std::vector<ParsedComponent>& comps)
-{
-    assign_legacy_entry(entry, {});
-
-    std::size_t index = 0;
-    if (comps.empty())
-    {
-        return;
-    }
-
-    if (comps[0].isTexture)
-    {
-        set_texture_channel(entry.albedo, comps[0].texture);
-        index = 1;
-    }
-    else
-    {
-        if (comps.size() < 3u)
-        {
-            material_parse_error(line, "material albedo requires 3 floats or a texture block");
-        }
-        entry.albedo.mode = MaterialChannel::Mode::Inline;
-        entry.albedo.r = clamp01(comps[0].scalar);
-        entry.albedo.g = clamp01(comps[1].scalar);
-        entry.albedo.b = clamp01(comps[2].scalar);
-        index = 3;
-    }
-
-    MaterialChannel* slots[] = {
-        &entry.roughness,
-        &entry.metallic,
-        &entry.transmission,
-        &entry.thin,
-        &entry.ior,
-        &entry.subsurface,
-        &entry.emission,
-        &entry.diffuseRoughness,
-        &entry.scatterRadiusR,
-        &entry.scatterRadiusG,
-        &entry.scatterRadiusB,
-        &entry.specular,
-    };
-
-    for (std::size_t slot = 0; slot < 11u && index < comps.size(); ++slot, ++index)
-    {
-        const ParsedComponent& component = comps[index];
-        if (component.isTexture)
-        {
-            set_texture_channel(*slots[slot], component.texture);
-        }
-        else
-        {
-            assign_scalar_channel(*slots[slot], slot + 1u, component.scalar);
-        }
-    }
-}
-
-void validate_component_count(std::string_view line, const std::vector<ParsedComponent>& comps)
-{
-    if (comps.empty() || comps.size() > 15u)
-    {
-        material_parse_error(
-            line,
-            "material requires 1 to 15 components "
-            "(albedo texture or r,g,b, then optional channel values)");
-    }
-
-    if (all_scalar_components(comps))
-    {
-        if (comps.size() < 3u)
-        {
-            material_parse_error(
-                line,
-                "material requires 3 to 15 scalar components "
-                "(r, g, b, [roughness], [metallic], [transmission], [thin], [ior], "
-                "[subsurface], [emission], [diffuseRoughness], [scatterRadiusR], "
-                "[scatterRadiusG], [scatterRadiusB], [specular])");
-        }
-        return;
-    }
-
-    if (!comps[0].isTexture && comps.size() < 3u)
-    {
-        material_parse_error(line, "material albedo requires 3 floats or a texture block");
-    }
-}
-
-void assign_material_entry(std::string_view line, MaterialEntry& entry, const std::vector<ParsedComponent>& comps)
-{
-    if (all_scalar_components(comps))
-    {
-        std::vector<float> legacyValues;
-        legacyValues.reserve(comps.size());
-        for (const ParsedComponent& component : comps)
-        {
-            legacyValues.push_back(component.scalar);
-        }
-        assign_legacy_entry(entry, legacyValues);
-        return;
-    }
-
-    assign_component_entry(line, entry, comps);
 }
 
 } // namespace
@@ -1313,6 +1113,12 @@ bool try_parse_material_line(std::string_view trimmed_line, std::vector<Material
     MaterialDefinition def;
     def.id = id;
 
+    skip_ws(trimmed_line, pos);
+    if (pos >= trimmed_line.size() || trimmed_line[pos] != '{')
+    {
+        material_parse_error(trimmed_line, "material declaration expected '{'");
+    }
+
     if (is_named_material_block(trimmed_line, pos))
     {
         NamedProps props;
@@ -1323,31 +1129,25 @@ bool try_parse_material_line(std::string_view trimmed_line, std::vector<Material
                 "material declaration expected named properties "
                 "(e.g. albedo: {r,g,b}, roughness: 0.5, emission: 1.0)");
         }
-
-        skip_ws(trimmed_line, pos);
-        if (pos != trimmed_line.size())
-        {
-            material_parse_error(trimmed_line, "unexpected text after material declaration");
-        }
-
-        if (material_id_defined(definitions, id))
-        {
-            material_parse_error(trimmed_line, "duplicate material id");
-        }
-
         assign_named_entry(trimmed_line, def.entry, props);
-        definitions.push_back(def);
-        return true;
     }
-
-    std::vector<ParsedComponent> comps;
-    if (!parse_brace_component_list(trimmed_line, pos, comps))
+    else
     {
-        material_parse_error(
-            trimmed_line,
-            "material declaration expected '{' "
-            "(r, g, b, [roughness], [metallic], [transmission], [thin], [ior], [subsurface], "
-            "[emission], [diffuseRoughness], [scatterRadiusR], [scatterRadiusG], [scatterRadiusB], [specular])");
+        std::size_t checkPos = pos;
+        ++checkPos;
+        skip_ws(trimmed_line, checkPos);
+        if (checkPos < trimmed_line.size() && trimmed_line[checkPos] == '}')
+        {
+            pos = checkPos + 1;
+            init_default_entry(def.entry);
+        }
+        else
+        {
+            material_parse_error(
+                trimmed_line,
+                "material declaration requires named properties "
+                "(e.g. Mat(id) = {albedo: {r,g,b}, roughness: 0.5, sigmaS: {0.3, 0.2, 0.1}, g: 0.5, ior: 1.5})");
+        }
     }
 
     skip_ws(trimmed_line, pos);
@@ -1356,14 +1156,11 @@ bool try_parse_material_line(std::string_view trimmed_line, std::vector<Material
         material_parse_error(trimmed_line, "unexpected text after material declaration");
     }
 
-    validate_component_count(trimmed_line, comps);
-
     if (material_id_defined(definitions, id))
     {
         material_parse_error(trimmed_line, "duplicate material id");
     }
 
-    assign_material_entry(trimmed_line, def.entry, comps);
     definitions.push_back(def);
     return true;
 }

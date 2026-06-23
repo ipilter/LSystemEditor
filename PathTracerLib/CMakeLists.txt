@@ -114,11 +114,14 @@ add_test(NAME PathTracerSpectral COMMAND path_tracer_spectral_tests)
 
 add_executable(path_tracer_principled_brdf_tests tests/PathTracerPrincipledBrdfTests.cpp)
 target_link_libraries(path_tracer_principled_brdf_tests PRIVATE PathTracerLib)
+target_compile_definitions(path_tracer_principled_brdf_tests PRIVATE
+    "PATHTRACER_RGB2SPEC_COEFF_PATH=\"${PATHTRACER_LIB_DIR}/src/Spectral/srgb.coeff\"")
 target_include_directories(path_tracer_principled_brdf_tests PRIVATE
     "${PATHTRACER_LIB_INCLUDE_DIR}"
     "${PATHTRACER_LIB_INCLUDE_DIR}/Brdf"
     "${PATHTRACER_LIB_INCLUDE_DIR}/Geometry"
-    "${PATHTRACER_LIB_INCLUDE_DIR}/MeshAccel")
+    "${PATHTRACER_LIB_INCLUDE_DIR}/MeshAccel"
+    "${PATHTRACER_LIB_INCLUDE_DIR}/Spectral")
 set_target_properties(path_tracer_principled_brdf_tests PROPERTIES FOLDER "PathTracerLib/tests")
 add_test(NAME PathTracerPrincipledBrdf COMMAND path_tracer_principled_brdf_tests)
 

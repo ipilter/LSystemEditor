@@ -7,6 +7,7 @@
 #include "SceneModel.h"
 #include "SceneUnits.h"
 
+#include <QCursor>
 #include <QFocusEvent>
 #include <QKeyEvent>
 #include <QMetaObject>
@@ -219,6 +220,7 @@ OpenGLViewportWidget::OpenGLViewportWidget(QWidget* parent)
 
 OpenGLViewportWidget::~OpenGLViewportWidget()
 {
+    endCameraDrag();
     makeCurrent();
     releaseGlResources();
     doneCurrent();
@@ -728,6 +730,61 @@ void OpenGLViewportWidget::drawRegionOverlayLines(const glm::mat4& viewProj, con
     m_regionOverlay.draw(this, viewProj, regionPx, renderW, renderH, color);
 }
 
+void OpenGLViewportWidget::beginCameraDrag(const QPoint& widgetPos)
+{
+    if (m_cameraDragActive) {
+        endCameraDrag();
+    }
+
+    grabMouse();
+    setCursor(Qt::BlankCursor);
+    m_lastMousePos = widgetPos;
+    m_cameraDragActive = true;
+}
+
+void OpenGLViewportWidget::endCameraDrag()
+{
+    if (!m_cameraDragActive) {
+        return;
+    }
+
+    releaseMouse();
+    unsetCursor();
+    m_cameraDragActive = false;
+}
+
+QPoint OpenGLViewportWidget::cameraDragWarpCenter() const
+{
+    return rect().center();
+}
+
+void OpenGLViewportWidget::applyCameraDragDelta(const QPoint& delta)
+{
+    const float deltaYaw = static_cast<float>(-delta.x()) * m_mouseSensitivity;
+    const float deltaPitch = static_cast<float>(-delta.y()) * m_mouseSensitivity;
+
+    if (m_orbiting) {
+        m_camera.orbitAroundPoint(m_orbitPivot, deltaYaw, deltaPitch);
+    } else if (m_looking) {
+        m_camera.addEulerDelta(deltaYaw, deltaPitch, 0.0f);
+    } else {
+        return;
+    }
+
+    notifyCameraMotionChanged();
+}
+
+void OpenGLViewportWidget::warpCameraDragCursor()
+{
+    if (width() <= 0 || height() <= 0) {
+        return;
+    }
+
+    const QPoint center = cameraDragWarpCenter();
+    QCursor::setPos(mapToGlobal(center));
+    m_lastMousePos = center;
+}
+
 void OpenGLViewportWidget::mousePressEvent(QMouseEvent* event)
 {
     if (m_regionDefining && event->button() == Qt::RightButton) {
@@ -769,17 +826,17 @@ void OpenGLViewportWidget::mousePressEvent(QMouseEvent* event)
 
     if (event->button() == Qt::RightButton) {
         setFocus();
-        m_lastMousePos = event->pos();
         m_looking = true;
+        beginCameraDrag(event->pos());
         event->accept();
         return;
     }
 
     if (event->button() == Qt::MiddleButton) {
         setFocus();
-        m_lastMousePos = event->pos();
         m_orbitPivot = resolveOrbitPivot();
         m_orbiting = true;
+        beginCameraDrag(event->pos());
         event->accept();
         return;
     }
@@ -814,32 +871,13 @@ void OpenGLViewportWidget::mouseMoveEvent(QMouseEvent* event)
         return;
     }
 
-    if (m_orbiting) {
+    if (m_orbiting || m_looking) {
         const QPoint delta = event->pos() - m_lastMousePos;
-        m_lastMousePos = event->pos();
-
-        m_camera.orbitAroundPoint(
-            m_orbitPivot,
-            static_cast<float>(-delta.x()) * m_mouseSensitivity,
-            static_cast<float>(-delta.y()) * m_mouseSensitivity);
-        notifyCameraMotionChanged();
+        applyCameraDragDelta(delta);
+        warpCameraDragCursor();
         event->accept();
         return;
     }
-
-    if (!m_looking) {
-        return;
-    }
-
-    const QPoint delta = event->pos() - m_lastMousePos;
-    m_lastMousePos = event->pos();
-
-    m_camera.addEulerDelta(
-        static_cast<float>(-delta.x()) * m_mouseSensitivity,
-        static_cast<float>(-delta.y()) * m_mouseSensitivity,
-        0.0f);
-    notifyCameraMotionChanged();
-    event->accept();
 }
 
 void OpenGLViewportWidget::mouseReleaseEvent(QMouseEvent* event)
@@ -849,9 +887,11 @@ void OpenGLViewportWidget::mouseReleaseEvent(QMouseEvent* event)
         event->accept();
     } else if (event->button() == Qt::RightButton) {
         m_looking = false;
+        endCameraDrag();
         event->accept();
     } else if (event->button() == Qt::MiddleButton) {
         m_orbiting = false;
+        endCameraDrag();
         event->accept();
     }
 }
@@ -931,6 +971,7 @@ void OpenGLViewportWidget::focusOutEvent(QFocusEvent* event)
     m_cameraMotionStopDebounce.cancel();
     m_looking = false;
     m_orbiting = false;
+    endCameraDrag();
     QOpenGLWidget::focusOutEvent(event);
 }
 
@@ -1252,6 +1293,7 @@ void OpenGLViewportWidget::setRegionDefineMode(bool active)
     m_regionDefineHasAnchor = false;
     m_looking = false;
     m_orbiting = false;
+    endCameraDrag();
     emit regionDefineModeChanged(active);
     update();
 }

@@ -55,13 +55,6 @@ struct alignas(16) MaterialGpu
     float b = 0.8f;
     float roughness = 0.5f;
     float metallic = 0.0f;
-    /** @brief Transmission in [0, 1]; 0 = opaque, 1 = fully transmissive. */
-    float transmission = 0.0f;
-    /** @brief Thin shell in [0, 1]; 0 = thick medium, 1 = thin-shell translucency. */
-    float thin = 0.0f;
-    float ior = 1.5f;
-    /** @brief Subsurface influence in [0, 1]. */
-    float subsurface = 0.0f;
     /**
      * @brief Emission intensity multiplier; radiance = base_color * emission.
      * Scene-unit radiance scale (1.0 ≈ moderate area light).
@@ -69,27 +62,33 @@ struct alignas(16) MaterialGpu
     float emission = 0.0f;
     /** @brief Oren-Nayar diffuse roughness in [0, 1]; negative = use roughness. */
     float diffuseRoughness = -1.0f;
-    /** @brief Burley diffusion radius per channel in world units (mm). */
-    float scatterRadiusR = 0.0f;
-    float scatterRadiusG = 0.0f;
-    float scatterRadiusB = 0.0f;
     /** @brief Dielectric F0 multiplier in [0, 1]; 1 = physical IOR-derived F0. */
     float specular = 1.0f;
+    /** @brief Volume absorption coefficient per channel in 1/mm. */
+    float sigmaAr = 0.0f;
+    float sigmaAg = 0.0f;
+    float sigmaAb = 0.0f;
+    /** @brief Volume scattering coefficient per channel in 1/mm. */
+    float sigmaSr = 0.0f;
+    float sigmaSg = 0.0f;
+    float sigmaSb = 0.0f;
+    /** @brief Henyey-Greenstein anisotropy in [-1, 1]. */
+    float mediumG = 0.0f;
+    float ior = 1.5f;
+    /** @brief Abbe number for IOR dispersion; crown-glass default. */
+    float abbeNumber = 58.0f;
 
     /** @brief 0 = use inline field; else index into scene texture bank. */
     uint32_t albedoTex = 0;
     uint32_t roughnessTex = 0;
     uint32_t metallicTex = 0;
-    uint32_t transmissionTex = 0;
-    uint32_t thinTex = 0;
-    uint32_t iorTex = 0;
-    uint32_t subsurfaceTex = 0;
     uint32_t emissionTex = 0;
     uint32_t diffuseRoughnessTex = 0;
-    uint32_t scatterRadiusRTex = 0;
-    uint32_t scatterRadiusGTex = 0;
-    uint32_t scatterRadiusBTex = 0;
     uint32_t specularTex = 0;
+    uint32_t sigmaATex = 0;
+    uint32_t sigmaSTex = 0;
+    uint32_t mediumGTex = 0;
+    uint32_t iorTex = 0;
 };
 
 static_assert(sizeof(MaterialGpu) % alignof(MaterialGpu) == 0);

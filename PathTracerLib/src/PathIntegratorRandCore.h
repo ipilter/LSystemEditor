@@ -2,8 +2,9 @@
 
 #include "Brdf/BrdfDispatch.h"
 #include "Brdf/BrdfDebug.h"
-#include "Brdf/SubsurfaceCore.h"
 #include "Geometry/MathCore.h"
+#include "Medium/MediumProperties.h"
+#include "Medium/VolumeCore.h"
 #include "MeshAccel/MeshAccelIntersectCore.h"
 #include "MeshAccel/MeshAccelTypes.h"
 #include "RenderTypes.h"
@@ -11,6 +12,7 @@
 #include "Sampling/MisCore.h"
 #include "Sampling/RandCore.h"
 #include "SceneUnits.h"
+#include "Spectral/SpectralCore.h"
 #include "Texture/ProceduralTexture.h"
 
 #include <cmath>
@@ -26,18 +28,14 @@ namespace PathIntegratorRandDetail {
 constexpr float kRayTMax = SceneUnits::kDefaultRayTMaxMm;
 constexpr float kMinPdf = 1.0e-8f;
 constexpr float kAirIor = 1.0f;
-constexpr float kDefaultWavelengthNm = 550.0f;
+constexpr float kMediumEtaEpsilon = 1.0e-4f;
 constexpr int kRussianRouletteStartDepth = 3;
 constexpr float kMaxRussianRouletteProb = 0.95f;
 constexpr int kDefaultMaxPathDepth = 32;
 constexpr int kUnlimitedPathDepth = 256;
+constexpr int kMaxMediumScatters = 16;
 
 } // namespace PathIntegratorRandDetail
-
-PATH_INTEGRATOR_RAND_FN Vec3 vecMul3(Vec3 a, Vec3 b)
-{
-    return vecMake3(a.x * b.x, a.y * b.y, a.z * b.z);
-}
 
 PATH_INTEGRATOR_RAND_FN MaterialGpu pathIntegratorRandResolveMaterial(
     const MaterialGpu& material,
@@ -53,21 +51,14 @@ PATH_INTEGRATOR_RAND_FN MaterialGpu pathIntegratorRandResolveMaterial(
     return materialFromResolved(resolved);
 }
 
-PATH_INTEGRATOR_RAND_FN Vec3 pathIntegratorRandEmission(const MaterialGpu& material)
-{
-    return vecMake3(
-        material.r * material.emission,
-        material.g * material.emission,
-        material.b * material.emission);
-}
-
-PATH_INTEGRATOR_RAND_FN Vec3 pathIntegratorRandEvaluateEnvironmentNee(
+PATH_INTEGRATOR_RAND_FN float pathIntegratorRandEvaluateEnvironmentNee(
     Vec3 position,
     Vec3 normal,
     Vec3 wo,
     const MaterialGpu& material,
     float etaMedium,
     float wavelengthNm,
+    float throughput,
     const MeshAccelSceneGpu* scene,
     const EnvironmentMapGpu* env,
     const RenderParamsGpu* params,
@@ -76,7 +67,7 @@ PATH_INTEGRATOR_RAND_FN Vec3 pathIntegratorRandEvaluateEnvironmentNee(
     uint32_t sourceTriangleIndex)
 {
     if (brdfSkipsEnvironmentNee(material)) {
-        return vecMake3(0.0f, 0.0f, 0.0f);
+        return 0.0f;
     }
 
     float u1 = 0.0f;
@@ -86,42 +77,43 @@ PATH_INTEGRATOR_RAND_FN Vec3 pathIntegratorRandEvaluateEnvironmentNee(
     float lightPdf = 0.0f;
     const Vec3 wi = lightSampleEnvironmentOrBackground(env, params, u1, u2, lightPdf);
     if (lightPdf <= PathIntegratorRandDetail::kMinPdf) {
-        return vecMake3(0.0f, 0.0f, 0.0f);
+        return 0.0f;
     }
 
     if (lightIsOccluded(position, normal, wi, scene, hitDistanceMm, sourceTriangleIndex)) {
-        return vecMake3(0.0f, 0.0f, 0.0f);
+        return 0.0f;
     }
 
     const float cosTheta = vecMax2(0.0f, vecDot3(normal, wi));
     if (cosTheta <= 0.0f) {
-        return vecMake3(0.0f, 0.0f, 0.0f);
+        return 0.0f;
     }
 
     const BrdfContext ctx{normal, wo, material, etaMedium, wavelengthNm};
-    const Vec3 lightRadiance = lightEvalEnvironmentOrBackground(env, params, wi);
-    const Vec3 bsdf = brdfEval(ctx, wi);
+    const float lightRadiance = lightEvalEnvironmentSpectral(env, params, wi, wavelengthNm);
+    const float bsdf = brdfEvalSpectral(ctx, wi);
     const float bsdfPdfValue = brdfPdf(ctx, wi);
     const float misWeight = misBalanceWeight(lightPdf, bsdfPdfValue);
     const float scale = misWeight * cosTheta / lightPdf;
 
-    return vecMul3(bsdf, vecScale3(lightRadiance, scale));
+    return throughput * bsdf * lightRadiance * scale;
 }
 
-PATH_INTEGRATOR_RAND_FN Vec3 pathIntegratorRandEvaluateEmissiveNee(
+PATH_INTEGRATOR_RAND_FN float pathIntegratorRandEvaluateEmissiveNee(
     Vec3 position,
     Vec3 normal,
     Vec3 wo,
     const MaterialGpu& material,
     float etaMedium,
     float wavelengthNm,
+    float throughput,
     const MeshAccelSceneGpu* scene,
     curandState* rng,
     float hitDistanceMm,
     uint32_t sourceTriangleIndex)
 {
     if (scene == nullptr || scene->emissiveTriangleCount == 0) {
-        return vecMake3(0.0f, 0.0f, 0.0f);
+        return 0.0f;
     }
 
     float uTri = 0.0f;
@@ -135,75 +127,124 @@ PATH_INTEGRATOR_RAND_FN Vec3 pathIntegratorRandEvaluateEmissiveNee(
     Vec3 lightRadiance{};
     float areaPdf = 0.0f;
     if (!lightSampleEmissiveTriangle(scene, uTri, u1, u2, lightPosition, lightNormal, lightRadiance, areaPdf)) {
-        return vecMake3(0.0f, 0.0f, 0.0f);
+        return 0.0f;
     }
 
     const Vec3 toLight = vecSub3(lightPosition, position);
     const float dist2 = vecDot3(toLight, toLight);
     if (dist2 <= PathIntegratorRandDetail::kMinPdf) {
-        return vecMake3(0.0f, 0.0f, 0.0f);
+        return 0.0f;
     }
 
     const Vec3 wi = vecNormalize3(toLight);
     const float cosTheta = vecMax2(0.0f, vecDot3(normal, wi));
     const float cosLight = vecMax2(0.0f, vecDot3(lightNormal, vecScale3(wi, -1.0f)));
     if (cosTheta <= 0.0f || cosLight <= 0.0f) {
-        return vecMake3(0.0f, 0.0f, 0.0f);
+        return 0.0f;
     }
 
     if (lightIsOccludedFrom(position, wi, scene, hitDistanceMm, sourceTriangleIndex)) {
-        return vecMake3(0.0f, 0.0f, 0.0f);
+        return 0.0f;
     }
 
     const float lightPdf = areaPdf * dist2 / cosLight;
     if (lightPdf <= PathIntegratorRandDetail::kMinPdf) {
-        return vecMake3(0.0f, 0.0f, 0.0f);
+        return 0.0f;
     }
 
     const BrdfContext ctx{normal, wo, material, etaMedium, wavelengthNm};
-    const Vec3 bsdf = brdfEval(ctx, wi);
+    const float bsdf = brdfEvalSpectral(ctx, wi);
     const float bsdfPdfValue = brdfPdf(ctx, wi);
     const float misWeight = misBalanceWeight(lightPdf, bsdfPdfValue);
     const float scale = misWeight * cosTheta / lightPdf;
+    const float lightSpectral = spectralEnvironmentRadianceAtWavelength(lightRadiance, wavelengthNm);
 
-    return vecMul3(bsdf, vecScale3(lightRadiance, scale));
+    return throughput * bsdf * lightSpectral * scale;
 }
 
-PATH_INTEGRATOR_RAND_FN Vec3 pathIntegratorRandApplySubsurfaceTierB(
-    Vec3 throughput,
-    const MaterialGpu& material,
-    Vec3 normal,
-    const BrdfSampleResult& sample,
+PATH_INTEGRATOR_RAND_FN bool pathIntegratorRandTraceMediumSegment(
+    PathSpectralState& spectral,
+    Vec3& currentOrigin,
+    Vec3& currentDir,
+    MeshHit& currentHit,
+    float& etaMedium,
+    const MediumProperties& medium,
+    const MeshAccelSceneGpu* scene,
+    const EnvironmentMapGpu* env,
+    const RenderParamsGpu* params,
+    float& radiance,
     curandState* rng)
 {
-    if (!sample.subsurfaceScatter || sample.subsurfaceInternalSteps <= 0) {
-        return throughput;
+    const float sigmaA_lambda = mediumSigmaAAtWavelength(medium.sigmaA, spectral.wavelengthNm);
+    const float sigmaS_lambda = spectralGlassAbsorptionAtWavelength(
+        medium.sigmaS.x, medium.sigmaS.y, medium.sigmaS.z, spectral.wavelengthNm);
+    const float sigmaT_lambda = sigmaA_lambda + sigmaS_lambda;
+    const float scatterAlbedo = sigmaT_lambda > VolumeDetail::kMinSigmaT
+        ? sigmaS_lambda / sigmaT_lambda
+        : 0.0f;
+    const float continuationBias = SceneUnits::rayEpsilonMm(
+        0.0f,
+        scene != nullptr ? scene->sceneExtentMm : 0.0f);
+
+    for (int scatterIndex = 0; scatterIndex < PathIntegratorRandDetail::kMaxMediumScatters; ++scatterIndex) {
+        const MeshHit exitHit = meshAccelTraceRay(
+            currentOrigin,
+            currentDir,
+            scene,
+            continuationBias,
+            PathIntegratorRandDetail::kRayTMax);
+        const float tExit = exitHit.hit ? exitHit.t : PathIntegratorRandDetail::kRayTMax;
+
+        if (sigmaT_lambda < VolumeDetail::kMinSigmaT) {
+            spectral.throughput *= mediumTransmittanceAtWavelength(sigmaA_lambda, tExit);
+            if (!exitHit.hit) {
+                const float envRadiance = lightEvalEnvironmentSpectral(
+                    env, params, currentDir, spectral.wavelengthNm);
+                radiance += spectral.throughput * envRadiance;
+                return false;
+            }
+
+            currentHit = exitHit;
+            etaMedium = mediumIorAtWavelength(medium, spectral.wavelengthNm);
+            const Vec3 exitPosition = vecEvalRay(currentOrigin, currentDir, tExit);
+            const float biasSign = vecDot3(exitHit.normal, currentDir) >= 0.0f ? -1.0f : 1.0f;
+            currentOrigin = vecAdd3(exitPosition, vecScale3(exitHit.normal, biasSign * continuationBias));
+            currentHit.t = 0.0f;
+            return true;
+        }
+
+        const float uFlight = rand01(rng);
+        const float tScatter = mediumSampleFreeFlight(uFlight, sigmaT_lambda);
+
+        if (tScatter >= tExit) {
+            spectral.throughput *= mediumTransmittanceAtWavelength(sigmaA_lambda, tExit);
+            if (!exitHit.hit) {
+                const float envRadiance = lightEvalEnvironmentSpectral(
+                    env, params, currentDir, spectral.wavelengthNm);
+                radiance += spectral.throughput * envRadiance;
+                return false;
+            }
+
+            currentHit = exitHit;
+            etaMedium = mediumIorAtWavelength(medium, spectral.wavelengthNm);
+            const Vec3 exitPosition = vecEvalRay(currentOrigin, currentDir, tExit);
+            const float biasSign = vecDot3(exitHit.normal, currentDir) >= 0.0f ? -1.0f : 1.0f;
+            currentOrigin = vecAdd3(exitPosition, vecScale3(exitHit.normal, biasSign * continuationBias));
+            currentHit.t = 0.0f;
+            return true;
+        }
+
+        currentOrigin = vecEvalRay(currentOrigin, currentDir, tScatter);
+        spectral.throughput *= mediumTransmittanceAtWavelength(sigmaA_lambda, tScatter);
+        spectral.throughput *= scatterAlbedo;
+
+        float uHg1 = 0.0f;
+        float uHg2 = 0.0f;
+        rand02(rng, uHg1, uHg2);
+        currentDir = henyeyGreensteinSampleDirection(vecScale3(currentDir, -1.0f), medium.mediumG, uHg1, uHg2);
     }
 
-    const float maxRadius = brdfMaxScatterRadius(material);
-    if (maxRadius <= SubsurfaceDetail::kMinRadius) {
-        return throughput;
-    }
-
-    const Vec3 albedo = vecMake3(material.r, material.g, material.b);
-    for (int step = 0; step < sample.subsurfaceInternalSteps; ++step) {
-        float uStep1 = 0.0f;
-        float uStep2 = 0.0f;
-        rand02(rng, uStep1, uStep2);
-        const float uStep3 = rand01(rng);
-        (void)subsurfaceInternalStepDirection(normal, uStep1, uStep2);
-        const float meanFreePath = maxRadius * (-logf(vecMax2(1.0e-8f, uStep3)));
-        const float scatterSurvival = expf(-meanFreePath / maxRadius);
-        throughput = vecMul3(throughput, vecScale3(albedo, scatterSurvival));
-    }
-
-    const float exitDistance = vecLength3(sample.subsurfaceExitOffset);
-    if (exitDistance > 0.0f) {
-        const float exitFactor = expf(-exitDistance / maxRadius);
-        throughput = vecScale3(throughput, exitFactor);
-    }
-
-    return throughput;
+    return false;
 }
 
 PATH_INTEGRATOR_RAND_FN Vec3 tracePathRandFromHit(
@@ -215,8 +256,13 @@ PATH_INTEGRATOR_RAND_FN Vec3 tracePathRandFromHit(
     const EnvironmentMapGpu* env,
     curandState* rng)
 {
+    PathSpectralState spectral{};
+    spectralSampleWavelength(rand01(rng), spectral.wavelengthNm, spectral.wavelengthPdf);
+    spectral.throughput = 1.0f;
+
     if (!hit.hit) {
-        return lightEvalEnvironmentOrBackground(env, params, rayDir);
+        const float envRadiance = lightEvalEnvironmentSpectral(env, params, rayDir, spectral.wavelengthNm);
+        return spectralToRgb(envRadiance, spectral.wavelengthNm, spectral.wavelengthPdf);
     }
 
     int maxDepth = PathIntegratorRandDetail::kDefaultMaxPathDepth;
@@ -234,8 +280,7 @@ PATH_INTEGRATOR_RAND_FN Vec3 tracePathRandFromHit(
         brdfDebugFlags = params->brdfDebugFlags;
     }
 
-    Vec3 radiance = vecMake3(0.0f, 0.0f, 0.0f);
-    Vec3 throughput = vecMake3(1.0f, 1.0f, 1.0f);
+    float radiance = 0.0f;
     Vec3 currentOrigin = rayOrigin;
     Vec3 currentDir = rayDir;
     MeshHit currentHit = hit;
@@ -248,71 +293,164 @@ PATH_INTEGRATOR_RAND_FN Vec3 tracePathRandFromHit(
         const MaterialGpu sourceMaterial = lightFetchMaterial(scene, currentHit.triangleIndex);
         const MaterialGpu material = pathIntegratorRandResolveMaterial(sourceMaterial, currentHit.uv, scene);
 
-        radiance = vecAdd3(radiance, vecMul3(throughput, pathIntegratorRandEmission(material)));
+        radiance += spectral.throughput * lightEmissiveRadianceSpectral(material, spectral.wavelengthNm);
 
-        radiance = vecAdd3(
-            radiance,
-            vecMul3(
-                throughput,
-                pathIntegratorRandEvaluateEnvironmentNee(
-                    position,
-                    normal,
-                    wo,
-                    material,
-                    etaMedium,
-                    PathIntegratorRandDetail::kDefaultWavelengthNm,
-                    scene,
-                    env,
-                    params,
-                    rng,
-                    currentHit.t,
-                    currentHit.triangleIndex)));
+        radiance += pathIntegratorRandEvaluateEnvironmentNee(
+            position,
+            normal,
+            wo,
+            material,
+            etaMedium,
+            spectral.wavelengthNm,
+            spectral.throughput,
+            scene,
+            env,
+            params,
+            rng,
+            currentHit.t,
+            currentHit.triangleIndex);
 
-        radiance = vecAdd3(
-            radiance,
-            vecMul3(
-                throughput,
-                pathIntegratorRandEvaluateEmissiveNee(
-                    position,
-                    normal,
-                    wo,
-                    material,
-                    etaMedium,
-                    PathIntegratorRandDetail::kDefaultWavelengthNm,
-                    scene,
-                    rng,
-                    currentHit.t,
-                    currentHit.triangleIndex)));
+        radiance += pathIntegratorRandEvaluateEmissiveNee(
+            position,
+            normal,
+            wo,
+            material,
+            etaMedium,
+            spectral.wavelengthNm,
+            spectral.throughput,
+            scene,
+            rng,
+            currentHit.t,
+            currentHit.triangleIndex);
 
         const BrdfContext ctx{
             normal,
             wo,
             material,
             etaMedium,
-            PathIntegratorRandDetail::kDefaultWavelengthNm,
+            spectral.wavelengthNm,
             brdfDebugFlags};
 
         float u1 = 0.0f;
         float u2 = 0.0f;
         rand02(rng, u1, u2);
-        const BrdfSampleResult sample = brdfSample(ctx, u1, u2);
+
+        BrdfSampleResult sample{};
+        float fresnelReflectance = 0.0f;
+        bool choseReflect = true;
+        const bool opaquePath = materialIsMetallicSurface(material)
+            || mediumIsOpaque(mediumFromMaterial(material));
+        const bool volumePath = !opaquePath && materialUsesVolumeTransport(material);
+
+        if (opaquePath) {
+            sample = brdfSampleReflect(ctx, u1, u2);
+        } else {
+            fresnelReflectance = PrincipledDetail::interfaceFresnelReflectance(ctx);
+            const float uInterface = rand01(rng);
+            choseReflect = uInterface < fresnelReflectance;
+            if ((brdfDebugFlags & BrdfDebugFlags::kDisableRefract) != 0) {
+                choseReflect = true;
+            }
+            if ((brdfDebugFlags & BrdfDebugFlags::kDisableReflect) != 0) {
+                choseReflect = false;
+            }
+            if ((brdfDebugFlags & BrdfDebugFlags::kForceTransmitLobeOnly) != 0) {
+                choseReflect = false;
+            }
+
+            if (choseReflect) {
+                sample = brdfSampleReflect(ctx, u1, u2);
+            } else {
+                sample = brdfSampleRefract(ctx, u1, u2);
+                if (!sample.valid) {
+                    if ((brdfDebugFlags & BrdfDebugFlags::kDisableTirFallback) != 0) {
+                        break;
+                    }
+                    sample = brdfSampleReflect(ctx, u1, u2);
+                    choseReflect = true;
+                }
+            }
+        }
+
         if (!sample.valid || sample.pdf <= PathIntegratorRandDetail::kMinPdf) {
             break;
         }
 
-        const Vec3 bsdfValue = brdfEval(ctx, sample.direction);
-        throughput = brdfApplyThroughput(throughput, ctx, sample, bsdfValue);
-        throughput = pathIntegratorRandApplySubsurfaceTierB(throughput, material, normal, sample, rng);
+        const bool enteringMedium = sample.transmitted
+            && sample.nextMediumEta > PathIntegratorRandDetail::kAirIor + PathIntegratorRandDetail::kMediumEtaEpsilon;
 
-        if ((brdfDebugFlags & BrdfDebugFlags::kTintGlassPaths) != 0) {
-            if (sample.transmitted) {
-                throughput = vecMul3(throughput, vecMake3(0.2f, 1.0f, 0.2f));
+        if (sample.transmitted && volumePath && enteringMedium) {
+            spectral.throughput = brdfApplyInterfaceThroughputScalar(
+                spectral.throughput, fresnelReflectance, false);
+            etaMedium = sample.nextMediumEta;
+            const float continuationBias = SceneUnits::rayEpsilonMm(
+                currentHit.t,
+                scene != nullptr ? scene->sceneExtentMm : 0.0f);
+            const float biasSign = vecDot3(normal, sample.direction) >= 0.0f ? 1.0f : -1.0f;
+            currentOrigin = vecAdd3(position, vecScale3(normal, biasSign * continuationBias));
+            currentDir = sample.direction;
+
+            const MediumProperties mediumProps = mediumFromMaterial(material);
+            const bool continueSurface = pathIntegratorRandTraceMediumSegment(
+                spectral,
+                currentOrigin,
+                currentDir,
+                currentHit,
+                etaMedium,
+                mediumProps,
+                scene,
+                env,
+                params,
+                radiance,
+                rng);
+            if (!continueSurface) {
+                break;
+            }
+
+            if ((brdfDebugFlags & BrdfDebugFlags::kTintGlassPaths) != 0) {
+                spectral.throughput *= 0.47f;
+            }
+        } else {
+            if (sample.transmitted && !opaquePath) {
+                spectral.throughput = brdfApplyInterfaceThroughputScalar(
+                    spectral.throughput, fresnelReflectance, false);
             } else {
-                throughput = vecMul3(throughput, vecMake3(1.0f, 0.2f, 0.2f));
+                const float bsdfValue = brdfEvalSpectral(ctx, sample.direction);
+                spectral.throughput = brdfApplyThroughputScalar(
+                    spectral.throughput, ctx, sample, bsdfValue);
+            }
+
+            if ((brdfDebugFlags & BrdfDebugFlags::kTintGlassPaths) != 0) {
+                spectral.throughput *= 0.47f;
+            }
+
+            etaMedium = sample.nextMediumEta;
+
+            const float continuationBias = SceneUnits::rayEpsilonMm(
+                currentHit.t,
+                scene != nullptr ? scene->sceneExtentMm : 0.0f);
+
+            const float biasSign = vecDot3(normal, sample.direction) >= 0.0f ? 1.0f : -1.0f;
+            currentOrigin = vecAdd3(position, vecScale3(normal, biasSign * continuationBias));
+            currentDir = sample.direction;
+            currentHit = meshAccelTraceRay(
+                currentOrigin,
+                currentDir,
+                scene,
+                continuationBias,
+                PathIntegratorRandDetail::kRayTMax);
+            if (!currentHit.hit) {
+                const float envRadiance = lightEvalEnvironmentSpectral(
+                    env, params, currentDir, spectral.wavelengthNm);
+                const float lightPdf = lightPdfEnvironmentOrBackground(env, params, currentDir);
+                const float misWeight = misBalanceWeight(sample.pdf, lightPdf);
+                radiance += spectral.throughput * envRadiance * misWeight;
+                break;
             }
         }
 
-        const float throughputLuminance = brdfThroughputLuminance(throughput);
+        const float throughputLuminance = brdfThroughputLuminanceScalar(
+            spectral.throughput, spectral.wavelengthNm);
         if (!isfinite(throughputLuminance) || throughputLuminance <= 0.0f || throughputLuminance > 1.0e8f) {
             break;
         }
@@ -324,36 +462,11 @@ PATH_INTEGRATOR_RAND_FN Vec3 tracePathRandFromHit(
             if (rand01(rng) > survivalProb) {
                 break;
             }
-            throughput = vecScale3(throughput, 1.0f / survivalProb);
-        }
-
-        etaMedium = sample.nextMediumEta;
-
-        const float continuationBias = SceneUnits::rayEpsilonMm(
-            currentHit.t,
-            scene != nullptr ? scene->sceneExtentMm : 0.0f);
-
-        const float biasSign = vecDot3(normal, sample.direction) >= 0.0f ? 1.0f : -1.0f;
-        currentOrigin = vecAdd3(position, vecScale3(normal, biasSign * continuationBias));
-        currentDir = sample.direction;
-        currentHit = meshAccelTraceRay(
-            currentOrigin,
-            currentDir,
-            scene,
-            continuationBias,
-            PathIntegratorRandDetail::kRayTMax);
-        if (!currentHit.hit) {
-            const Vec3 envRadiance = lightEvalEnvironmentOrBackground(env, params, currentDir);
-            const float lightPdf = lightPdfEnvironmentOrBackground(env, params, currentDir);
-            const float misWeight = misBalanceWeight(sample.pdf, lightPdf);
-            radiance = vecAdd3(
-                radiance,
-                vecMul3(throughput, vecScale3(envRadiance, misWeight)));
-            break;
+            spectral.throughput /= survivalProb;
         }
     }
 
-    return radiance;
+    return spectralToRgb(radiance, spectral.wavelengthNm, spectral.wavelengthPdf);
 }
 
 PATH_INTEGRATOR_RAND_FN Vec3 tracePathRand(

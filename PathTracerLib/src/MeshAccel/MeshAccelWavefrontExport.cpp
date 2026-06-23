@@ -1,4 +1,5 @@
 #include "MeshAccelScene.h"
+#include "Medium/MediumProperties.h"
 
 #include <QDir>
 #include <QFile>
@@ -27,16 +28,16 @@ void writeMaterialEntry(QTextStream& out, uint32_t materialIndex, const Material
 {
     const float ns = specularExponentFromRoughness(material.roughness);
     const float emissionScale = material.emission > 0.0f ? material.emission : 0.0f;
-    const float opacity = 1.0f - clamp01(material.transmission);
+    const float opacity = materialIsClearMedium(material) ? 0.05f : 1.0f;
 
     out << "newmtl mat_" << materialIndex << '\n';
     out << "# PathTracer r g b: " << material.r << ' ' << material.g << ' ' << material.b << '\n';
     out << "# PathTracer roughness: " << material.roughness << '\n';
     out << "# PathTracer metallic: " << material.metallic << '\n';
-    out << "# PathTracer transmission: " << material.transmission << '\n';
-    out << "# PathTracer thin: " << material.thin << '\n';
+    out << "# PathTracer sigmaS: " << material.sigmaSr << ' ' << material.sigmaSg << ' ' << material.sigmaSb << '\n';
+    out << "# PathTracer sigmaA: " << material.sigmaAr << ' ' << material.sigmaAg << ' ' << material.sigmaAb << '\n';
+    out << "# PathTracer mediumG: " << material.mediumG << '\n';
     out << "# PathTracer ior: " << material.ior << '\n';
-    out << "# PathTracer subsurface: " << material.subsurface << '\n';
 
     out << "Ka " << material.r * 0.2f << ' ' << material.g * 0.2f << ' ' << material.b * 0.2f << '\n';
     out << "Kd " << material.r << ' ' << material.g << ' ' << material.b << '\n';

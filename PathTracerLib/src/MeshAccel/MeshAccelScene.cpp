@@ -3,6 +3,8 @@
 #include "MeshBvhBuilder.h"
 #include "Geometry/MathCore.h"
 #include "Mesh.h"
+#include "Medium/MediumProperties.h"
+#include "Texture/ProceduralTexture.h"
 
 #include <cuda_runtime.h>
 #include <type_traits>
@@ -35,14 +37,11 @@ MaterialGpu defaultMaterial()
     material.metallic = 0.0f;
     material.emission = 0.0f;
     material.ior = 1.5f;
-    material.transmission = 0.0f;
-    material.thin = 0.0f;
-    material.subsurface = 0.0f;
     material.diffuseRoughness = -1.0f;
-    material.scatterRadiusR = 0.0f;
-    material.scatterRadiusG = 0.0f;
-    material.scatterRadiusB = 0.0f;
     material.specular = 1.0f;
+    material.sigmaSr = MediumDetail::kOpaqueSigmaS;
+    material.sigmaSg = MediumDetail::kOpaqueSigmaS;
+    material.sigmaSb = MediumDetail::kOpaqueSigmaS;
     return material;
 }
 
@@ -54,30 +53,19 @@ float triangleArea(const TriangleGpu& tri)
     return 0.5f * vecLength3(cross);
 }
 
-float materialEmissionLuminance(const MaterialGpu& material)
-{
-    return material.emission * (
-        0.2126f * material.r + 0.7152f * material.g + 0.0722f * material.b);
-}
-
-float sceneExtentFromMesh(const Mesh& mesh)
-{
-    const MeshAabb aabb = meshComputeAabb(mesh);
-    return vecMax3(
-        aabb.max.x - aabb.min.x,
-        aabb.max.y - aabb.min.y,
-        aabb.max.z - aabb.min.z);
-}
-
 void buildEmissiveTriangleList(
     const std::vector<TriangleGpu>& triangles,
     const std::vector<MaterialGpu>& materials,
+    const std::vector<TextureDescGpu>& textures,
     std::vector<uint32_t>& outIndices,
     std::vector<float>& outCdf)
 {
     outIndices.clear();
     outCdf.clear();
     outCdf.push_back(0.0f);
+
+    const TextureDescGpu* textureBank = textures.empty() ? nullptr : textures.data();
+    const uint32_t textureCount = static_cast<uint32_t>(textures.size());
 
     float totalWeight = 0.0f;
     for (uint32_t triIndex = 0; triIndex < triangles.size(); ++triIndex) {
@@ -86,7 +74,7 @@ void buildEmissiveTriangleList(
             continue;
         }
         const MaterialGpu& material = materials[tri.materialIndex];
-        const float luminance = materialEmissionLuminance(material);
+        const float luminance = estimateMaterialEmissionLuminance(material, textureBank, textureCount);
         if (luminance <= 0.0f) {
             continue;
         }
@@ -102,6 +90,15 @@ void buildEmissiveTriangleList(
     if (totalWeight <= 0.0f) {
         outCdf.assign(1, 0.0f);
     }
+}
+
+float sceneExtentFromMesh(const Mesh& mesh)
+{
+    const MeshAabb aabb = meshComputeAabb(mesh);
+    return vecMax3(
+        aabb.max.x - aabb.min.x,
+        aabb.max.y - aabb.min.y,
+        aabb.max.z - aabb.min.z);
 }
 
 template<typename T>
@@ -182,7 +179,7 @@ bool MeshAccelScene::build(const Mesh& mesh)
         return false;
     }
 
-    buildEmissiveTriangleList(m_triangles, m_materials, m_emissiveTriangleIndices, m_emissiveTriangleCdf);
+    buildEmissiveTriangleList(m_triangles, m_materials, m_textures, m_emissiveTriangleIndices, m_emissiveTriangleCdf);
 
     const float sceneExtentMm = sceneExtentFromMesh(mesh);
 
