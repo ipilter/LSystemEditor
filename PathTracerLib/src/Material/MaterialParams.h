@@ -14,7 +14,7 @@
 namespace MaterialParamsDetail {
 
 constexpr float kMinSigmaT = 1.0e-6f;
-constexpr float kMinMeanFreePathMm = 0.001f;
+constexpr float kMinMeanFreePathMm = 0.01f;
 
 } // namespace MaterialParamsDetail
 
@@ -37,6 +37,27 @@ struct PhysicalMediumCoeffs
 MATERIAL_PARAMS_FN float materialAlbedoChannel(float rgb, float sigmaS, float sigmaT)
 {
     return sigmaT > MaterialParamsDetail::kMinSigmaT ? sigmaS / sigmaT : rgb;
+}
+
+MATERIAL_PARAMS_FN float materialScatterDistanceChannel(const MaterialGpu& material, int channelIndex)
+{
+    float sigmaT = 0.0f;
+    float radius = 1.0f;
+    if (channelIndex < 1) {
+        sigmaT = vecMax2(0.0f, material.sigmaAr) + vecMax2(0.0f, material.sigmaSr);
+        radius = material.subsurfaceRadiusR;
+    } else if (channelIndex < 2) {
+        sigmaT = vecMax2(0.0f, material.sigmaAg) + vecMax2(0.0f, material.sigmaSg);
+        radius = material.subsurfaceRadiusG;
+    } else {
+        sigmaT = vecMax2(0.0f, material.sigmaAb) + vecMax2(0.0f, material.sigmaSb);
+        radius = material.subsurfaceRadiusB;
+    }
+
+    if (sigmaT > MaterialParamsDetail::kMinSigmaT) {
+        return vecMax2(1.0f / sigmaT, MaterialParamsDetail::kMinMeanFreePathMm);
+    }
+    return vecMax2(radius, MaterialParamsDetail::kMinMeanFreePathMm);
 }
 
 MATERIAL_PARAMS_FN PhysicalMediumCoeffs materialToPhysicalMedium(
@@ -64,9 +85,16 @@ MATERIAL_PARAMS_FN PhysicalMediumCoeffs materialToPhysicalMedium(
             vecMax2(0.0f, material.sigmaSg),
             vecMax2(0.0f, material.sigmaSb));
     } else if (sub > 1.0e-6f) {
-        const float radiusR = vecMax2(material.subsurfaceRadiusR * sub, MaterialParamsDetail::kMinMeanFreePathMm);
-        const float radiusG = vecMax2(material.subsurfaceRadiusG * sub, MaterialParamsDetail::kMinMeanFreePathMm);
-        const float radiusB = vecMax2(material.subsurfaceRadiusB * sub, MaterialParamsDetail::kMinMeanFreePathMm);
+        const float scatterScale = vecMax2(material.subsurfaceScatterScale, 1.0e-6f);
+        const float radiusR = vecMax2(
+            materialScatterDistanceChannel(material, 0) * sub * scatterScale,
+            MaterialParamsDetail::kMinMeanFreePathMm);
+        const float radiusG = vecMax2(
+            materialScatterDistanceChannel(material, 1) * sub * scatterScale,
+            MaterialParamsDetail::kMinMeanFreePathMm);
+        const float radiusB = vecMax2(
+            materialScatterDistanceChannel(material, 2) * sub * scatterScale,
+            MaterialParamsDetail::kMinMeanFreePathMm);
 
         coeffs.sigmaT = vecMake3(1.0f / radiusR, 1.0f / radiusG, 1.0f / radiusB);
 

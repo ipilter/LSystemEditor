@@ -50,6 +50,9 @@ public:
     int russianRouletteMinDepth() const;
     void setRussianRouletteMinDepth(int value);
 
+    int maxSubsurfaceScatters() const;
+    void setMaxSubsurfaceScatters(int value);
+
     RenderViewOverlayMode boundsOverlayMode() const;
     void setBoundsOverlayMode(RenderViewOverlayMode mode);
 
@@ -70,6 +73,9 @@ public:
 
     float environmentIntensity() const;
     void setEnvironmentIntensity(float value);
+
+    int environmentRotationY() const;
+    void setEnvironmentRotationY(int degrees);
 
     float fStop() const;
     void setFStop(float value);
@@ -121,12 +127,14 @@ signals:
     void relativeErrorThresholdChanged(float value);
     void previewStepsPerLevelChanged(int value);
     void russianRouletteMinDepthChanged(int value);
+    void maxSubsurfaceScattersChanged(int value);
     void boundsOverlayModeChanged(RenderViewOverlayMode mode);
     void brdfDebugFlagsChanged(int flags);
     void sceneOverlayVisibleChanged(bool visible);
     void accelBvhColorChanged(const QColor& color);
     void environmentHdrPathChanged(const QString& path);
     void environmentIntensityChanged(float value);
+    void environmentRotationYChanged(int degrees);
     void fStopChanged(float value);
     void focalLengthMmChanged(float value);
     void shutterSpeedSecondsChanged(float value);
@@ -147,6 +155,7 @@ private:
     static float clampRelativeErrorThreshold(float value);
     static int clampPreviewSteps(int value);
     static int clampRussianRouletteMinDepth(int value);
+    static int clampMaxSubsurfaceScatters(int value);
     static float clampCreaseAngleDeg(float value);
     static float clampFStop(float value);
     static float clampFocalLengthMm(float value);
@@ -154,6 +163,7 @@ private:
     static float clampIso(float value);
     static float clampFocusDistanceMm(float value);
     static float clampEnvironmentIntensity(float value);
+    static int clampEnvironmentRotationY(int degrees);
     static QRect normalizeRegionRect(int minX, int minY, int maxX, int maxY, int renderW, int renderH);
     void clampRegionToRenderSize();
 
@@ -164,6 +174,7 @@ private:
     float m_relativeErrorThreshold = 0.02f;
     int m_previewStepsPerLevel = 2;
     int m_russianRouletteMinDepth = 3;
+    int m_maxSubsurfaceScatters = 8;
     RenderViewOverlayMode m_renderViewOverlayMode = RenderViewOverlayMode::Render;
     int m_brdfDebugFlags = 0;
     bool m_sceneOverlayVisible = true;
@@ -171,6 +182,7 @@ private:
     float m_creaseAngleDeg = 50.0f;
     QString m_environmentHdrPath;
     float m_environmentIntensity = 1.0f;
+    int m_environmentRotationY = 0;
     float m_fStop = 0.0f;
     float m_focalLengthMm = 0.0f;
     float m_shutterSpeedSeconds = 0.0f;

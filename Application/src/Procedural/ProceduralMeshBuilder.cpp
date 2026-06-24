@@ -78,6 +78,17 @@ uint32_t materialTypeFromName(const std::string& typeName)
     return static_cast<uint32_t>(MaterialType::Opaque);
 }
 
+uint32_t resolveMaterialType(const MaterialEntry& entry)
+{
+    if (entry.typeName != "Opaque") {
+        return materialTypeFromName(entry.typeName);
+    }
+    if (materialChannelScalar(entry.emission) > 1.0e-6f) {
+        return static_cast<uint32_t>(MaterialType::Emissive);
+    }
+    return static_cast<uint32_t>(MaterialType::Opaque);
+}
+
 MaterialGpu toMaterialGpu(const MaterialEntry& entry, std::vector<TextureDescGpu>& bank)
 {
     MaterialGpu material{};
@@ -89,11 +100,13 @@ MaterialGpu toMaterialGpu(const MaterialEntry& entry, std::vector<TextureDescGpu
     material.emission = materialChannelScalar(entry.emission);
     material.diffuseRoughness = materialChannelScalar(entry.diffuseRoughness, -1.0f);
     material.specular = materialChannelScalar(entry.specular, 1.0f);
-    material.materialType = materialTypeFromName(entry.typeName);
+    material.materialType = resolveMaterialType(entry);
     material.subsurface = materialChannelScalar(entry.subsurface, 0.0f);
     material.subsurfaceRadiusR = materialChannelR(entry.subsurfaceRadius, 1.0f);
     material.subsurfaceRadiusG = materialChannelG(entry.subsurfaceRadius, 1.0f);
     material.subsurfaceRadiusB = materialChannelB(entry.subsurfaceRadius, 1.0f);
+    material.subsurfaceScatterScale = materialChannelScalar(entry.subsurfaceScatterScale, 1.0f);
+    material.mediumG = materialChannelScalar(entry.mediumG, 0.0f);
     material.ior = materialChannelScalar(entry.ior, 1.5f);
     material.abbeNumber = materialChannelScalar(entry.abbe, 58.0f);
 

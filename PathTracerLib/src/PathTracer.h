@@ -68,6 +68,12 @@ public:
     /// Synchronous publish for one-off refresh (e.g. overlay toggle). Blocks until GPU copy completes.
     bool publishDisplayFrame(int slot);
 
+    /// Viewport display decimation (1, 2, or 4). Full-res accumulator unchanged; PBO/GL upload uses reduced size.
+    void setDisplayPublishDownscale(int factor);
+    int displayPublishDownscale() const;
+    int displayPublishWidth() const;
+    int displayPublishHeight() const;
+
     /// Full-resolution sample iterations only (0 = unlimited). Total kernel launches = preview + max.
     void setMaxSamplesPerPixel(int max);
     int maxSamplesPerPixel() const;
@@ -89,6 +95,10 @@ public:
     /// with shallow path tracing before full-resolution accumulation.
     void setPreviewStepsPerLevel(int steps);
     int previewStepsPerLevel() const;
+
+    /// UI frame callback interval in completed sample iterations (1 = every iteration).
+    void setUiUpdateEveryNSamples(int interval);
+    int uiUpdateEveryNSamples() const;
 
     int currentSampleCount() const;
 
@@ -119,9 +129,17 @@ public:
     void setEnvironmentIntensity(float intensity);
     float environmentIntensity() const;
 
+    /// Rotates the environment map around world +Y (0–359 degrees).
+    void setEnvironmentRotationY(int degrees);
+    int environmentRotationY() const;
+
     /// Minimum path depth before Russian roulette termination (0 = from first bounce).
     void setRussianRouletteMinDepth(int depth);
     int russianRouletteMinDepth() const;
+
+    /// Cap on interior HG scatter events per subsurface random walk (1–128).
+    void setMaxSubsurfaceScatters(int count);
+    int maxSubsurfaceScatters() const;
 
     void rebuildMeshBoundsMesh(const QColor& boundsColor);
     const MeshAccelBoundsMesh& meshBoundsMesh() const;
@@ -147,6 +165,7 @@ private:
     void renderLoop();
     void notifyWorker();
     void invokeFrameReadyCallback();
+    void maybeInvokeFrameReadyCallback();
 
     std::unique_ptr<PathTracerDetail::PathTracerImpl> m_impl;
     std::mutex m_callbackMutex;

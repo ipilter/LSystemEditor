@@ -2,6 +2,7 @@
 
 #include "Brdf/BrdfBase.h"
 #include "Brdf/BrdfLobe.h"
+#include "Spectral/SpectralCore.h"
 
 #if defined(__CUDACC__)
 #define OREN_NAYAR_BRDF_FN __host__ __device__ inline
@@ -30,7 +31,7 @@ OREN_NAYAR_BRDF_FN Vec3 evalDiffuse(const BrdfContext& ctx, Vec3 wi)
         return vecMake3(0.0f, 0.0f, 0.0f);
     }
 
-    const BrdfLobeWeights weights = computeSurfaceLobeWeights(ctx.material);
+    const BrdfLobeWeights weights = computeReflectLobeWeights(ctx.material);
     const Vec3 base = brdfBaseColor(ctx.material);
     const float orenNayar = diffuseOrenNayarFactor(ctx, wi);
     return vecScale3(base, weights.diffuse * orenNayar * BrdfDetail::kInvPi);
@@ -38,7 +39,7 @@ OREN_NAYAR_BRDF_FN Vec3 evalDiffuse(const BrdfContext& ctx, Vec3 wi)
 
 OREN_NAYAR_BRDF_FN float pdfDiffuse(const BrdfContext& ctx, Vec3 wi)
 {
-    const BrdfLobeWeights weights = computeSurfaceLobeWeights(ctx.material);
+    const BrdfLobeWeights weights = computeReflectLobeWeights(ctx.material);
     return weights.diffuse * brdfCosineHemispherePdf(vecMax2(0.0f, vecDot3(ctx.normal, wi)));
 }
 
@@ -70,6 +71,12 @@ struct OrenNayarDiffuseBrdf : BrdfBase<OrenNayarDiffuseBrdf>
     OREN_NAYAR_BRDF_FN float pdfImpl(const BrdfContext& ctx, Vec3 wi) const
     {
         return OrenNayarDetail::pdfDiffuse(ctx, wi);
+    }
+
+    OREN_NAYAR_BRDF_FN float evalSpectral(const BrdfContext& ctx, Vec3 wi) const
+    {
+        const Vec3 rgb = evalImpl(ctx, wi);
+        return spectralRgbToScalar(rgb.x, rgb.y, rgb.z, ctx.wavelengthNm);
     }
 };
 

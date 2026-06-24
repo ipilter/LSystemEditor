@@ -1,6 +1,8 @@
 #pragma once
 
 #include "Brdf/BrdfDispatch.h"
+#include "Brdf/BrdfLobe.h"
+#include "Bssrdf/BssrdfCore.h"
 #include "Geometry/MathCore.h"
 #include "Material/MaterialType.h"
 #include "MeshAccel/MeshAccelIntersectCore.h"
@@ -11,6 +13,8 @@
 #include "Sampling/MisCore.h"
 #include "Sampling/RandCore.h"
 #include "SceneUnits.h"
+#include "Spectral/SpectralCore.h"
+#include "Subsurface/SubsurfaceTransportCore.h"
 #include "Texture/ProceduralTexture.h"
 
 #include <cmath>
@@ -46,9 +50,18 @@ PATH_INTEGRATOR_CORE_FN MaterialGpu pathIntegratorResolveMaterial(
     MaterialGpu result = materialFromResolved(resolved);
     result.materialType = material.materialType;
     result.subsurface = material.subsurface;
-    result.subsurfaceRadiusR = material.subsurfaceRadiusR;
-    result.subsurfaceRadiusG = material.subsurfaceRadiusG;
-    result.subsurfaceRadiusB = material.subsurfaceRadiusB;
+    result.subsurfaceScatterScale = material.subsurfaceScatterScale;
+    result.mediumG = material.mediumG;
+
+    if (material.sigmaSTex != 0u || material.sigmaATex != 0u) {
+        result.subsurfaceRadiusR = materialScatterDistanceChannel(result, 0);
+        result.subsurfaceRadiusG = materialScatterDistanceChannel(result, 1);
+        result.subsurfaceRadiusB = materialScatterDistanceChannel(result, 2);
+    } else {
+        result.subsurfaceRadiusR = material.subsurfaceRadiusR;
+        result.subsurfaceRadiusG = material.subsurfaceRadiusG;
+        result.subsurfaceRadiusB = material.subsurfaceRadiusB;
+    }
     return result;
 }
 
@@ -216,7 +229,7 @@ PATH_INTEGRATOR_CORE_FN Vec3 tracePathCoreFromHit(
     curandState* rng)
 {
     PathState path{};
-    path.throughput = vecMake3(1.0f, 1.0f, 1.0f);
+    pathStateInitSpectral(path, rng);
 
     if (!hit.hit) {
         return lightEvalEnvironmentOrBackground(env, params, rayDir);
@@ -236,6 +249,7 @@ PATH_INTEGRATOR_CORE_FN Vec3 tracePathCoreFromHit(
     }
 
     Vec3 radiance = vecMake3(0.0f, 0.0f, 0.0f);
+    float sssRadiance = 0.0f;
     Vec3 currentOrigin = rayOrigin;
     Vec3 currentDir = rayDir;
     MeshHit currentHit = hit;
@@ -254,6 +268,8 @@ PATH_INTEGRATOR_CORE_FN Vec3 tracePathCoreFromHit(
                 path.throughput.x * emission.x,
                 path.throughput.y * emission.y,
                 path.throughput.z * emission.z));
+        sssRadiance += path.sssThroughput
+            * lightEmissiveRadianceSpectral(material, path.wavelengthNm);
 
         radiance = vecAdd3(
             radiance,
@@ -283,36 +299,140 @@ PATH_INTEGRATOR_CORE_FN Vec3 tracePathCoreFromHit(
                 currentHit.t,
                 currentHit.triangleIndex));
 
-        const BrdfContext ctx{normal, wo, material, 1.0f, 550.0f, 0};
-
-        float u1 = 0.0f;
-        float u2 = 0.0f;
-        rand02(rng, u1, u2);
-        const BrdfSampleResult sample = brdfSampleReflect(ctx, u1, u2);
-
-        if (!sample.valid || sample.pdf <= PathIntegratorCoreDetail::kMinPdf) {
-            break;
-        }
-
+        const BrdfLobeWeights lobeWeights = computeSurfaceLobeWeights(material);
         const float continuationBias = SceneUnits::rayEpsilonMm(
             currentHit.t,
             scene != nullptr ? scene->sceneExtentMm : 0.0f);
 
-        if (!pathIntegratorContinueAfterTrace(
-                path,
-                radiance,
-                ctx,
-                sample,
+        const float lobeU = rand01(rng);
+        if (bssrdfEnabled(material) && lobeU < lobeWeights.subsurface) {
+            const float lobePdf = vecMax2(lobeWeights.subsurface, PathIntegratorCoreDetail::kMinPdf);
+            path.sssThroughput *= lobeWeights.subsurface / lobePdf;
+            path.throughput = vecScale3(path.throughput, 1.0f - lobeWeights.subsurface);
+
+            const SubsurfaceTransportResult sssResult = SubsurfaceTransportDetail::subsurfaceTransport(
                 position,
                 normal,
-                currentOrigin,
-                currentDir,
-                currentHit,
+                material,
+                path.sssThroughput,
+                path.wavelengthNm,
                 scene,
                 env,
                 params,
-                continuationBias)) {
-            break;
+                rng,
+                currentHit.t,
+                currentHit.triangleIndex);
+
+            if (!sssResult.valid) {
+                break;
+            }
+
+            sssRadiance += sssResult.sssRadiance;
+
+            const Vec3 sssRgb = spectralToRgb(
+                sssResult.sssThroughput, path.wavelengthNm, path.wavelengthPdf);
+            path.throughput = vecAdd3(path.throughput, sssRgb);
+            path.sssThroughput = 1.0f;
+
+            const MaterialGpu exitSourceMaterial = lightFetchMaterial(scene, sssResult.exitHit.triangleIndex);
+            const MaterialGpu exitMaterial = pathIntegratorResolveMaterial(
+                exitSourceMaterial, sssResult.exitHit.uv, scene);
+
+            radiance = vecAdd3(
+                radiance,
+                pathIntegratorEvaluateEnvironmentNee(
+                    sssResult.exitPosition,
+                    sssResult.exitNormal,
+                    sssResult.exitWo,
+                    exitMaterial,
+                    path.throughput,
+                    scene,
+                    env,
+                    params,
+                    rng,
+                    sssResult.exitHit.t,
+                    sssResult.exitHit.triangleIndex));
+
+            radiance = vecAdd3(
+                radiance,
+                pathIntegratorEvaluateEmissiveNee(
+                    sssResult.exitPosition,
+                    sssResult.exitNormal,
+                    sssResult.exitWo,
+                    exitMaterial,
+                    path.throughput,
+                    scene,
+                    rng,
+                    sssResult.exitHit.t,
+                    sssResult.exitHit.triangleIndex));
+
+            const BrdfContext exitCtx{
+                sssResult.exitNormal,
+                sssResult.exitWo,
+                exitMaterial,
+                1.0f,
+                path.wavelengthNm,
+                0};
+
+            float u1 = 0.0f;
+            float u2 = 0.0f;
+            rand02(rng, u1, u2);
+            const BrdfSampleResult exitSample = brdfSampleReflect(exitCtx, u1, u2);
+            if (!exitSample.valid || exitSample.pdf <= PathIntegratorCoreDetail::kMinPdf) {
+                break;
+            }
+
+            if (!pathIntegratorContinueAfterTrace(
+                    path,
+                    radiance,
+                    exitCtx,
+                    exitSample,
+                    sssResult.exitPosition,
+                    sssResult.exitNormal,
+                    currentOrigin,
+                    currentDir,
+                    currentHit,
+                    scene,
+                    env,
+                    params,
+                    continuationBias)) {
+                break;
+            }
+        } else {
+            const float surfacePdf = vecMax2(
+                1.0f - lobeWeights.subsurface, PathIntegratorCoreDetail::kMinPdf);
+            if (surfacePdf <= PathIntegratorCoreDetail::kMinPdf) {
+                break;
+            }
+
+            const BrdfContext ctx{normal, wo, material, 1.0f, path.wavelengthNm, 0};
+
+            float u1 = 0.0f;
+            float u2 = 0.0f;
+            rand02(rng, u1, u2);
+            const float surfaceU = (lobeU - lobeWeights.subsurface) / surfacePdf;
+            const BrdfSampleResult sample = brdfSampleReflect(ctx, surfaceU, u2);
+
+            if (!sample.valid || sample.pdf <= PathIntegratorCoreDetail::kMinPdf) {
+                break;
+            }
+
+            if (!pathIntegratorContinueAfterTrace(
+                    path,
+                    radiance,
+                    ctx,
+                    sample,
+                    position,
+                    normal,
+                    currentOrigin,
+                    currentDir,
+                    currentHit,
+                    scene,
+                    env,
+                    params,
+                    continuationBias)) {
+                break;
+            }
         }
 
         const float throughputLuminance = brdfThroughputLuminance(path.throughput);
@@ -328,10 +448,11 @@ PATH_INTEGRATOR_CORE_FN Vec3 tracePathCoreFromHit(
                 break;
             }
             path.throughput = vecScale3(path.throughput, 1.0f / survivalProb);
+            path.sssThroughput /= survivalProb;
         }
     }
 
-    return radiance;
+    return pathStateCombineRadiance(radiance, sssRadiance, path);
 }
 
 PATH_INTEGRATOR_CORE_FN Vec3 tracePathCore(

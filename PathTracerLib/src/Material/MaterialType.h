@@ -85,7 +85,7 @@ MATERIAL_TYPE_FN bool materialIsSubsurfaceType(const MaterialGpu& material)
 
 MATERIAL_TYPE_FN bool materialHasParticipatingMedium(const MaterialGpu& material)
 {
-    if (materialIsSubsurfaceType(material) && material.subsurface > 1.0e-6f) {
+    if (material.subsurface > 1.0e-6f) {
         return true;
     }
     const float maxSigmaT = vecMax2(

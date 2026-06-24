@@ -17,10 +17,14 @@ constexpr int kMinPreviewStepsPerLevel = 0;
 constexpr int kMaxPreviewStepsPerLevel = 8;
 constexpr int kMinRussianRouletteMinDepth = 0;
 constexpr int kMaxRussianRouletteMinDepth = 64;
+constexpr int kMinMaxSubsurfaceScatters = 1;
+constexpr int kMaxMaxSubsurfaceScatters = 128;
 constexpr float kMinCreaseAngleDeg = 0.0f;
 constexpr float kMaxCreaseAngleDeg = 180.0f;
 constexpr float kMinEnvironmentIntensity = 0.0f;
 constexpr float kMaxEnvironmentIntensity = 100.0f;
+constexpr int kMinEnvironmentRotationY = 0;
+constexpr int kMaxEnvironmentRotationY = 359;
 constexpr int kMinMinSamples = 1;
 constexpr int kMaxMinSamples = 10'000;
 constexpr float kMinRelativeErrorThreshold = 0.001f;
@@ -38,10 +42,12 @@ SceneModel::SceneModel(QObject* parent)
     , m_relativeErrorThreshold(AppSettings::instance().relativeErrorThreshold())
     , m_previewStepsPerLevel(AppSettings::instance().previewStepsPerLevel())
     , m_russianRouletteMinDepth(AppSettings::instance().russianRouletteMinDepth())
+    , m_maxSubsurfaceScatters(AppSettings::instance().maxSubsurfaceScatters())
     , m_accelBvhColor(AppSettings::instance().accelBvhColor())
     , m_creaseAngleDeg(AppSettings::instance().creaseAngleDeg())
     , m_environmentHdrPath(AppSettings::instance().environmentHdrPath())
     , m_environmentIntensity(AppSettings::instance().environmentIntensity())
+    , m_environmentRotationY(AppSettings::instance().environmentRotationY())
     , m_fStop(AppSettings::instance().fStop())
     , m_focalLengthMm(AppSettings::instance().focalLengthMm())
     , m_shutterSpeedSeconds(AppSettings::instance().shutterSpeedSeconds())
@@ -185,6 +191,23 @@ void SceneModel::setRussianRouletteMinDepth(int value)
     emit russianRouletteMinDepthChanged(m_russianRouletteMinDepth);
 }
 
+int SceneModel::maxSubsurfaceScatters() const
+{
+    return m_maxSubsurfaceScatters;
+}
+
+void SceneModel::setMaxSubsurfaceScatters(int value)
+{
+    const int clamped = clampMaxSubsurfaceScatters(value);
+    if (m_maxSubsurfaceScatters == clamped) {
+        return;
+    }
+
+    m_maxSubsurfaceScatters = clamped;
+    AppSettings::instance().setMaxSubsurfaceScatters(clamped);
+    emit maxSubsurfaceScattersChanged(m_maxSubsurfaceScatters);
+}
+
 RenderViewOverlayMode SceneModel::boundsOverlayMode() const
 {
     return m_renderViewOverlayMode;
@@ -297,6 +320,23 @@ void SceneModel::setEnvironmentIntensity(float value)
     m_environmentIntensity = clamped;
     AppSettings::instance().setEnvironmentIntensity(clamped);
     emit environmentIntensityChanged(m_environmentIntensity);
+}
+
+int SceneModel::environmentRotationY() const
+{
+    return m_environmentRotationY;
+}
+
+void SceneModel::setEnvironmentRotationY(int degrees)
+{
+    const int clamped = clampEnvironmentRotationY(degrees);
+    if (m_environmentRotationY == clamped) {
+        return;
+    }
+
+    m_environmentRotationY = clamped;
+    AppSettings::instance().setEnvironmentRotationY(clamped);
+    emit environmentRotationYChanged(m_environmentRotationY);
 }
 
 float SceneModel::fStop() const
@@ -633,6 +673,17 @@ int SceneModel::clampRussianRouletteMinDepth(int value)
     return value;
 }
 
+int SceneModel::clampMaxSubsurfaceScatters(int value)
+{
+    if (value < kMinMaxSubsurfaceScatters) {
+        return kMinMaxSubsurfaceScatters;
+    }
+    if (value > kMaxMaxSubsurfaceScatters) {
+        return kMaxMaxSubsurfaceScatters;
+    }
+    return value;
+}
+
 RenderViewOverlayMode SceneModel::clampBoundsOverlayMode(RenderViewOverlayMode mode)
 {
     switch (mode) {
@@ -708,6 +759,17 @@ float SceneModel::clampEnvironmentIntensity(float value)
         return kMaxEnvironmentIntensity;
     }
     return value;
+}
+
+int SceneModel::clampEnvironmentRotationY(int degrees)
+{
+    if (degrees < kMinEnvironmentRotationY) {
+        return kMinEnvironmentRotationY;
+    }
+    if (degrees > kMaxEnvironmentRotationY) {
+        return kMaxEnvironmentRotationY;
+    }
+    return degrees;
 }
 
 QRect SceneModel::normalizeRegionRect(int minX, int minY, int maxX, int maxY, int renderW, int renderH)

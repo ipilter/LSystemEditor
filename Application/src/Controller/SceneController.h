@@ -35,6 +35,8 @@ private:
     void applyPreviewStepsFromSpinBox();
     void onRussianRouletteMinDepthSpinBoxChanged();
     void syncRussianRouletteMinDepthSpinBox();
+    void onMaxSubsurfaceScattersSpinBoxChanged();
+    void syncMaxSubsurfaceScattersSpinBox();
     void onBoundsOverlayComboBoxChanged();
     void onBrdfDebugComboBoxChanged();
     void onSceneOverlayCheckBoxChanged();
@@ -51,7 +53,10 @@ private:
     void onEnvironmentIntensitySpinBoxChanged(double value);
     void syncEnvironmentIntensitySpinBox();
     void syncEnvironmentIntensityEnabled();
+    void onEnvironmentRotationYSpinBoxChanged(int value);
+    void syncEnvironmentRotationYSpinBox();
     void onIterationChangedForAutoExposure(int sampleCount);
+    void onApplicationShuttingDown();
     void applyAccumulatorExposureRefine(bool ok, PhysicalCamera suggested);
     void applyPhysicalCameraToViewport();
     void applySuggestedPhysicalCameraFromHdr();
@@ -85,5 +90,6 @@ private:
     DebounceTimer m_physicalCameraDebounce;
     bool m_pendingFrameAutoExposure = false;
     bool m_pendingAccumulatorExposureRefine = false;
+    std::atomic<bool> m_applicationActive{true};
     std::atomic<bool> m_autoExposureComputeRunning{false};
 };

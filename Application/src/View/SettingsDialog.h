@@ -21,6 +21,7 @@ private:
     QSpinBox* m_renderSizeSpinDebounceSpinBox = nullptr;
     QSpinBox* m_maxSamplesSpinDebounceSpinBox = nullptr;
     QSpinBox* m_physicalCameraDebounceSpinBox = nullptr;
+    QSpinBox* m_uiUpdateEveryNSamplesSpinBox = nullptr;
     QDoubleSpinBox* m_cameraLinearSpeedSpinBox = nullptr;
     QDoubleSpinBox* m_cameraAngularSpeedSpinBox = nullptr;
     QDoubleSpinBox* m_cameraMouseSensitivitySpinBox = nullptr;

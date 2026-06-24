@@ -472,6 +472,7 @@ __global__ void writeDisplayToPboKernel(
     int sourceHeight,
     int downscale,
     bool useAccumulator,
+    int publishDownscale,
     const RenderParamsGpu* params,
     float exposure)
 {
@@ -484,8 +485,21 @@ __global__ void writeDisplayToPboKernel(
     int sourceIndex = y * outputWidth + x;
     if (downscale > 1 && sourceWidth > 0 && sourceHeight > 0) {
         const int clampedDownscale = downscale < 1 ? 1 : downscale;
-        const int px = x / clampedDownscale;
-        const int py = y / clampedDownscale;
+        int mapX = x;
+        int mapY = y;
+        if (!useAccumulator && publishDownscale > 1) {
+            mapX = x * publishDownscale;
+            mapY = y * publishDownscale;
+        }
+        int px = 0;
+        int py = 0;
+        if (outputWidth * clampedDownscale <= sourceWidth) {
+            px = mapX * clampedDownscale;
+            py = mapY * clampedDownscale;
+        } else {
+            px = mapX / clampedDownscale;
+            py = mapY / clampedDownscale;
+        }
         const int clampedPx = px < sourceWidth ? px : sourceWidth - 1;
         const int clampedPy = py < sourceHeight ? py : sourceHeight - 1;
         sourceIndex = clampedPy * sourceWidth + clampedPx;
@@ -897,6 +911,7 @@ bool pathTracerCopyToPbo(
     uchar4* pbo,
     int width,
     int height,
+    int publishDownscale,
     const RenderParamsGpu* d_params,
     float exposure,
     cudaStream_t stream)
@@ -905,19 +920,27 @@ bool pathTracerCopyToPbo(
         return false;
     }
 
+    const int clampedDownscale = publishDownscale < 1 ? 1 : (publishDownscale > 4 ? 4 : publishDownscale);
+    const int outputWidth = width / clampedDownscale;
+    const int outputHeight = height / clampedDownscale;
+    if (outputWidth <= 0 || outputHeight <= 0) {
+        return false;
+    }
+
     const dim3 block(16, 16);
-    const dim3 grid = grid2d(width, height, block);
+    const dim3 grid = grid2d(outputWidth, outputHeight, block);
     writeDisplayToPboKernel<<<grid, block, 0, stream>>>(
         acc,
         counts,
         converged,
         pbo,
+        outputWidth,
+        outputHeight,
         width,
         height,
-        width,
-        height,
-        1,
+        clampedDownscale,
         true,
+        1,
         d_params,
         exposure);
     return checkLaunch(cudaSuccess);
@@ -931,6 +954,7 @@ bool pathTracerUpsamplePreviewToPbo(
     uchar4* pbo,
     int fullWidth,
     int fullHeight,
+    int publishDownscale,
     const RenderParamsGpu* d_params,
     float exposure,
     cudaStream_t stream)
@@ -940,19 +964,28 @@ bool pathTracerUpsamplePreviewToPbo(
         return false;
     }
 
+    const int clampedPublishDownscale =
+        publishDownscale < 1 ? 1 : (publishDownscale > 4 ? 4 : publishDownscale);
+    const int outputWidth = fullWidth / clampedPublishDownscale;
+    const int outputHeight = fullHeight / clampedPublishDownscale;
+    if (outputWidth <= 0 || outputHeight <= 0) {
+        return false;
+    }
+
     const dim3 block(16, 16);
-    const dim3 grid = grid2d(fullWidth, fullHeight, block);
+    const dim3 grid = grid2d(outputWidth, outputHeight, block);
     writeDisplayToPboKernel<<<grid, block, 0, stream>>>(
         preview,
         nullptr,
         nullptr,
         pbo,
-        fullWidth,
-        fullHeight,
+        outputWidth,
+        outputHeight,
         previewWidth,
         previewHeight,
         downscale,
         false,
+        clampedPublishDownscale,
         d_params,
         exposure);
     return checkLaunch(cudaSuccess);

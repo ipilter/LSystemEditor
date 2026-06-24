@@ -40,6 +40,7 @@ public:
     void setSceneModel(SceneModel* model);
     void setEnvironmentHdrPath(const QString& path);
     void setEnvironmentIntensity(float intensity);
+    void setEnvironmentRotationY(int degrees);
     void setPhysicalCamera(float fStop, float shutterSpeedSeconds, float iso);
     void setFocalLengthMm(float focalLengthMm);
     void setFocusDistanceMm(float distanceMm);
@@ -48,6 +49,8 @@ public:
 
     void restartRender(bool regionOnlyReset = false);
     void pauseRender();
+    void shutdown();
+    void setUiUpdateEveryNSamples(int interval);
     void setRegionDefineMode(bool active);
     bool regionDefineMode() const;
     void applyRegionRenderSettings(bool resetActiveRegion);
@@ -106,6 +109,7 @@ private:
     void emitRenderState();
     void scheduleDisplayPublishRepaint();
     int effectiveDisplayRefreshIntervalMs() const;
+    void applyDisplayPublishDownscaleForModel();
     GLuint compileShader(GLenum type, const char* source);
     GLuint linkProgram(GLuint vertexShader, GLuint fragmentShader);
     void beginCameraDrag(const QPoint& widgetPos);
@@ -151,12 +155,20 @@ private:
     bool m_textureAllocated = false;
     int m_displaySlot = 0;
     bool m_renderPaused = false;
+    bool m_shutdownComplete = false;
 
     std::atomic<bool> m_hasNewFrame{false};
     std::atomic<bool> m_frameCallbackQueued{false};
     std::atomic<bool> m_iterationCallbackQueued{false};
     std::atomic<bool> m_publishRepaintQueued{false};
+    std::atomic<bool> m_regionOverlayRepaintQueued{false};
     QElapsedTimer m_displayRefreshTimer;
+
+#ifdef PATHTRACER_PROFILE
+    int m_paintProfileSampleCount = 0;
+    qint64 m_paintProfileTotalUs = 0;
+    qint64 m_paintProfileUploadUs = 0;
+#endif
 
     GLuint m_pbos[2] = {0, 0};
 };

@@ -121,6 +121,15 @@ SettingsDialog::SettingsDialog(QWidget* parent)
         AppSettings::instance().debounceMsFor(DebounceElementIds::kPhysicalCamera));
     formLayout->addRow(QStringLiteral("Physical camera debounce:"), m_physicalCameraDebounceSpinBox);
 
+    m_uiUpdateEveryNSamplesSpinBox = new QSpinBox(this);
+    m_uiUpdateEveryNSamplesSpinBox->setRange(1, 10'000);
+    m_uiUpdateEveryNSamplesSpinBox->setToolTip(
+        QStringLiteral(
+            "Notify the viewport at most once every N completed sample iterations. "
+            "Use 1 to update every iteration; higher values reduce UI load at large resolutions."));
+    m_uiUpdateEveryNSamplesSpinBox->setValue(AppSettings::instance().uiUpdateEveryNSamples());
+    formLayout->addRow(QStringLiteral("UI update every N samples:"), m_uiUpdateEveryNSamplesSpinBox);
+
     const CameraDynamicsSettings cameraSettings = AppSettings::instance().cameraDynamicsSettings();
     auto* cameraGroup = new QGroupBox(QStringLiteral("Camera movement"), this);
     auto* cameraLayout = new QFormLayout(cameraGroup);
@@ -276,6 +285,7 @@ SettingsDialog::SettingsDialog(QWidget* parent)
         AppSettings::instance().setDebounceMs(
             DebounceElementIds::kPhysicalCamera,
             m_physicalCameraDebounceSpinBox->value());
+        AppSettings::instance().setUiUpdateEveryNSamples(m_uiUpdateEveryNSamplesSpinBox->value());
         CameraDynamicsSettings cameraDynamicsSettings{};
         cameraDynamicsSettings.linearSpeedMmPerSec =
             static_cast<float>(m_cameraLinearSpeedSpinBox->value());

@@ -97,8 +97,7 @@ MEDIUM_PROPERTIES_FN bool materialIsOpaque(const MaterialGpu& material)
 
 MEDIUM_PROPERTIES_FN bool materialUsesVolumeTransport(const MaterialGpu& material)
 {
-    (void)material;
-    return false;
+    return materialHasParticipatingMedium(material);
 }
 
 #undef MEDIUM_PROPERTIES_FN

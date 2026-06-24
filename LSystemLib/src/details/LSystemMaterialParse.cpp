@@ -139,7 +139,12 @@ enum class NamedValueKind
     FloatList,
     Texture,
     Identifier,
+    NestedProps,
 };
+
+struct NamedValue;
+
+using NamedProps = std::map<std::string, NamedValue>;
 
 struct NamedValue
 {
@@ -148,9 +153,10 @@ struct NamedValue
     std::vector<float> floats;
     TextureDef texture;
     std::string identifier;
+    NamedProps nested;
 };
 
-using NamedProps = std::map<std::string, NamedValue>;
+bool parse_named_property_map(std::string_view line, std::size_t& pos, NamedProps& out_props);
 
 bool is_named_property_start(std::string_view line, std::size_t pos)
 {
@@ -265,6 +271,12 @@ bool parse_colon_value(std::string_view line, std::size_t& pos, NamedValue& out_
                 out_value.kind = NamedValueKind::Texture;
                 return parse_texture_block(line, pos, out_value.texture);
             }
+        }
+
+        if (is_named_property_start(line, peek))
+        {
+            out_value.kind = NamedValueKind::NestedProps;
+            return parse_named_property_map(line, pos, out_value.nested);
         }
 
         out_value.kind = NamedValueKind::FloatList;
@@ -849,6 +861,7 @@ enum class MaterialProperty
     Emission,
     Subsurface,
     SubsurfaceRadius,
+    SubsurfaceScatterScale,
     SigmaA,
     SigmaS,
     MediumG,
@@ -894,6 +907,10 @@ MaterialProperty resolve_material_property(std::string_view key)
     if (key == "subsurfaceRadius" || key == "ssRadius")
     {
         return MaterialProperty::SubsurfaceRadius;
+    }
+    if (key == "scatterScale" || key == "subsurfaceScatterScale" || key == "ssScale")
+    {
+        return MaterialProperty::SubsurfaceScatterScale;
     }
     if (key == "sigmaA" || key == "absorption" || key == "abs")
     {
@@ -949,6 +966,7 @@ void init_default_entry(MaterialEntry& entry)
     set_inline_scalar(entry.emission, 0.f);
     set_inline_scalar(entry.subsurface, 0.f);
     set_inline_scalar(entry.subsurfaceRadius, 1.f);
+    set_inline_scalar(entry.subsurfaceScatterScale, 1.f);
     set_inline_rgb(entry.sigmaA, 0.f, 0.f, 0.f);
     set_inline_rgb(entry.sigmaS, 0.f, 0.f, 0.f);
     set_inline_scalar(entry.mediumG, 0.f);
@@ -979,15 +997,15 @@ void reject_deprecated_volume_property(MaterialProperty property, std::string_vi
     case MaterialProperty::SigmaA:
         material_parse_error(
             line,
-            "sigmaA/absorption is deprecated; use type: Subsurface with subsurfaceRadius (mm)");
+            "sigmaA/absorption is deprecated; use subsurface with subsurfaceRadius (mm)");
     case MaterialProperty::SigmaS:
         material_parse_error(
             line,
-            "sigmaS/scattering is deprecated; use type: Subsurface with subsurfaceRadius (mm)");
+            "sigmaS/scattering is deprecated; use subsurface with subsurfaceRadius (mm)");
     case MaterialProperty::MediumG:
         material_parse_error(
             line,
-            "g/anisotropy is deprecated for volume materials; use type: Subsurface with subsurfaceRadius");
+            "g/anisotropy is deprecated for volume materials; use subsurface block with anisotropy");
     default:
         break;
     }
@@ -1011,6 +1029,9 @@ void assign_scalar_channel(MaterialChannel& channel, MaterialProperty property, 
         break;
     case MaterialProperty::DiffuseRoughness:
         set_inline_scalar(channel, value);
+        break;
+    case MaterialProperty::SubsurfaceScatterScale:
+        set_inline_scalar(channel, std::max(1.0e-6f, value));
         break;
     default:
         set_inline_scalar(channel, clamp01(value));
@@ -1072,6 +1093,86 @@ void assign_named_rgb_or_texture(
     }
 }
 
+void assign_subsurface_block(MaterialEntry& entry, const NamedProps& props, std::string_view line)
+{
+    float radiusR = materialChannelR(entry.subsurfaceRadius);
+    float radiusG = materialChannelG(entry.subsurfaceRadius);
+    float radiusB = materialChannelB(entry.subsurfaceRadius);
+    bool hasRadiusR = false;
+    bool hasRadiusG = false;
+    bool hasRadiusB = false;
+
+    for (const auto& [key, value] : props)
+    {
+        if (key == "weight" || key == "subsurface" || key == "ss")
+        {
+            assign_named_scalar_or_texture(entry.subsurface, MaterialProperty::Subsurface, value, line);
+        }
+        else if (key == "scatterR" || key == "ssRadiusR")
+        {
+            if (value.kind != NamedValueKind::Scalar)
+            {
+                material_parse_error(line, "scatterR expects a scalar");
+            }
+            radiusR = std::max(0.f, value.scalar);
+            hasRadiusR = true;
+        }
+        else if (key == "scatterG" || key == "ssRadiusG")
+        {
+            if (value.kind != NamedValueKind::Scalar)
+            {
+                material_parse_error(line, "scatterG expects a scalar");
+            }
+            radiusG = std::max(0.f, value.scalar);
+            hasRadiusG = true;
+        }
+        else if (key == "scatterB" || key == "ssRadiusB")
+        {
+            if (value.kind != NamedValueKind::Scalar)
+            {
+                material_parse_error(line, "scatterB expects a scalar");
+            }
+            radiusB = std::max(0.f, value.scalar);
+            hasRadiusB = true;
+        }
+        else if (key == "scatterScale" || key == "subsurfaceScatterScale" || key == "ssScale")
+        {
+            assign_named_scalar_or_texture(
+                entry.subsurfaceScatterScale, MaterialProperty::SubsurfaceScatterScale, value, line);
+        }
+        else if (key == "anisotropy" || key == "g" || key == "asymmetry")
+        {
+            assign_named_scalar_or_texture(entry.mediumG, MaterialProperty::MediumG, value, line);
+        }
+        else if (key == "subsurfaceRadius" || key == "ssRadius")
+        {
+            assign_named_rgb_or_texture(entry.subsurfaceRadius, value, line, false);
+            hasRadiusR = hasRadiusG = hasRadiusB = true;
+        }
+        else
+        {
+            material_parse_error(line, "unknown subsurface block property");
+        }
+    }
+
+    if (hasRadiusR || hasRadiusG || hasRadiusB)
+    {
+        if (!hasRadiusR)
+        {
+            radiusR = materialChannelR(entry.subsurfaceRadius);
+        }
+        if (!hasRadiusG)
+        {
+            radiusG = materialChannelG(entry.subsurfaceRadius);
+        }
+        if (!hasRadiusB)
+        {
+            radiusB = materialChannelB(entry.subsurfaceRadius);
+        }
+        set_inline_rgb(entry.subsurfaceRadius, radiusR, radiusG, radiusB);
+    }
+}
+
 void assign_named_entry(std::string_view line, MaterialEntry& entry, const NamedProps& props)
 {
     init_default_entry(entry);
@@ -1105,10 +1206,21 @@ void assign_named_entry(std::string_view line, MaterialEntry& entry, const Named
             assign_named_scalar_or_texture(entry.emission, MaterialProperty::Emission, value, line);
             break;
         case MaterialProperty::Subsurface:
-            assign_named_scalar_or_texture(entry.subsurface, MaterialProperty::Subsurface, value, line);
+            if (value.kind == NamedValueKind::NestedProps)
+            {
+                assign_subsurface_block(entry, value.nested, line);
+            }
+            else
+            {
+                assign_named_scalar_or_texture(entry.subsurface, MaterialProperty::Subsurface, value, line);
+            }
             break;
         case MaterialProperty::SubsurfaceRadius:
             assign_named_rgb_or_texture(entry.subsurfaceRadius, value, line, false);
+            break;
+        case MaterialProperty::SubsurfaceScatterScale:
+            assign_named_scalar_or_texture(
+                entry.subsurfaceScatterScale, MaterialProperty::SubsurfaceScatterScale, value, line);
             break;
         case MaterialProperty::MediumG:
             assign_named_scalar_or_texture(entry.mediumG, MaterialProperty::MediumG, value, line);
@@ -1126,9 +1238,49 @@ void assign_named_entry(std::string_view line, MaterialEntry& entry, const Named
     }
 }
 
+std::string_view strip_line_comment(std::string_view raw)
+{
+    const std::size_t hash = raw.find('#');
+    if (hash != std::string_view::npos)
+    {
+        return raw.substr(0, hash);
+    }
+    return raw;
+}
+
+std::string_view trim_line(std::string_view t)
+{
+    while (!t.empty() && std::isspace(static_cast<unsigned char>(t.front())))
+    {
+        t.remove_prefix(1);
+    }
+    while (!t.empty() && std::isspace(static_cast<unsigned char>(t.back())))
+    {
+        t.remove_suffix(1);
+    }
+    return t;
+}
+
+int net_brace_delta(std::string_view text)
+{
+    int delta = 0;
+    for (char c : text)
+    {
+        if (c == '{')
+        {
+            ++delta;
+        }
+        else if (c == '}')
+        {
+            --delta;
+        }
+    }
+    return delta;
+}
+
 } // namespace
 
-bool is_material_declaration_line(std::string_view trimmed_line)
+bool is_material_declaration_start_line(std::string_view trimmed_line)
 {
     std::size_t pos = 0;
     std::string id;
@@ -1144,6 +1296,15 @@ bool is_material_declaration_line(std::string_view trimmed_line)
     ++pos;
     skip_ws(trimmed_line, pos);
     return pos < trimmed_line.size() && trimmed_line[pos] == '{';
+}
+
+bool is_material_declaration_line(std::string_view trimmed_line)
+{
+    if (!is_material_declaration_start_line(trimmed_line))
+    {
+        return false;
+    }
+    return net_brace_delta(trimmed_line) == 0;
 }
 
 bool material_id_defined(const std::vector<MaterialDefinition>& definitions, const std::string& id)
@@ -1238,30 +1399,109 @@ bool try_parse_material_line(std::string_view trimmed_line, std::vector<Material
 void parse_materials_from_lines(const std::vector<std::string_view>& lines,
     std::vector<MaterialDefinition>& definitions)
 {
+    std::string blockBuffer;
+    int braceDepth = 0;
+    bool inBlock = false;
+
     for (const std::string_view raw : lines)
     {
-        std::string_view t = raw;
-        const std::size_t hash = t.find('#');
-        if (hash != std::string_view::npos)
-        {
-            t = t.substr(0, hash);
-        }
-        while (!t.empty() && std::isspace(static_cast<unsigned char>(t.front())))
-        {
-            t.remove_prefix(1);
-        }
-        while (!t.empty() && std::isspace(static_cast<unsigned char>(t.back())))
-        {
-            t.remove_suffix(1);
-        }
+        const std::string_view t = trim_line(strip_line_comment(raw));
         if (t.empty())
         {
+            if (inBlock && braceDepth > 0)
+            {
+                continue;
+            }
             continue;
         }
-        if (is_material_declaration_line(t))
+
+        if (!inBlock)
         {
-            const bool parsed = try_parse_material_line(t, definitions);
+            if (!is_material_declaration_start_line(t))
+            {
+                continue;
+            }
+            blockBuffer.assign(t.data(), t.size());
+            braceDepth = net_brace_delta(t);
+            inBlock = true;
+            if (braceDepth <= 0)
+            {
+                const bool parsed = try_parse_material_line(blockBuffer, definitions);
+                (void)parsed;
+                blockBuffer.clear();
+                inBlock = false;
+                braceDepth = 0;
+            }
+            continue;
+        }
+
+        if (!blockBuffer.empty())
+        {
+            blockBuffer.push_back(' ');
+        }
+        blockBuffer.append(t.data(), t.size());
+        braceDepth += net_brace_delta(t);
+        if (braceDepth <= 0)
+        {
+            const bool parsed = try_parse_material_line(blockBuffer, definitions);
             (void)parsed;
+            blockBuffer.clear();
+            inBlock = false;
+            braceDepth = 0;
         }
     }
+
+    if (inBlock && braceDepth > 0)
+    {
+        material_parse_error(blockBuffer, "unclosed material declaration block");
+    }
+}
+
+bool is_line_skipped_for_axiom(const std::vector<std::string_view>& lines, std::size_t index)
+{
+    if (index >= lines.size())
+    {
+        return false;
+    }
+
+    std::size_t lineIndex = 0;
+    while (lineIndex < lines.size())
+    {
+        const std::string_view t = trim_line(strip_line_comment(lines[lineIndex]));
+        if (t.empty())
+        {
+            ++lineIndex;
+            continue;
+        }
+
+        if (!is_material_declaration_start_line(t))
+        {
+            if (lineIndex == index)
+            {
+                return false;
+            }
+            ++lineIndex;
+            continue;
+        }
+
+        const std::size_t blockStart = lineIndex;
+        int braceDepth = net_brace_delta(t);
+        ++lineIndex;
+        while (braceDepth > 0 && lineIndex < lines.size())
+        {
+            const std::string_view cont = trim_line(strip_line_comment(lines[lineIndex]));
+            if (!cont.empty())
+            {
+                braceDepth += net_brace_delta(cont);
+            }
+            ++lineIndex;
+        }
+
+        if (index >= blockStart && index < lineIndex)
+        {
+            return true;
+        }
+    }
+
+    return false;
 }

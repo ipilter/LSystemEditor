@@ -149,4 +149,66 @@ BRDF_BASE_FN float brdfOrenNayarFactor(
     return A + B * vecMax2(0.0f, cosPhi) * sinAlpha * tanBeta;
 }
 
+BRDF_BASE_FN float brdfAlphaFromRoughness(float roughness)
+{
+    const float clamped = vecMax2(roughness, 0.04f);
+    return clamped * clamped;
+}
+
+BRDF_BASE_FN float brdfGGXD(float cosThetaH, float alpha)
+{
+    const float alpha2 = alpha * alpha;
+    const float cos2 = cosThetaH * cosThetaH;
+    const float denom = cos2 * (alpha2 - 1.0f) + 1.0f;
+    return alpha2 / (BrdfDetail::kPi * denom * denom);
+}
+
+BRDF_BASE_FN float brdfSmithG1(float cosTheta, float alpha)
+{
+    const float alpha2 = alpha * alpha;
+    const float cos2 = vecMax2(cosTheta * cosTheta, 1.0e-8f);
+    const float tan2 = (1.0f - cos2) / cos2;
+    return 2.0f / (1.0f + sqrtf(1.0f + alpha2 * tan2));
+}
+
+BRDF_BASE_FN Vec3 brdfSchlickF(float cosTheta, Vec3 f0)
+{
+    const float t = vecMax2(0.0f, vecMin2(1.0f, 1.0f - cosTheta));
+    const float t2 = t * t;
+    const float t5 = t2 * t2 * t;
+    return vecAdd3(vecScale3(f0, 1.0f - t5), vecMake3(t5, t5, t5));
+}
+
+BRDF_BASE_FN float brdfSchlickFScalar(float cosTheta, float f0)
+{
+    const float t = vecMax2(0.0f, vecMin2(1.0f, 1.0f - cosTheta));
+    const float t2 = t * t;
+    const float t5 = t2 * t2 * t;
+    return f0 + (1.0f - f0) * t5;
+}
+
+BRDF_BASE_FN Vec3 brdfSampleGGXHalfLocal(float alpha, float u1, float u2, float& pdf)
+{
+    const float phi = 2.0f * BrdfDetail::kPi * u1;
+    const float alpha2 = alpha * alpha;
+    const float cosTheta = sqrtf((1.0f - u2) / (1.0f + (alpha2 - 1.0f) * u2));
+    const float sinTheta = sqrtf(vecMax2(0.0f, 1.0f - cosTheta * cosTheta));
+    const float cosPhi = cosf(phi);
+    const float sinPhi = sinf(phi);
+    pdf = (alpha2 * cosTheta)
+        / (BrdfDetail::kPi
+            * (cosTheta * cosTheta * (alpha2 - 1.0f) + 1.0f)
+            * (cosTheta * cosTheta * (alpha2 - 1.0f) + 1.0f));
+    return vecMake3(sinTheta * cosPhi, sinTheta * sinPhi, cosTheta);
+}
+
+BRDF_BASE_FN float brdfGgxEnergyCompensation(float roughness, float cosTheta)
+{
+    const float alpha = brdfAlphaFromRoughness(roughness);
+    const float cosClamped = vecMax2(cosTheta, 1.0e-4f);
+    const float Ess = 1.0f - alpha * (0.3316f + 0.3237f * alpha);
+    const float Ems = (1.0f - Ess) * (1.0f - cosClamped);
+    return 1.0f + Ems / vecMax2(Ess, 1.0e-4f);
+}
+
 #undef BRDF_BASE_FN

@@ -2,9 +2,16 @@
 #include "Brdf/BrdfBase.h"
 #include "Brdf/BrdfLobe.h"
 #include "Brdf/OrenNayarDiffuseBrdf.h"
+#include "Bssrdf/BssrdfCore.h"
+#include "Material/MaterialParams.h"
 #include "Material/MaterialType.h"
+#include "Medium/MediumProperties.h"
+#include "Medium/VolumeCore.h"
 #include "MeshAccel/MeshAccelTypes.h"
 #include "Path/PathState.h"
+#include "Spectral/SpectralCore.h"
+#include "Spectral/SpectralState.h"
+#include "Subsurface/SubsurfaceTransportCore.h"
 
 #include <cmath>
 #include <iostream>
@@ -41,15 +48,31 @@ MaterialGpu makeMaterial(
     float g,
     float b,
     float roughness = 0.5f,
-    float diffuseRoughness = -1.0f)
+    float metallic = 0.0f,
+    float ior = 1.5f,
+    float emission = 0.0f,
+    float diffuseRoughness = -1.0f,
+    uint32_t materialType = static_cast<uint32_t>(MaterialType::Opaque),
+    float subsurface = 0.0f,
+    float subsurfaceRadius = 1.0f,
+    float specular = 1.0f)
 {
     MaterialGpu material{};
     material.r = r;
     material.g = g;
     material.b = b;
     material.roughness = roughness;
+    material.metallic = metallic;
+    material.ior = ior;
+    material.emission = emission;
     material.diffuseRoughness = diffuseRoughness;
-    material.ior = 1.5f;
+    material.materialType = materialType;
+    material.subsurface = subsurface;
+    material.subsurfaceRadiusR = subsurfaceRadius;
+    material.subsurfaceRadiusG = subsurfaceRadius;
+    material.subsurfaceRadiusB = subsurfaceRadius;
+    material.subsurfaceScatterScale = 1.0f;
+    material.specular = specular;
     material.abbeNumber = 58.0f;
     return material;
 }
@@ -87,13 +110,74 @@ void testSurfaceLobeWeights()
 {
     const MaterialGpu material = makeMaterial(1.0f, 1.0f, 1.0f, 0.2f);
     const BrdfLobeWeights weights = computeSurfaceLobeWeights(material);
-    expectNear(weights.diffuse, 1.0f, 0.01f, "v1 uses diffuse-only lobe");
-    expectNear(weights.specular, 0.0f, 0.01f, "specular lobe stubbed off");
+    expectNear(weights.diffuse, 0.5f, 0.01f, "non-metallic splits surface between diffuse and specular");
+    expectNear(weights.specular, 0.5f, 0.01f, "non-metallic specular lobe weight");
+
+    const MaterialGpu subsurface = makeMaterial(
+        1.0f, 1.0f, 1.0f, 0.2f, 0.0f, 1.5f, 0.0f, -1.0f,
+        static_cast<uint32_t>(MaterialType::Opaque), 0.6f);
+    const BrdfLobeWeights subWeights = computeSurfaceLobeWeights(subsurface);
+    expectNear(subWeights.subsurface, 0.6f, 0.01f, "subsurface weight");
+    expectNear(subWeights.diffuse, 0.2f, 0.01f, "diffuse complement within surface");
+}
+
+void testSubsurfaceUsesVolumeTransport()
+{
+    const MaterialGpu wax = makeMaterial(
+        0.9f, 0.95f, 0.2f, 0.8f, 0.0f, 1.5f, 0.0f, -1.0f,
+        static_cast<uint32_t>(MaterialType::Opaque), 1.0f, 2.0f);
+    expectTrue(materialHasParticipatingMedium(wax), "subsurface weight enables medium");
+    expectTrue(materialUsesVolumeTransport(wax), "subsurface uses random-walk volume transport");
+    expectTrue(bssrdfEnabled(wax), "bssrdf enabled for subsurface wax");
+}
+
+void testMaterialParamsMapping()
+{
+    const MaterialGpu wax = makeMaterial(
+        0.8f, 0.6f, 0.4f, 0.5f, 0.0f, 1.5f, 0.0f, -1.0f,
+        static_cast<uint32_t>(MaterialType::Subsurface), 1.0f, 2.0f);
+    const PhysicalMediumCoeffs coeffs = materialToPhysicalMedium(wax, 550.0f);
+    expectNear(coeffs.sigmaT.x, 0.5f, 0.01f, "sigma_t = 1 / radius");
+    expectNear(coeffs.sigmaS.x / coeffs.sigmaT.x, 0.8f / (0.8f + 0.6f + 0.4f), 0.05f, "albedo maps to sigma_s/sigma_t");
+}
+
+void testBssrdfEnterProbability()
+{
+    const MaterialGpu wax = makeMaterial(
+        0.8f, 0.8f, 0.8f, 0.5f, 0.0f, 1.5f, 0.0f, -1.0f,
+        static_cast<uint32_t>(MaterialType::Subsurface), 0.5f, 2.0f);
+    expectNear(bssrdfEnterProbability(wax), 0.5f, 0.01f, "enter probability follows subsurface weight");
+}
+
+void testSubsurfaceShellMode()
+{
+    const MaterialGpu wax = makeMaterial(
+        0.8f, 0.8f, 0.8f, 0.5f, 0.0f, 1.5f, 0.0f, -1.0f,
+        static_cast<uint32_t>(MaterialType::Subsurface), 1.0f, 2.0f);
+    SubsurfaceShellInfo openSheet{};
+    openSheet.valid = true;
+    openSheet.hasBackFace = false;
+    expectTrue(subsurfaceUsesThinShellMode(openSheet, wax), "open sheet uses thin shell");
+
+    SubsurfaceShellInfo thick{};
+    thick.valid = true;
+    thick.hasBackFace = true;
+    thick.thicknessMm = 50.0f;
+    expectTrue(!subsurfaceUsesThinShellMode(thick, wax), "thick branch uses random walk");
+}
+
+void testThinShellTransmittance()
+{
+    const MaterialGpu material = makeMaterial(
+        0.2f, 0.8f, 0.1f, 0.5f, 0.0f, 1.5f, 0.0f, -1.0f,
+        static_cast<uint32_t>(MaterialType::Subsurface), 0.8f, 1.5f);
+    const float transmittance = SubsurfaceTransportDetail::thinShellTransmittance(material, 2.0f, 550.0f);
+    expectTrue(transmittance > 0.0f && transmittance <= 1.0f, "thin shell transmittance in range");
 }
 
 void testOrenNayar_ZeroRoughnessMatchesLambert()
 {
-    const MaterialGpu material = makeMaterial(0.8f, 0.8f, 0.8f, 0.0f, 0.0f);
+    const MaterialGpu material = makeMaterial(0.8f, 0.8f, 0.8f, 0.0f, 0.0f, 1.5f, 0.0f, 0.0f);
     const BrdfContext ctx = makeContext(material);
     const Vec3 wi = vecNormalize3(vecMake3(0.3f, 0.2f, 1.0f));
     const float factor = OrenNayarDetail::diffuseOrenNayarFactor(ctx, wi);
@@ -113,21 +197,41 @@ void testPathStateDefaults()
 {
     PathState path{};
     expectNear(path.throughput.x, 1.0f, 0.01f, "default throughput");
+    expectNear(path.sssThroughput, 1.0f, 0.01f, "default sss throughput");
+    expectNear(path.wavelengthNm, 550.0f, 0.01f, "default hero wavelength");
+}
+
+void testVolumeFreeFlight()
+{
+    const float distance = mediumSampleFreeFlight(0.5f, 1.0f);
+    expectTrue(distance > 0.0f, "free flight distance is positive");
 }
 
 } // namespace
 
 int main()
 {
+    std::string initError;
+    if (!spectralInitHostFromCoeffFile(PATHTRACER_RGB2SPEC_COEFF_PATH, &initError)) {
+        std::cerr << "Failed to load rgb2spec coefficients: " << initError << '\n';
+        return 1;
+    }
+
     testDiffuseSample();
     testDiffuseThroughput();
     testSurfaceLobeWeights();
+    testSubsurfaceUsesVolumeTransport();
+    testMaterialParamsMapping();
+    testBssrdfEnterProbability();
+    testSubsurfaceShellMode();
+    testThinShellTransmittance();
     testOrenNayar_ZeroRoughnessMatchesLambert();
     testBrdfEvalPositive();
     testPathStateDefaults();
+    testVolumeFreeFlight();
 
     if (gFailures == 0) {
-        std::cout << "All Oren-Nayar BRDF tests passed.\n";
+        std::cout << "All Oren-Nayar / subsurface tests passed.\n";
         return 0;
     }
 

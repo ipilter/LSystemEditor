@@ -18,8 +18,12 @@ struct RenderParamsGpu
     float backgroundG = 10.0f / 255.0f;
     float backgroundB = 10.0f / 255.0f;
     float environmentIntensity = 1.0f;
+    /** @brief Environment map yaw in degrees (0–359), rotation about world +Y. */
+    int environmentRotationYDeg = 0;
     int maxPathDepth = 32;
     int russianRouletteMinDepth = 3;
+    /** @brief Cap on interior HG scatter events per subsurface random walk (1–128). */
+    int maxSubsurfaceScatters = 8;
     int minSamples = 16;
     int maxSamplesPerPixel = 1024;
     int debugOverlayMode = 0;

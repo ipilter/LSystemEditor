@@ -15,6 +15,7 @@
 #include "PathTracerPreviewLevels.h"
 #include "RenderTypes.h"
 #include "SceneUnits.h"
+#include "Spectral/SpectralState.h"
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -91,12 +92,14 @@ struct PathTracerDetail::PathTracerImpl
     std::atomic<int> brdfDebugFlags{0};
     std::atomic<int> activePixelCount{0};
     std::atomic<int> previewStepsPerLevel{0};
+    std::atomic<int> uiUpdateEveryNSamples{1};
     std::atomic<int> sampleCount{0};
     std::atomic<int> finestCompletedPreview{-1};
     std::atomic<bool> displayBuffersValid{false};
 
     MeshAccelScene meshScene;
     MeshAccelBoundsMesh boundsMesh;
+    SpectralStateHost spectralState;
 
     EnvironmentMap environmentMap;
     RenderParamsGpu hostRenderParams{};
@@ -112,6 +115,7 @@ struct PathTracerDetail::PathTracerImpl
     std::atomic<int> regionMaxX{0};
     std::atomic<int> regionMaxY{0};
     std::atomic<bool> renderParamsDirty{true};
+    std::atomic<int> displayPublishDownscale{1};
 
     CameraGpu lastSampleCamera{};
     std::mutex lastSampleCameraMutex;
@@ -129,6 +133,7 @@ constexpr int kMaxMinSamples = 10'000;
 constexpr float kMinRelativeErrorThreshold = 0.001f;
 constexpr float kMaxRelativeErrorThreshold = 1.0f;
 constexpr int kCompactActiveListInterval = kAdaptiveCompactActiveListInterval;
+constexpr std::size_t kMaxAutoExposureReadbackPixels = 16'000'000;
 
 bool hasDisplayableContent(const PathTracerDetail::PathTracerImpl& impl)
 {
@@ -186,6 +191,38 @@ int clampPreviewStepsPerLevel(int value)
         return kMaxPreviewStepsPerLevel;
     }
     return value;
+}
+
+int clampDisplayPublishDownscale(int value)
+{
+    if (value <= 1) {
+        return 1;
+    }
+    if (value <= 2) {
+        return 2;
+    }
+    return 4;
+}
+
+int clampUiUpdateEveryNSamples(int value)
+{
+    if (value < 1) {
+        return 1;
+    }
+    if (value > 10'000) {
+        return 10'000;
+    }
+    return value;
+}
+
+bool shouldNotifyUiForSampleCount(int sampleCount, int interval)
+{
+    if (sampleCount <= 0) {
+        return false;
+    }
+
+    const int clampedInterval = clampUiUpdateEveryNSamples(interval);
+    return sampleCount == 1 || (sampleCount % clampedInterval) == 0;
 }
 
 QString cudaErrorString(cudaError_t error)
@@ -1005,6 +1042,45 @@ void releaseMeshScene(PathTracerDetail::PathTracerImpl* impl)
     impl->boundsMesh = MeshAccelBoundsMesh{};
 }
 
+void freeSpectralState(PathTracerDetail::PathTracerImpl* impl)
+{
+    if (impl == nullptr) {
+        return;
+    }
+    impl->spectralState.freeDevice();
+}
+
+bool initSpectralState(PathTracerDetail::PathTracerImpl* impl, QString* outError)
+{
+    if (impl == nullptr) {
+        if (outError != nullptr) {
+            *outError = QStringLiteral("invalid path tracer impl");
+        }
+        return false;
+    }
+
+    freeSpectralState(impl);
+
+    std::string loadError;
+    if (!impl->spectralState.loadCoeffFile(PATHTRACER_RGB2SPEC_COEFF_PATH, &loadError)) {
+        if (outError != nullptr) {
+            *outError = QString::fromStdString(loadError);
+        }
+        return false;
+    }
+
+    if (!impl->spectralState.uploadToDevice(&loadError)) {
+        if (outError != nullptr) {
+            *outError = QString::fromStdString(loadError);
+        }
+        freeSpectralState(impl);
+        return false;
+    }
+
+    spectralSetHostModel(impl->spectralState.hostModel());
+    return true;
+}
+
 enum class SampleWaitResult
 {
     Completed,
@@ -1174,6 +1250,7 @@ bool PathTracer::configure(
     freeAccumulator(&m_impl->acc);
     freePreviewBuffers(&m_impl->previewLevels);
     releaseMeshScene(m_impl.get());
+    freeSpectralState(m_impl.get());
 
     if (m_impl->sampleStream == nullptr) {
         const cudaError_t streamError = cudaStreamCreate(&m_impl->sampleStream);
@@ -1262,6 +1339,18 @@ bool PathTracer::configure(
         unregisterPboResources(m_impl.get());
         freeCameraGpu(m_impl.get());
         freeAccumulator(&m_impl->acc);
+        return false;
+    }
+
+    if (!initSpectralState(m_impl.get(), &error)) {
+        AppLog::instance().error(
+            QStringLiteral("PathTracer configure: spectral init failed: %1").arg(error));
+        unregisterPboResources(m_impl.get());
+        freeCameraGpu(m_impl.get());
+        freeRenderParamsGpu(m_impl.get());
+        freeAccumulator(&m_impl->acc);
+        freePreviewBuffers(&m_impl->previewLevels);
+        freeSpectralState(m_impl.get());
         return false;
     }
 
@@ -1534,6 +1623,7 @@ bool launchDisplayPublishLocked(
             static_cast<uchar4*>(devicePointer),
             impl->acc.width,
             impl->acc.height,
+            impl->displayPublishDownscale.load(),
             impl->d_renderParams,
             exposure,
             impl->displayStream);
@@ -1545,6 +1635,7 @@ bool launchDisplayPublishLocked(
             static_cast<uchar4*>(devicePointer),
             impl->acc.width,
             impl->acc.height,
+            impl->displayPublishDownscale.load(),
             impl->d_renderParams,
             exposure,
             impl->displayStream);
@@ -1656,12 +1747,42 @@ bool PathTracer::publishDisplayFrame(int slot)
         return false;
     }
 
-    for (;;) {
+    for (int spinCount = 0; spinCount < 10000; ++spinCount) {
         if (isDisplayPublishReady()) {
             return finishDisplayPublish() >= 0;
         }
-        std::this_thread::yield();
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
+
+    return false;
+}
+
+void PathTracer::setDisplayPublishDownscale(int factor)
+{
+    m_impl->displayPublishDownscale.store(clampDisplayPublishDownscale(factor));
+}
+
+int PathTracer::displayPublishDownscale() const
+{
+    return m_impl->displayPublishDownscale.load();
+}
+
+int PathTracer::displayPublishWidth() const
+{
+    if (m_impl->acc.width <= 0) {
+        return 0;
+    }
+    const int factor = clampDisplayPublishDownscale(m_impl->displayPublishDownscale.load());
+    return m_impl->acc.width / factor;
+}
+
+int PathTracer::displayPublishHeight() const
+{
+    if (m_impl->acc.height <= 0) {
+        return 0;
+    }
+    const int factor = clampDisplayPublishDownscale(m_impl->displayPublishDownscale.load());
+    return m_impl->acc.height / factor;
 }
 
 void PathTracer::setMaxSamplesPerPixel(int max)
@@ -1781,6 +1902,16 @@ int PathTracer::previewStepsPerLevel() const
     return m_impl->previewStepsPerLevel.load();
 }
 
+void PathTracer::setUiUpdateEveryNSamples(int interval)
+{
+    m_impl->uiUpdateEveryNSamples.store(clampUiUpdateEveryNSamples(interval));
+}
+
+int PathTracer::uiUpdateEveryNSamples() const
+{
+    return m_impl->uiUpdateEveryNSamples.load();
+}
+
 int PathTracer::currentSampleCount() const
 {
     return m_impl->sampleCount.load();
@@ -1882,6 +2013,32 @@ float PathTracer::environmentIntensity() const
     return m_impl->hostRenderParams.environmentIntensity;
 }
 
+void PathTracer::setEnvironmentRotationY(int degrees)
+{
+    if (degrees < 0) {
+        degrees = 0;
+    }
+    if (degrees > 359) {
+        degrees = 359;
+    }
+
+    if (m_impl->hostRenderParams.environmentRotationYDeg == degrees) {
+        return;
+    }
+
+    m_impl->hostRenderParams.environmentRotationYDeg = degrees;
+    m_impl->renderParamsDirty.store(true);
+
+    if (m_impl->configured.load()) {
+        resetAccumulation();
+    }
+}
+
+int PathTracer::environmentRotationY() const
+{
+    return m_impl->hostRenderParams.environmentRotationYDeg;
+}
+
 void PathTracer::setRussianRouletteMinDepth(int depth)
 {
     if (depth < 0) {
@@ -1906,6 +2063,32 @@ void PathTracer::setRussianRouletteMinDepth(int depth)
 int PathTracer::russianRouletteMinDepth() const
 {
     return m_impl->hostRenderParams.russianRouletteMinDepth;
+}
+
+void PathTracer::setMaxSubsurfaceScatters(int count)
+{
+    if (count < 1) {
+        count = 1;
+    }
+    if (count > 128) {
+        count = 128;
+    }
+
+    if (m_impl->hostRenderParams.maxSubsurfaceScatters == count) {
+        return;
+    }
+
+    m_impl->hostRenderParams.maxSubsurfaceScatters = count;
+    m_impl->renderParamsDirty.store(true);
+
+    if (m_impl->configured.load()) {
+        resetAccumulation();
+    }
+}
+
+int PathTracer::maxSubsurfaceScatters() const
+{
+    return m_impl->hostRenderParams.maxSubsurfaceScatters;
 }
 
 void PathTracer::setPhysicalCamera(float fStop, float shutterSpeedSeconds, float iso)
@@ -1993,26 +2176,32 @@ bool PathTracer::computeSuggestedCameraFromAccumulator(PhysicalCamera* out) cons
     const int height = m_impl->acc.height;
     const std::size_t pixelCount = static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
 
+    if (pixelCount > kMaxAutoExposureReadbackPixels) {
+        return false;
+    }
+
     std::vector<float4> hostBuffer(pixelCount);
     std::vector<uint32_t> hostCounts(pixelCount);
 
+    bool syncOk = false;
     {
         std::lock_guard<std::mutex> streamLock(m_impl->streamMutex);
         if (m_impl->displayPublishInFlight.load() && m_impl->displayReadyEvent != nullptr) {
             const cudaError_t displayWaitError = cudaEventSynchronize(m_impl->displayReadyEvent);
-            if (displayWaitError != cudaSuccess) {
-                return false;
-            }
+            syncOk = displayWaitError == cudaSuccess;
         } else if (m_impl->sampleCompleteEvent != nullptr) {
             const cudaError_t waitError =
                 cudaStreamWaitEvent(m_impl->sampleStream, m_impl->sampleCompleteEvent, 0);
-            if (waitError != cudaSuccess) {
-                return false;
+            if (waitError == cudaSuccess) {
+                const cudaError_t syncError = cudaStreamSynchronize(m_impl->sampleStream);
+                syncOk = syncError == cudaSuccess;
             }
-            const cudaError_t syncError = cudaStreamSynchronize(m_impl->sampleStream);
-            if (syncError != cudaSuccess) {
-                return false;
-            }
+        } else {
+            syncOk = true;
+        }
+
+        if (!syncOk) {
+            return false;
         }
 
         const cudaError_t bufferError = cudaMemcpy(
@@ -2030,12 +2219,19 @@ bool PathTracer::computeSuggestedCameraFromAccumulator(PhysicalCamera* out) cons
         }
     }
 
-    constexpr int kSampleStride = 16;
-    std::vector<float> luminances;
-    luminances.reserve(pixelCount / static_cast<std::size_t>(kSampleStride * kSampleStride) + 1);
+    int sampleStride = 16;
+    if (pixelCount > 4'000'000) {
+        sampleStride = 32;
+    }
+    if (pixelCount > 8'000'000) {
+        sampleStride = 64;
+    }
 
-    for (int y = 0; y < height; y += kSampleStride) {
-        for (int x = 0; x < width; x += kSampleStride) {
+    std::vector<float> luminances;
+    luminances.reserve(pixelCount / static_cast<std::size_t>(sampleStride * sampleStride) + 1);
+
+    for (int y = 0; y < height; y += sampleStride) {
+        for (int x = 0; x < width; x += sampleStride) {
             const std::size_t index = static_cast<std::size_t>(y) * static_cast<std::size_t>(width) +
                 static_cast<std::size_t>(x);
             if (hostCounts[index] == 0) {
@@ -2185,6 +2381,17 @@ void PathTracer::invokeFrameReadyCallback()
     }
 }
 
+void PathTracer::maybeInvokeFrameReadyCallback()
+{
+    if (!shouldNotifyUiForSampleCount(
+            m_impl->sampleCount.load(),
+            m_impl->uiUpdateEveryNSamples.load())) {
+        return;
+    }
+
+    invokeFrameReadyCallback();
+}
+
 void PathTracer::renderLoop()
 {
     cudaSetDevice(m_impl->cudaDeviceId);
@@ -2244,7 +2451,7 @@ void PathTracer::renderLoop()
                         QStringLiteral("CUDA stream sync after accumulator reset failed: %1")
                             .arg(cudaErrorString(syncError)));
                 } else if (!invalidateDisplay && m_impl->sampleCount.load() > 0) {
-                    invokeFrameReadyCallback();
+                    maybeInvokeFrameReadyCallback();
                 }
             }
 
@@ -2499,13 +2706,6 @@ void PathTracer::renderLoop()
         logPipelineTimingIfDue();
 #endif
 
-        FrameReadyCallback callback;
-        {
-            std::lock_guard<std::mutex> lock(m_callbackMutex);
-            callback = m_frameReadyCallback;
-        }
-        if (callback) {
-            callback();
-        }
+        maybeInvokeFrameReadyCallback();
     }
 }

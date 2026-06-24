@@ -41,6 +41,22 @@ LIGHT_CORE_FN Vec3 lightLatLongToDirection(float u, float v)
     return vecNormalize3(vecMake3(sinTheta * sinf(phi), cosf(theta), sinTheta * cosf(phi)));
 }
 
+LIGHT_CORE_FN float lightEnvironmentRotationYRad(const RenderParamsGpu* params)
+{
+    if (params == nullptr) {
+        return 0.0f;
+    }
+    return static_cast<float>(params->environmentRotationYDeg) * (LightCoreDetail::kPi / 180.0f);
+}
+
+LIGHT_CORE_FN Vec3 lightRotateY(float angleRad, Vec3 direction)
+{
+    const Vec3 d = vecNormalize3(direction);
+    const float c = cosf(angleRad);
+    const float s = sinf(angleRad);
+    return vecMake3(d.x * c - d.z * s, d.y, d.x * s + d.z * c);
+}
+
 LIGHT_CORE_FN Vec3 lightEvalEnvironment(const EnvironmentMapGpu* env, Vec3 direction)
 {
     if (env == nullptr || env->valid == 0 || env->pixels == nullptr || env->width <= 0 || env->height <= 0) {
@@ -71,8 +87,9 @@ LIGHT_CORE_FN Vec3 lightEvalEnvironmentOrBackground(
     const RenderParamsGpu* params,
     Vec3 direction)
 {
+    const float rotationRad = lightEnvironmentRotationYRad(params);
     if (env != nullptr && env->valid != 0) {
-        return lightEvalEnvironment(env, direction);
+        return lightEvalEnvironment(env, lightRotateY(-rotationRad, direction));
     }
     return lightSolidEnvironmentRadiance(params);
 }
@@ -183,11 +200,12 @@ LIGHT_CORE_FN Vec3 lightSampleEnvironmentOrBackground(
     float uRow,
     float& pdf)
 {
+    const float rotationRad = lightEnvironmentRotationYRad(params);
     if (env != nullptr && env->valid != 0) {
-        return lightSampleEnvironment(env, uMarginal, uRow, pdf);
+        return lightRotateY(rotationRad, lightSampleEnvironment(env, uMarginal, uRow, pdf));
     }
     (void)params;
-    return lightSampleSolidEnvironment(uMarginal, uRow, pdf);
+    return lightRotateY(rotationRad, lightSampleSolidEnvironment(uMarginal, uRow, pdf));
 }
 
 LIGHT_CORE_FN float lightPdfEnvironmentOrBackground(
@@ -195,8 +213,9 @@ LIGHT_CORE_FN float lightPdfEnvironmentOrBackground(
     const RenderParamsGpu* params,
     Vec3 wi)
 {
+    const float rotationRad = lightEnvironmentRotationYRad(params);
     if (env != nullptr && env->valid != 0) {
-        return lightPdfEnvironment(env, wi);
+        return lightPdfEnvironment(env, lightRotateY(-rotationRad, wi));
     }
     (void)params;
     return lightPdfSolidEnvironment(wi);

@@ -4,6 +4,7 @@ set(PATHTRACER_LIB_INCLUDE_DIR "${PATHTRACER_LIB_DIR}/src")
 set(PATHTRACER_LIB_SOURCES
     "${PATHTRACER_LIB_DIR}/src/PhysicalCamera.cpp"
     "${PATHTRACER_LIB_DIR}/src/EnvironmentMap.cpp"
+    "${PATHTRACER_LIB_DIR}/src/Spectral/SpectralState.cpp"
     "${PATHTRACER_LIB_DIR}/src/MeshAccel/MeshBvhBuilder.cpp"
     "${PATHTRACER_LIB_DIR}/src/MeshAccel/MeshAccelScene.cpp"
     "${PATHTRACER_LIB_DIR}/src/MeshAccel/MeshAccelWavefrontExport.cpp"
@@ -43,6 +44,7 @@ target_include_directories(PathTracerLib PUBLIC
     "${PATHTRACER_LIB_INCLUDE_DIR}/Path"
     "${PATHTRACER_LIB_INCLUDE_DIR}/Medium"
     "${PATHTRACER_LIB_INCLUDE_DIR}/Bssrdf"
+    "${PATHTRACER_LIB_INCLUDE_DIR}/Subsurface"
     "${PATHTRACER_LIB_INCLUDE_DIR}/Sampling"
     "${PATHTRACER_LIB_INCLUDE_DIR}/Spectral"
     "${PATHTRACER_LIB_INCLUDE_DIR}/Texture")
@@ -50,6 +52,8 @@ option(PATHTRACER_ENABLE_PROFILE "Enable render pipeline profiling logs" ON)
 if(PATHTRACER_ENABLE_PROFILE)
     target_compile_definitions(PathTracerLib PRIVATE PATHTRACER_PROFILE)
 endif()
+target_compile_definitions(PathTracerLib PRIVATE
+    "PATHTRACER_RGB2SPEC_COEFF_PATH=\"${PATHTRACER_LIB_DIR}/src/Spectral/srgb.coeff\"")
 target_include_directories(PathTracerLib PRIVATE
     "${CMAKE_SOURCE_DIR}/Application/src")
 target_link_libraries(PathTracerLib PUBLIC
@@ -117,9 +121,31 @@ target_include_directories(path_tracer_oren_nayar_brdf_tests PRIVATE
     "${PATHTRACER_LIB_INCLUDE_DIR}"
     "${PATHTRACER_LIB_INCLUDE_DIR}/Brdf"
     "${PATHTRACER_LIB_INCLUDE_DIR}/Geometry"
-    "${PATHTRACER_LIB_INCLUDE_DIR}/MeshAccel")
+    "${PATHTRACER_LIB_INCLUDE_DIR}/MeshAccel"
+    "${PATHTRACER_LIB_INCLUDE_DIR}/Subsurface"
+    "${PATHTRACER_LIB_INCLUDE_DIR}/Bssrdf"
+    "${PATHTRACER_LIB_INCLUDE_DIR}/Material"
+    "${PATHTRACER_LIB_INCLUDE_DIR}/Medium")
+target_compile_definitions(path_tracer_oren_nayar_brdf_tests PRIVATE
+    "PATHTRACER_RGB2SPEC_COEFF_PATH=\"${PATHTRACER_LIB_DIR}/src/Spectral/srgb.coeff\"")
 set_target_properties(path_tracer_oren_nayar_brdf_tests PROPERTIES FOLDER "PathTracerLib/tests")
 add_test(NAME PathTracerOrenNayarBrdf COMMAND path_tracer_oren_nayar_brdf_tests)
+
+add_executable(path_tracer_principled_brdf_tests tests/PathTracerPrincipledBrdfTests.cpp)
+target_link_libraries(path_tracer_principled_brdf_tests PRIVATE PathTracerLib)
+target_include_directories(path_tracer_principled_brdf_tests PRIVATE
+    "${PATHTRACER_LIB_INCLUDE_DIR}"
+    "${PATHTRACER_LIB_INCLUDE_DIR}/Brdf"
+    "${PATHTRACER_LIB_INCLUDE_DIR}/Geometry"
+    "${PATHTRACER_LIB_INCLUDE_DIR}/MeshAccel"
+    "${PATHTRACER_LIB_INCLUDE_DIR}/Subsurface"
+    "${PATHTRACER_LIB_INCLUDE_DIR}/Bssrdf"
+    "${PATHTRACER_LIB_INCLUDE_DIR}/Material"
+    "${PATHTRACER_LIB_INCLUDE_DIR}/Medium")
+target_compile_definitions(path_tracer_principled_brdf_tests PRIVATE
+    "PATHTRACER_RGB2SPEC_COEFF_PATH=\"${PATHTRACER_LIB_DIR}/src/Spectral/srgb.coeff\"")
+set_target_properties(path_tracer_principled_brdf_tests PROPERTIES FOLDER "PathTracerLib/tests")
+add_test(NAME PathTracerPrincipledBrdf COMMAND path_tracer_principled_brdf_tests)
 
 add_executable(path_tracer_region_render_tests tests/PathTracerRegionRenderTests.cpp)
 target_link_libraries(path_tracer_region_render_tests PRIVATE PathTracerLib)

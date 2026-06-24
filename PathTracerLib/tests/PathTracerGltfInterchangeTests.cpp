@@ -1,6 +1,7 @@
 #include "MeshAccel/MeshAccelGltfIO.h"
 #include "MeshAccel/MeshAccelMaterialJson.h"
 #include "MeshAccel/MaterialType.h"
+#include "MeshAccel/Mesh.h"
 #include "MeshAccel/MeshAccelTypes.h"
 
 #include <QDir>
@@ -214,6 +215,37 @@ void testMultiMaterialExport()
     expectTrue(imported.triangles.size() == 2, "two triangles imported");
 }
 
+void testMeshAppendOffsetsImportedMaterialIndices()
+{
+    MaterialGpu emissive{};
+    emissive.r = 0.9f;
+    emissive.g = 0.8f;
+    emissive.b = 0.7f;
+    emissive.emission = 50.0f;
+
+    MaterialGpu diffuse{};
+    diffuse.r = 0.2f;
+    diffuse.g = 0.4f;
+    diffuse.b = 0.6f;
+
+    Mesh lsystemMesh{};
+    lsystemMesh.materials.push_back(emissive);
+    lsystemMesh.triangles.push_back(makeTestTriangle(0));
+
+    Mesh importedMesh{};
+    importedMesh.materials.push_back(diffuse);
+    importedMesh.triangles.push_back(makeTestTriangle(0, 5.0f));
+
+    const uint32_t materialIndexOffset = static_cast<uint32_t>(lsystemMesh.materials.size());
+    meshAppend(lsystemMesh, importedMesh, materialIndexOffset);
+
+    expectTrue(lsystemMesh.materials.size() == 2, "merged mesh keeps both material tables");
+    expectTrue(lsystemMesh.triangles.size() == 2, "merged mesh keeps both triangle sets");
+    expectTrue(lsystemMesh.triangles[0].materialIndex == 0, "lsystem triangle keeps its material index");
+    expectTrue(lsystemMesh.triangles[1].materialIndex == 1, "imported triangle material index is offset");
+    expectNear(lsystemMesh.materials[1].r, diffuse.r, 1e-5f, "imported material appended after lsystem materials");
+}
+
 } // namespace
 
 int main()
@@ -225,6 +257,7 @@ int main()
     testGltfRoundTripMaterial(makeSubsurfaceMaterial(), "subsurface glTF round-trip");
     testGltfRoundTripMaterial(makeEmissionMaterial(), "emission glTF round-trip");
     testMultiMaterialExport();
+    testMeshAppendOffsetsImportedMaterialIndices();
 
     if (gFailures != 0) {
         std::cerr << gFailures << " test failure(s)\n";

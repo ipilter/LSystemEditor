@@ -93,6 +93,8 @@ struct alignas(16) MaterialGpu
     float subsurfaceRadiusR = 1.0f;
     float subsurfaceRadiusG = 1.0f;
     float subsurfaceRadiusB = 1.0f;
+    /** @brief Scales subsurfaceRadius for geometry tuning; default 1. */
+    float subsurfaceScatterScale = 1.0f;
 
     /** @brief 0 = use inline field; else index into scene texture bank. */
     uint32_t albedoTex = 0;

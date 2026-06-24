@@ -40,6 +40,7 @@ struct MaterialEntry
     MaterialChannel emission;
     MaterialChannel subsurface;
     MaterialChannel subsurfaceRadius;
+    MaterialChannel subsurfaceScatterScale;
     MaterialChannel sigmaA;
     MaterialChannel sigmaS;
     MaterialChannel mediumG;

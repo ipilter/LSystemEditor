@@ -161,6 +161,7 @@ SceneController::SceneController(SceneModel* model, MainView* view, QObject* par
     syncColorButtonStyle();
     m_view->viewport()->setClearColor(m_model->clearColor());
     m_view->viewport()->setEnvironmentIntensity(m_model->environmentIntensity());
+    m_view->viewport()->setEnvironmentRotationY(m_model->environmentRotationY());
     m_view->viewport()->setSceneModel(m_model);
 
     syncRenderSpinBoxes();
@@ -169,6 +170,7 @@ SceneController::SceneController(SceneModel* model, MainView* view, QObject* par
     syncRelativeErrorThresholdSpinBox();
     syncPreviewStepsSpinBox();
     syncRussianRouletteMinDepthSpinBox();
+    syncMaxSubsurfaceScattersSpinBox();
     syncBoundsOverlayComboBox();
     syncBrdfDebugComboBox();
     syncSceneOverlayCheckBox();
@@ -177,6 +179,7 @@ SceneController::SceneController(SceneModel* model, MainView* view, QObject* par
     syncEnvironmentHdrPath();
     syncEnvironmentIntensitySpinBox();
     syncEnvironmentIntensityEnabled();
+    syncEnvironmentRotationYSpinBox();
     syncPhysicalCameraUi();
     syncFocusDistanceSpinBox();
     updateExposureValueLabel();
@@ -194,6 +197,9 @@ SceneController::SceneController(SceneModel* model, MainView* view, QObject* par
     connect(m_model, &SceneModel::previewStepsPerLevelChanged, this, [this](int) { syncPreviewStepsSpinBox(); });
     connect(m_model, &SceneModel::russianRouletteMinDepthChanged, this, [this](int) {
         syncRussianRouletteMinDepthSpinBox();
+    });
+    connect(m_model, &SceneModel::maxSubsurfaceScattersChanged, this, [this](int) {
+        syncMaxSubsurfaceScattersSpinBox();
     });
     connect(m_model, &SceneModel::boundsOverlayModeChanged, this, [this](RenderViewOverlayMode) {
         syncBoundsOverlayComboBox();
@@ -219,6 +225,11 @@ SceneController::SceneController(SceneModel* model, MainView* view, QObject* par
         &QSpinBox::valueChanged,
         this,
         &SceneController::onRussianRouletteMinDepthSpinBoxChanged);
+    connect(
+        m_view->maxSubsurfaceScattersSpinBox(),
+        &QSpinBox::valueChanged,
+        this,
+        &SceneController::onMaxSubsurfaceScattersSpinBoxChanged);
     connect(
         m_view->renderViewOverlayComboBox(),
         QOverload<int>::of(&QComboBox::currentIndexChanged),
@@ -279,6 +290,11 @@ SceneController::SceneController(SceneModel* model, MainView* view, QObject* par
         QOverload<double>::of(&QDoubleSpinBox::valueChanged),
         this,
         &SceneController::onEnvironmentIntensitySpinBoxChanged);
+    connect(
+        m_view->environmentRotationYSpinBox(),
+        QOverload<int>::of(&QSpinBox::valueChanged),
+        this,
+        &SceneController::onEnvironmentRotationYSpinBoxChanged);
     connect(m_model, &SceneModel::environmentHdrPathChanged, this, [this](const QString& path) {
         syncEnvironmentHdrPath();
         syncEnvironmentIntensityEnabled();
@@ -289,6 +305,10 @@ SceneController::SceneController(SceneModel* model, MainView* view, QObject* par
     connect(m_model, &SceneModel::environmentIntensityChanged, this, [this](float value) {
         syncEnvironmentIntensitySpinBox();
         m_view->viewport()->setEnvironmentIntensity(value);
+    });
+    connect(m_model, &SceneModel::environmentRotationYChanged, this, [this](int degrees) {
+        syncEnvironmentRotationYSpinBox();
+        m_view->viewport()->setEnvironmentRotationY(degrees);
     });
     connect(m_view->fStopSpinBox(), QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [this](double value) {
         m_model->setFStop(static_cast<float>(value));
@@ -333,6 +353,7 @@ SceneController::SceneController(SceneModel* model, MainView* view, QObject* par
     connect(&m_physicalCameraDebounce, &DebounceTimer::triggered, this, &SceneController::applyPhysicalCameraToViewport);
     connect(m_view->viewport(), &OpenGLViewportWidget::iterationChanged, this, &SceneController::onIterationChangedForAutoExposure);
     connect(m_view->viewport(), &OpenGLViewportWidget::iterationChanged, m_view, &MainView::setIteration);
+    connect(m_view, &MainView::applicationShuttingDown, this, &SceneController::onApplicationShuttingDown);
     connect(
         m_view->viewport(),
         &OpenGLViewportWidget::renderStateChanged,
@@ -422,6 +443,11 @@ void SceneController::applyPreviewStepsFromSpinBox()
 void SceneController::onRussianRouletteMinDepthSpinBoxChanged()
 {
     m_model->setRussianRouletteMinDepth(m_view->russianRouletteMinDepthSpinBox()->value());
+}
+
+void SceneController::onMaxSubsurfaceScattersSpinBoxChanged()
+{
+    m_model->setMaxSubsurfaceScatters(m_view->maxSubsurfaceScattersSpinBox()->value());
 }
 
 void SceneController::onBoundsOverlayComboBoxChanged()
@@ -702,6 +728,13 @@ void SceneController::syncRussianRouletteMinDepthSpinBox()
     m_view->russianRouletteMinDepthSpinBox()->blockSignals(false);
 }
 
+void SceneController::syncMaxSubsurfaceScattersSpinBox()
+{
+    m_view->maxSubsurfaceScattersSpinBox()->blockSignals(true);
+    m_view->maxSubsurfaceScattersSpinBox()->setValue(m_model->maxSubsurfaceScatters());
+    m_view->maxSubsurfaceScattersSpinBox()->blockSignals(false);
+}
+
 void SceneController::syncBoundsOverlayComboBox()
 {
     m_view->renderViewOverlayComboBox()->blockSignals(true);
@@ -767,8 +800,31 @@ void SceneController::syncEnvironmentIntensityEnabled()
     m_view->environmentIntensitySpinBox()->setEnabled(!hasHdr);
 }
 
+void SceneController::onEnvironmentRotationYSpinBoxChanged(int value)
+{
+    m_model->setEnvironmentRotationY(value);
+}
+
+void SceneController::syncEnvironmentRotationYSpinBox()
+{
+    m_view->environmentRotationYSpinBox()->blockSignals(true);
+    m_view->environmentRotationYSpinBox()->setValue(m_model->environmentRotationY());
+    m_view->environmentRotationYSpinBox()->blockSignals(false);
+}
+
+void SceneController::onApplicationShuttingDown()
+{
+    m_applicationActive.store(false);
+    m_pendingFrameAutoExposure = false;
+    m_pendingAccumulatorExposureRefine = false;
+}
+
 void SceneController::onIterationChangedForAutoExposure(int sampleCount)
 {
+    if (!m_applicationActive.load()) {
+        return;
+    }
+
     if (m_pendingFrameAutoExposure && sampleCount >= kFrameAutoExposureWarmupSamples) {
         applySuggestedPhysicalCameraFromHdr();
         m_pendingFrameAutoExposure = false;
@@ -784,8 +840,20 @@ void SceneController::onIterationChangedForAutoExposure(int sampleCount)
     m_autoExposureComputeRunning.store(true);
     OpenGLViewportWidget* viewport = m_view->viewport();
     (void)QtConcurrent::run([this, viewport]() {
+        if (!m_applicationActive.load()) {
+            m_autoExposureComputeRunning.store(false);
+            return;
+        }
+
         PhysicalCamera suggested{};
-        const bool ok = viewport->computeSuggestedPhysicalCameraFromAccumulator(&suggested);
+        const bool ok =
+            viewport != nullptr && m_applicationActive.load()
+            && viewport->computeSuggestedPhysicalCameraFromAccumulator(&suggested);
+        if (!m_applicationActive.load()) {
+            m_autoExposureComputeRunning.store(false);
+            return;
+        }
+
         QMetaObject::invokeMethod(
             this,
             [this, ok, suggested]() { applyAccumulatorExposureRefine(ok, suggested); },
@@ -796,6 +864,10 @@ void SceneController::onIterationChangedForAutoExposure(int sampleCount)
 void SceneController::applyAccumulatorExposureRefine(bool ok, PhysicalCamera suggested)
 {
     m_autoExposureComputeRunning.store(false);
+
+    if (!m_applicationActive.load()) {
+        return;
+    }
 
     if (ok) {
         m_model->setFStop(suggested.fStop);

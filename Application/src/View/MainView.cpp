@@ -49,6 +49,9 @@ constexpr int kDefaultPreviewStepsPerLevel = 1;
 constexpr int kMinRussianRouletteMinDepth = 0;
 constexpr int kMaxRussianRouletteMinDepth = 64;
 constexpr int kDefaultRussianRouletteMinDepth = 3;
+constexpr int kMinMaxSubsurfaceScatters = 1;
+constexpr int kMaxMaxSubsurfaceScatters = 128;
+constexpr int kDefaultMaxSubsurfaceScatters = 8;
 constexpr int kLogMaxBlockCount = 500;
 constexpr int kControlPanelMinWidth = 160;
 constexpr int kControlPanelInitialWidth = 220;
@@ -169,6 +172,18 @@ MainView::MainView(QWidget* parent)
             "Higher values keep paths alive longer (0 = from the first bounce)."));
     rrDepthRow->addWidget(m_russianRouletteMinDepthSpinBox);
     renderLayout->addLayout(rrDepthRow);
+
+    auto* sssScatterCapRow = new QHBoxLayout();
+    sssScatterCapRow->addWidget(new QLabel(QStringLiteral("SSS scatters:"), renderGroup));
+    m_maxSubsurfaceScattersSpinBox = new QSpinBox(renderGroup);
+    m_maxSubsurfaceScattersSpinBox->setRange(kMinMaxSubsurfaceScatters, kMaxMaxSubsurfaceScatters);
+    m_maxSubsurfaceScattersSpinBox->setValue(kDefaultMaxSubsurfaceScatters);
+    m_maxSubsurfaceScattersSpinBox->setToolTip(
+        QStringLiteral(
+            "Maximum interior HG scatter events per subsurface random walk. "
+            "Thin sheets skip the walk entirely."));
+    sssScatterCapRow->addWidget(m_maxSubsurfaceScattersSpinBox);
+    renderLayout->addLayout(sssScatterCapRow);
 
     auto* boundsOverlayRow = new QHBoxLayout();
     boundsOverlayRow->addWidget(new QLabel(QStringLiteral("View Mode:"), renderGroup));
@@ -303,6 +318,17 @@ MainView::MainView(QWidget* parent)
     intensityRow->addWidget(m_environmentIntensitySpinBox, 1);
     environmentLayout->addLayout(intensityRow);
 
+    auto* rotationRow = new QHBoxLayout();
+    rotationRow->addWidget(new QLabel(QStringLiteral("Rotation:"), environmentGroup));
+    m_environmentRotationYSpinBox = new QSpinBox(environmentGroup);
+    m_environmentRotationYSpinBox->setRange(0, 359);
+    m_environmentRotationYSpinBox->setSuffix(QStringLiteral("°"));
+    m_environmentRotationYSpinBox->setWrapping(true);
+    m_environmentRotationYSpinBox->setToolTip(
+        QStringLiteral("Rotate the environment map around the vertical (Y) axis to adjust scene lighting"));
+    rotationRow->addWidget(m_environmentRotationYSpinBox, 1);
+    environmentLayout->addLayout(rotationRow);
+
     auto* hdriRow = new QHBoxLayout();
     hdriRow->addWidget(new QLabel(QStringLiteral("HDRI:"), environmentGroup));
     m_environmentHdrPathEdit = new QLineEdit(environmentGroup);
@@ -416,9 +442,10 @@ MainView::MainView(QWidget* parent)
       "# metallic / met: scalar | texture  default 0\n"
       "# ior: scalar | texture  default 1.5\n"
       "# emission / emiss / em: scalar | texture  default 0  (1.0 ~ moderate area light)\n"
-      "# type: Opaque | Glass | Subsurface | Emissive  default Opaque\n"
-      "# subsurface / ss: scalar in [0,1]  default 0\n"
+      "# type: (optional) Opaque | Glass | Subsurface | Emissive — behavior is driven by weights\n"
+      "# subsurface / ss: scalar in [0,1] | nested {weight, scatterR, scatterG, scatterB, scatterScale, anisotropy}\n"
       "# subsurfaceRadius / ssRadius: scalar | {r,g,b} in mm  default 1\n"
+      "# scatterScale / subsurfaceScatterScale: geometry tuning scalar  default 1\n"
       "# diffuseRoughness / diffuse / diffRou: scalar | texture  default -1 (uses roughness)\n"
       "# specular / spec: scalar | texture  default 1\n"
       "# scalar textures multiply inline when inline > 0; inline 0 uses texture values directly\n"
@@ -426,24 +453,103 @@ MainView::MainView(QWidget* parent)
       "# Grid: {Grid, on:{r,g,b}|gray, off:{r,g,b}|gray, intensityOn:1, intensityOff:1, freq:8, freqU:8, freqV:8, thickness:0.05}\n"
       "# Stripe: {Stripe, on:{r,g,b}|gray, off:{r,g,b}|gray, intensityOn:1, intensityOff:1, freq, thickness:0.05}\n"
       "# Noise: {Noise, on:{r,g,b}|gray, off:{r,g,b}|gray, intensityOn:1, intensityOff:1, scale, octaves:1, seed:0}\n\n"
-      "Mat(Wax) = {type: Subsurface, albedo: {0.9, 0.95, 0.2}, roughness: 0.8, diffuseRoughness: 0.7, specular: 0.2, subsurface: 1, subsurfaceRadius: 2.0, ior: 1.5}\n"
-      "Mat(Leaf) = {type: Subsurface, albedo: {0.2, 0.8, 0.1}, roughness: 0.5, specular: 1.0, subsurface: 0.6, subsurfaceRadius: {1.5, 3.0, 0.8}, ior: 1.5}\n"
-      "Mat(Grid) = {albedo: {Grid, on: {0.95, 0.95, 0.95}, off: {0.1, 0.1, 0.1}, freq: 400, thickness: 0.05}, roughness: 0.5}\n"
-      "Mat(Light) = {albedo: {0.9, 0.8, 0.7}, roughness: 0.65, metallic: 1, emission: {Stripe, freq: 20, thickness: 0.25, on: 1, off: 0, intensityOn: 50}}\n"
-      "Mat(Metal) = {albedo: {1.0, 0.85, 0.3}, roughness: 0.15, metallic: 1, ior: 1.5}\n"
-      "Mat(Glass) = {type: Glass, albedo: 1, roughness: 0.0, ior: 1.42}\n"
-      "Mat(Diffuse) = {albedo: {0.9, 0.9, 0.9}, roughness: 0.90}\n"
-      "Mat(Plastic) = {type: Subsurface, albedo: {0.99, 0.7, 0.94}, roughness: 0.1, subsurface: 0.5, subsurfaceRadius: 1.5, ior: 1.5}\n\n"
-      "Mat(Pearl) = {type: Subsurface, albedo: {0.9, 0.8, 0.7}, roughness: 0.35, subsurface: 0.8, subsurfaceRadius: 1.2, ior: 1.5}\n\n"
+      "Mat(Wax) = {\n"
+      "  albedo: {0.99, 0.98, 0.94},\n"
+      "  roughness: 0.78,\n"
+      "  diffuseRoughness: 0.88,\n"
+      "  specular: 0.12,\n"
+      "  subsurface: {\n"
+      "    weight: 1.0,\n"
+      "    scatterR: 3.5, scatterG: 3.0, scatterB: 1.0,\n"
+      "    scatterScale: 1.0,\n"
+      "    anisotropy: 0.0\n"
+      "  },\n"
+      "  ior: 1.43\n"
+      "}\n"
+      "Mat(Leaf) = {\n"
+      "  albedo: {0.18, 0.72, 0.08},\n"
+      "  roughness: 0.55,\n"
+      "  diffuseRoughness: 0.65,\n"
+      "  specular: 0.25,\n"
+      "  subsurface: {\n"
+      "    weight: 0.85,\n"
+      "    scatterR: 1.2, scatterG: 2.8, scatterB: 0.6,\n"
+      "    scatterScale: 1.0,\n"
+      "    anisotropy: 0.0\n"
+      "  },\n"
+      "  ior: 1.45\n"
+      "}\n"
+      "Mat(Stem) = {\n"
+      "  albedo: {0.22, 0.42, 0.06},\n"
+      "  roughness: 0.72,\n"
+      "  diffuseRoughness: 0.8,\n"
+      "  specular: 0.15,\n"
+      "  subsurface: {\n"
+      "    weight: 1.0,\n"
+      "    scatterR: 0.01, scatterG: 0.1, scatterB: 0.02,\n"
+      "    scatterScale: 0.005,\n"
+      "    anisotropy: 0.0\n"
+      "  },\n"
+      "  ior: 1.5\n"
+      "}\n"
+      "Mat(Grid) = {\n"
+      "  albedo: {Grid, on: {0.95, 0.95, 0.95}, off: {0.1, 0.1, 0.1}, freq: 400, thickness: 0.05},\n"
+      "  roughness: 0.5\n"
+      "}\n"
+      "Mat(Strips) = {\n"
+      "  albedo: {0.9, 0.8, 0.7},\n"
+      "  roughness: 0.05,\n"
+      "  metallic: {Stripe, freq: 20, thickness: 0.25, on: 1, off: 0}\n"
+      "}\n"
+      "Mat(Metal) = {\n"
+      "  albedo: {1.0, 0.86, 0.35},\n"
+      "  roughness: 0.18,\n"
+      "  metallic: 1.0,\n"
+      "  ior: 1.5\n"
+      "}\n"
+      "Mat(Glass) = {\n"
+      "  type: Glass,\n"
+      "  albedo: 1.0,\n"
+      "  roughness: 0.0,\n"
+      "  ior: 1.52,\n"
+      "  abbe: 58\n"
+      "}\n"
+      "Mat(Diffuse) = {\n"
+      "  albedo: {0.82, 0.82, 0.82},\n"
+      "  roughness: 0.95,\n"
+      "  diffuseRoughness: 0.95\n"
+      "}\n"
+      "Mat(Plastic) = {\n"
+      "  albedo: {0.94, 0.78, 0.88},\n"
+      "  roughness: 0.14,\n"
+      "  specular: 0.45,\n"
+      "  subsurface: {\n"
+      "    weight: 0.55,\n"
+      "    scatterR: 1.5, scatterG: 1.5, scatterB: 1.5,\n"
+      "    scatterScale: 1.0,\n"
+      "    anisotropy: 0.0\n"
+      "  },\n"
+      "  ior: 1.49\n"
+      "}\n"
+      "Mat(Pearl) = {\n"
+      "  albedo: {0.92, 0.88, 0.82},\n"
+      "  roughness: 0.32,\n"
+      "  specular: 0.9,\n"
+      "  subsurface: {\n"
+      "    weight: 0.85,\n"
+      "    scatterR: 1.0, scatterG: 1.2, scatterB: 1.5,\n"
+      "    scatterScale: 1.0,\n"
+      "    anisotropy: 0.0\n"
+      "  },\n"
+      "  ior: 1.53\n"
+      "}\n\n"
       "Mat(Grid)\n"
       "Pitch(-90) f(-100) F(100, 5000, 5000)\n\n"
       "f(100)\n\n"
       "Mat(Diffuse)\n"
       "F(0, 100)\n\n"
-      "f(500)\n"
-      "Mat(Light)\n"
+      "Mat(Strips)\n"
       "F(0, 100)\n\n"
-      "f(-500)\n"
       "Pitch(-90) f(250) Pitch(90)\n"
       "Mat(Glass)\n"
       "F(0, 100)\n\n"
@@ -584,6 +690,11 @@ QDoubleSpinBox* MainView::environmentIntensitySpinBox() const
     return m_environmentIntensitySpinBox;
 }
 
+QSpinBox* MainView::environmentRotationYSpinBox() const
+{
+    return m_environmentRotationYSpinBox;
+}
+
 void MainView::setEnvironmentHdrPath(const QString& path)
 {
     if (m_environmentHdrPathEdit != nullptr) {
@@ -662,6 +773,11 @@ QSpinBox* MainView::previewStepsSpinBox() const
 QSpinBox* MainView::russianRouletteMinDepthSpinBox() const
 {
     return m_russianRouletteMinDepthSpinBox;
+}
+
+QSpinBox* MainView::maxSubsurfaceScattersSpinBox() const
+{
+    return m_maxSubsurfaceScattersSpinBox;
 }
 
 QComboBox* MainView::renderViewOverlayComboBox() const
@@ -796,6 +912,10 @@ void MainView::setRenderState(
 
 void MainView::closeEvent(QCloseEvent* event)
 {
+    emit applicationShuttingDown();
+    if (m_viewport != nullptr) {
+        m_viewport->shutdown();
+    }
     saveLayoutToSettings();
     QWidget::closeEvent(event);
 }

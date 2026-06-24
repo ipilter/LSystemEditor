@@ -73,8 +73,14 @@ public:
     int previewStepsPerLevel() const;
     void setPreviewStepsPerLevel(int value);
 
+    int uiUpdateEveryNSamples() const;
+    void setUiUpdateEveryNSamples(int value);
+
     int russianRouletteMinDepth() const;
     void setRussianRouletteMinDepth(int value);
+
+    int maxSubsurfaceScatters() const;
+    void setMaxSubsurfaceScatters(int value);
 
     QColor accelBvhColor() const;
     void setAccelBvhColor(const QColor& color);
@@ -96,6 +102,9 @@ public:
 
     float environmentIntensity() const;
     void setEnvironmentIntensity(float value);
+
+    int environmentRotationY() const;
+    void setEnvironmentRotationY(int degrees);
 
     float fStop() const;
     void setFStop(float value);
@@ -139,6 +148,7 @@ public:
 signals:
     void debounceMsChanged(const QString& elementId, int ms);
     void cameraDynamicsSettingsChanged(const CameraDynamicsSettings& settings);
+    void uiUpdateEveryNSamplesChanged(int value);
 
 private:
     static int clampDebounceMs(int value);
@@ -148,13 +158,16 @@ private:
     static int clampMinSamples(int value);
     static float clampRelativeErrorThreshold(float value);
     static int clampPreviewStepsPerLevel(int value);
+    static int clampUiUpdateEveryNSamples(int value);
     static int clampRussianRouletteMinDepth(int value);
+    static int clampMaxSubsurfaceScatters(int value);
     static float clampCreaseAngleDeg(float value);
     static float clampFStop(float value);
     static float clampFocalLengthMm(float value);
     static float clampShutterSpeedSeconds(float value);
     static float clampIso(float value);
     static float clampEnvironmentIntensity(float value);
+    static int clampEnvironmentRotationY(int degrees);
     static int clampRegionCoordinate(int value, int maxInclusive);
     static int clampEditorFontSize(int value);
     void seedDefaultDebounceValues();
@@ -168,7 +181,9 @@ private:
     int m_minSamples = 16;
     float m_relativeErrorThreshold = 0.02f;
     int m_previewStepsPerLevel = 0;
+    int m_uiUpdateEveryNSamples = 1;
     int m_russianRouletteMinDepth = 3;
+    int m_maxSubsurfaceScatters = 8;
     QColor m_accelBvhColor = QColor(230, 200, 0);
     float m_creaseAngleDeg = 50.0f;
     QString m_environmentHdrPath;
@@ -176,6 +191,7 @@ private:
     int m_lsystemEditorFontSize = 9;
     int m_logFontSize = 9;
     float m_environmentIntensity = 1.0f;
+    int m_environmentRotationY = 0;
     float m_fStop = 0.0f;
     float m_focalLengthMm = 0.0f;
     float m_shutterSpeedSeconds = 0.0f;

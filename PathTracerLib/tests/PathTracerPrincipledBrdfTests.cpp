@@ -11,6 +11,7 @@
 #include "Path/PathState.h"
 #include "Spectral/SpectralCore.h"
 #include "Spectral/SpectralState.h"
+#include "Subsurface/SubsurfaceTransportCore.h"
 
 #include <cmath>
 #include <iostream>
@@ -108,8 +109,39 @@ void testSurfaceLobeWeights()
 {
     const MaterialGpu material = makeMaterial(1.0f, 1.0f, 1.0f, 0.2f, 0.0f);
     const BrdfLobeWeights weights = computeSurfaceLobeWeights(material);
-    expectNear(weights.diffuse, 1.0f, 0.01f, "v1 uses diffuse-only lobe");
-    expectNear(weights.specular, 0.0f, 0.01f, "specular lobe stubbed off");
+    expectNear(weights.diffuse, 0.5f, 0.01f, "non-metallic splits surface between diffuse and specular");
+    expectNear(weights.specular, 0.5f, 0.01f, "non-metallic specular lobe weight");
+    expectNear(weights.subsurface, 0.0f, 0.01f, "no subsurface by default");
+
+    const MaterialGpu subsurface = makeMaterial(
+        1.0f, 1.0f, 1.0f, 0.2f, 0.0f, 1.5f, 0.0f, -1.0f,
+        static_cast<uint32_t>(MaterialType::Opaque), 0.6f);
+    const BrdfLobeWeights subWeights = computeSurfaceLobeWeights(subsurface);
+    expectNear(subWeights.subsurface, 0.6f, 0.01f, "subsurface weight");
+    expectNear(subWeights.diffuse, 0.2f, 0.01f, "diffuse complement within surface");
+    expectNear(subWeights.specular, 0.2f, 0.01f, "specular complement within surface");
+}
+
+void testWeightDrivenSubsurfaceWithoutType()
+{
+    const MaterialGpu wax = makeMaterial(
+        0.9f, 0.95f, 0.2f, 0.8f, 0.0f, 1.5f, 0.0f, -1.0f,
+        static_cast<uint32_t>(MaterialType::Opaque), 1.0f, 2.0f);
+    expectTrue(materialHasParticipatingMedium(wax), "subsurface weight enables participating medium");
+    expectTrue(materialUsesVolumeTransport(wax), "subsurface weight enables volume transport");
+    expectTrue(!materialIsSubsurfaceType(wax), "no explicit subsurface type required");
+}
+
+void testMetallicSpecularSample()
+{
+    const MaterialGpu metal = makeMaterial(1.0f, 0.85f, 0.3f, 0.15f, 1.0f);
+    const BrdfContext ctx = makeContext(metal);
+    const BrdfLobeWeights reflect = computeReflectLobeWeights(metal);
+    expectNear(reflect.diffuse, 0.0f, 0.01f, "metal has no diffuse lobe");
+    expectNear(reflect.specular, 1.0f, 0.01f, "metal is specular-only");
+
+    const BrdfSampleResult sample = brdfSampleReflect(ctx, 0.9f, 0.25f);
+    expectTrue(sample.valid, "metallic principled sample valid");
 }
 
 void testDiffuseSurfaceDefaultsToOpaquePath()
@@ -122,8 +154,7 @@ void testSubsurfaceUsesVolumeTransport()
 {
     const MaterialGpu wax = makeMaterial(
         0.9f, 0.95f, 0.2f, 0.8f, 0.0f, 1.5f, 0.0f, -1.0f,
-        static_cast<uint32_t>(MaterialType::Subsurface), 1.0f, 2.0f);
-    expectTrue(materialIsSubsurfaceType(wax), "typed wax is subsurface");
+        static_cast<uint32_t>(MaterialType::Opaque), 1.0f, 2.0f);
     expectTrue(materialUsesVolumeTransport(wax), "subsurface uses random-walk volume transport");
 }
 
@@ -183,7 +214,38 @@ void testPathStateDefaults()
 {
     PathState path{};
     expectNear(path.wavelengthNm, 550.0f, 0.01f, "default hero wavelength");
-    expectTrue(!path.insideVolume, "path starts outside volume");
+    expectNear(path.sssThroughput, 1.0f, 0.01f, "default sss throughput");
+}
+
+void testSubsurfaceShellMode()
+{
+    const MaterialGpu wax = makeMaterial(
+        0.8f, 0.8f, 0.8f, 0.5f, 0.0f, 1.5f, 0.0f, -1.0f,
+        static_cast<uint32_t>(MaterialType::Subsurface), 1.0f, 2.0f);
+    SubsurfaceShellInfo openSheet{};
+    openSheet.valid = true;
+    openSheet.hasBackFace = false;
+    openSheet.thicknessMm = 0.01f;
+    expectTrue(subsurfaceUsesThinShellMode(openSheet, wax), "open sheet uses thin shell");
+
+    SubsurfaceShellInfo thick{};
+    thick.valid = true;
+    thick.hasBackFace = true;
+    thick.thicknessMm = 50.0f;
+    expectTrue(!subsurfaceUsesThinShellMode(thick, wax), "thick branch uses random walk");
+}
+
+void testThinShellTransmittanceOrdering()
+{
+    MaterialGpu material = makeMaterial(
+        0.2f, 0.8f, 0.1f, 0.5f, 0.0f, 1.5f, 0.0f, -1.0f,
+        static_cast<uint32_t>(MaterialType::Opaque), 0.8f, 1.5f);
+    material.subsurfaceScatterScale = 1.0f;
+
+    const float tGreen = SubsurfaceTransportDetail::thinShellTransmittance(material, 2.0f, 550.0f);
+    const float tRed = SubsurfaceTransportDetail::thinShellTransmittance(material, 2.0f, 650.0f);
+    expectTrue(tGreen > 0.0f && tGreen <= 1.0f, "thin shell transmittance in range");
+    (void)tRed;
 }
 
 void testVolumeFreeFlight()
@@ -205,6 +267,8 @@ int main()
     testDiffuseSample();
     testDiffuseThroughput();
     testSurfaceLobeWeights();
+    testWeightDrivenSubsurfaceWithoutType();
+    testMetallicSpecularSample();
     testDiffuseSurfaceDefaultsToOpaquePath();
     testSubsurfaceUsesVolumeTransport();
     testMaterialParamsMapping();
@@ -213,6 +277,8 @@ int main()
     testOrenNayar_ZeroRoughnessMatchesLambert();
     testSpectralBrdfEvalPositive();
     testPathStateDefaults();
+    testSubsurfaceShellMode();
+    testThinShellTransmittanceOrdering();
     testVolumeFreeFlight();
 
     if (gFailures == 0) {

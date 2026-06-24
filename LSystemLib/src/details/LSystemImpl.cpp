@@ -93,7 +93,8 @@ void LSystemImpl::parse(const std::string& str)
     for (std::size_t i = 0; i < first_rule_line; ++i)
     {
         const std::string_view t = trim_in_place(strip_hash_comment(lines[i]));
-        if (t.empty() || is_material_declaration_line(t) || is_global_constant_line(t))
+        if (t.empty() || is_material_declaration_start_line(t)
+            || is_line_skipped_for_axiom(lines, i) || is_global_constant_line(t))
         {
             continue;
         }

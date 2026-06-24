@@ -70,7 +70,7 @@ bool parse_number(std::string_view line, std::size_t& pos, double& out)
 
 bool is_global_constant_line(std::string_view trimmed_line)
 {
-    if (trimmed_line.empty() || is_material_declaration_line(trimmed_line))
+    if (trimmed_line.empty() || is_material_declaration_start_line(trimmed_line))
     {
         return false;
     }
@@ -149,9 +149,9 @@ bool try_parse_constant_line(std::string_view trimmed_line, std::unordered_map<s
 void parse_constants_from_lines(const std::vector<std::string_view>& lines,
     std::unordered_map<std::string, double>& constants)
 {
-    for (const std::string_view raw : lines)
+    for (std::size_t i = 0; i < lines.size(); ++i)
     {
-        std::string_view t = raw;
+        std::string_view t = lines[i];
         const std::size_t hash = t.find('#');
         if (hash != std::string_view::npos)
         {
@@ -165,7 +165,7 @@ void parse_constants_from_lines(const std::vector<std::string_view>& lines,
         {
             t.remove_suffix(1);
         }
-        if (t.empty())
+        if (t.empty() || is_line_skipped_for_axiom(lines, i))
         {
             continue;
         }

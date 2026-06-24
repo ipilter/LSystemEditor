@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Brdf/OrenNayarDiffuseBrdf.h"
+#include "Brdf/PrincipledBrdf.h"
 
 #if defined(__CUDACC__)
 #define BRDF_DISPATCH_FN __host__ __device__ inline
@@ -10,30 +10,31 @@
 
 BRDF_DISPATCH_FN Vec3 brdfEval(const BrdfContext& ctx, Vec3 wi)
 {
-    const OrenNayarDiffuseBrdf brdf{};
+    const PrincipledBrdf brdf{};
     return brdf.eval(ctx, wi);
 }
 
 BRDF_DISPATCH_FN BrdfSampleResult brdfSample(const BrdfContext& ctx, float u1, float u2)
 {
-    const OrenNayarDiffuseBrdf brdf{};
+    const PrincipledBrdf brdf{};
     return brdf.sample(ctx, u1, u2);
 }
 
 BRDF_DISPATCH_FN BrdfSampleResult brdfSampleReflect(const BrdfContext& ctx, float u1, float u2)
 {
-    return brdfSample(ctx, u1, u2);
+    const PrincipledBrdf brdf{};
+    return brdf.sampleReflectImpl(ctx, u1, u2);
 }
 
 BRDF_DISPATCH_FN float brdfPdf(const BrdfContext& ctx, Vec3 wi)
 {
-    const OrenNayarDiffuseBrdf brdf{};
+    const PrincipledBrdf brdf{};
     return brdf.pdf(ctx, wi);
 }
 
 BRDF_DISPATCH_FN float brdfThroughputLuminance(Vec3 throughput)
 {
-    const OrenNayarDiffuseBrdf brdf{};
+    const PrincipledBrdf brdf{};
     return brdf.luminance(throughput);
 }
 

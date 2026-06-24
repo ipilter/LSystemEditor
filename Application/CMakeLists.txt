@@ -93,6 +93,9 @@ function(application_add_pathtracer_executable)
         Qt6::Concurrent
         CUDA::cudart
         glm::glm)
+    if(PATHTRACER_ENABLE_PROFILE)
+        target_compile_definitions(pathtracer PRIVATE PATHTRACER_PROFILE)
+    endif()
     set_target_properties(pathtracer PROPERTIES
         OUTPUT_NAME pathtracer
         AUTOMOC ON

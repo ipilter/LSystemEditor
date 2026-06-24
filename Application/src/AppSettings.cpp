@@ -24,9 +24,15 @@ constexpr int kMinMaxSamplesPerPixel = 0;
 constexpr int kMaxMaxSamplesPerPixel = 1'000'000;
 constexpr int kMinPreviewStepsPerLevel = 0;
 constexpr int kMaxPreviewStepsPerLevel = 128;
+constexpr int kDefaultUiUpdateEveryNSamples = 1;
+constexpr int kMinUiUpdateEveryNSamples = 1;
+constexpr int kMaxUiUpdateEveryNSamples = 10'000;
 constexpr int kMinRussianRouletteMinDepth = 0;
 constexpr int kMaxRussianRouletteMinDepth = 64;
 constexpr int kDefaultRussianRouletteMinDepth = 3;
+constexpr int kMinMaxSubsurfaceScatters = 1;
+constexpr int kMaxMaxSubsurfaceScatters = 128;
+constexpr int kDefaultMaxSubsurfaceScatters = 8;
 constexpr const char* kSettingsOrg = "PathTracer";
 constexpr const char* kSettingsApp = "pathtracer";
 constexpr const char* kDebounceGroup = "debounce";
@@ -45,18 +51,23 @@ constexpr const char* kMaxSamplesPerPixelKey = "maxSamplesPerPixel";
 constexpr const char* kMinSamplesKey = "minSamples";
 constexpr const char* kRelativeErrorThresholdKey = "relativeErrorThreshold";
 constexpr const char* kPreviewStepsPerLevelKey = "previewStepsPerLevel";
+constexpr const char* kUiUpdateEveryNSamplesKey = "uiUpdateEveryNSamples";
 constexpr const char* kRussianRouletteMinDepthKey = "russianRouletteMinDepth";
+constexpr const char* kMaxSubsurfaceScattersKey = "maxSubsurfaceScatters";
 constexpr float kDefaultCreaseAngleDeg = 50.0f;
 constexpr float kMinCreaseAngleDeg = 0.0f;
 constexpr float kMaxCreaseAngleDeg = 180.0f;
 constexpr float kMinEnvironmentIntensity = 0.0f;
 constexpr float kMaxEnvironmentIntensity = 100.0f;
+constexpr int kMinEnvironmentRotationY = 0;
+constexpr int kMaxEnvironmentRotationY = 359;
 constexpr const char* kCreaseAngleDegKey = "creaseAngleDeg";
 constexpr const char* kEnvironmentHdrPathKey = "environmentHdrPath";
 constexpr const char* kLsystemFilePathKey = "lsystemFilePath";
 constexpr const char* kLsystemEditorFontSizeKey = "lsystemEditorFontSize";
 constexpr const char* kLogFontSizeKey = "logFontSize";
 constexpr const char* kEnvironmentIntensityKey = "environmentIntensity";
+constexpr const char* kEnvironmentRotationYKey = "environmentRotationY";
 constexpr const char* kFStopKey = "fStop";
 constexpr const char* kFocalLengthMmKey = "focalLengthMm";
 constexpr const char* kShutterSpeedSecondsKey = "shutterSpeedSeconds";
@@ -359,6 +370,23 @@ void AppSettings::setPreviewStepsPerLevel(int value)
     save();
 }
 
+int AppSettings::uiUpdateEveryNSamples() const
+{
+    return m_uiUpdateEveryNSamples;
+}
+
+void AppSettings::setUiUpdateEveryNSamples(int value)
+{
+    const int clamped = clampUiUpdateEveryNSamples(value);
+    if (m_uiUpdateEveryNSamples == clamped) {
+        return;
+    }
+
+    m_uiUpdateEveryNSamples = clamped;
+    emit uiUpdateEveryNSamplesChanged(m_uiUpdateEveryNSamples);
+    save();
+}
+
 int AppSettings::russianRouletteMinDepth() const
 {
     return m_russianRouletteMinDepth;
@@ -372,6 +400,22 @@ void AppSettings::setRussianRouletteMinDepth(int value)
     }
 
     m_russianRouletteMinDepth = clamped;
+    save();
+}
+
+int AppSettings::maxSubsurfaceScatters() const
+{
+    return m_maxSubsurfaceScatters;
+}
+
+void AppSettings::setMaxSubsurfaceScatters(int value)
+{
+    const int clamped = clampMaxSubsurfaceScatters(value);
+    if (m_maxSubsurfaceScatters == clamped) {
+        return;
+    }
+
+    m_maxSubsurfaceScatters = clamped;
     save();
 }
 
@@ -483,6 +527,22 @@ void AppSettings::setEnvironmentIntensity(float value)
     }
 
     m_environmentIntensity = clamped;
+    save();
+}
+
+int AppSettings::environmentRotationY() const
+{
+    return m_environmentRotationY;
+}
+
+void AppSettings::setEnvironmentRotationY(int degrees)
+{
+    const int clamped = clampEnvironmentRotationY(degrees);
+    if (m_environmentRotationY == clamped) {
+        return;
+    }
+
+    m_environmentRotationY = clamped;
     save();
 }
 
@@ -735,6 +795,17 @@ float AppSettings::clampEnvironmentIntensity(float value)
     return value;
 }
 
+int AppSettings::clampEnvironmentRotationY(int degrees)
+{
+    if (degrees < kMinEnvironmentRotationY) {
+        return kMinEnvironmentRotationY;
+    }
+    if (degrees > kMaxEnvironmentRotationY) {
+        return kMaxEnvironmentRotationY;
+    }
+    return degrees;
+}
+
 float AppSettings::clampCreaseAngleDeg(float value)
 {
     if (value < kMinCreaseAngleDeg) {
@@ -812,6 +883,17 @@ int AppSettings::clampPreviewStepsPerLevel(int value)
     return value;
 }
 
+int AppSettings::clampUiUpdateEveryNSamples(int value)
+{
+    if (value < kMinUiUpdateEveryNSamples) {
+        return kMinUiUpdateEveryNSamples;
+    }
+    if (value > kMaxUiUpdateEveryNSamples) {
+        return kMaxUiUpdateEveryNSamples;
+    }
+    return value;
+}
+
 int AppSettings::clampRussianRouletteMinDepth(int value)
 {
     if (value < kMinRussianRouletteMinDepth) {
@@ -819,6 +901,17 @@ int AppSettings::clampRussianRouletteMinDepth(int value)
     }
     if (value > kMaxRussianRouletteMinDepth) {
         return kMaxRussianRouletteMinDepth;
+    }
+    return value;
+}
+
+int AppSettings::clampMaxSubsurfaceScatters(int value)
+{
+    if (value < kMinMaxSubsurfaceScatters) {
+        return kMinMaxSubsurfaceScatters;
+    }
+    if (value > kMaxMaxSubsurfaceScatters) {
+        return kMaxMaxSubsurfaceScatters;
     }
     return value;
 }
@@ -947,12 +1040,30 @@ void AppSettings::load()
         }
     }
 
+    const QVariant uiUpdateEveryNSamplesValue = settings.value(kUiUpdateEveryNSamplesKey);
+    if (uiUpdateEveryNSamplesValue.isValid()) {
+        bool ok = false;
+        const int uiUpdateEveryNSamples = uiUpdateEveryNSamplesValue.toInt(&ok);
+        if (ok) {
+            m_uiUpdateEveryNSamples = clampUiUpdateEveryNSamples(uiUpdateEveryNSamples);
+        }
+    }
+
     const QVariant rrDepthValue = settings.value(kRussianRouletteMinDepthKey);
     if (rrDepthValue.isValid()) {
         bool ok = false;
         const int rrDepth = rrDepthValue.toInt(&ok);
         if (ok) {
             m_russianRouletteMinDepth = clampRussianRouletteMinDepth(rrDepth);
+        }
+    }
+
+    const QVariant maxSssScattersValue = settings.value(kMaxSubsurfaceScattersKey);
+    if (maxSssScattersValue.isValid()) {
+        bool ok = false;
+        const int maxSssScatters = maxSssScattersValue.toInt(&ok);
+        if (ok) {
+            m_maxSubsurfaceScatters = clampMaxSubsurfaceScatters(maxSssScatters);
         }
     }
 
@@ -1042,6 +1153,15 @@ void AppSettings::load()
         const float intensity = static_cast<float>(environmentIntensityValue.toDouble(&ok));
         if (ok) {
             m_environmentIntensity = clampEnvironmentIntensity(intensity);
+        }
+    }
+
+    const QVariant environmentRotationYValue = settings.value(kEnvironmentRotationYKey);
+    if (environmentRotationYValue.isValid()) {
+        bool ok = false;
+        const int rotationY = environmentRotationYValue.toInt(&ok);
+        if (ok) {
+            m_environmentRotationY = clampEnvironmentRotationY(rotationY);
         }
     }
 
@@ -1213,7 +1333,9 @@ void AppSettings::save()
     settings.setValue(kMinSamplesKey, m_minSamples);
     settings.setValue(kRelativeErrorThresholdKey, static_cast<double>(m_relativeErrorThreshold));
     settings.setValue(kPreviewStepsPerLevelKey, m_previewStepsPerLevel);
+    settings.setValue(kUiUpdateEveryNSamplesKey, m_uiUpdateEveryNSamples);
     settings.setValue(kRussianRouletteMinDepthKey, m_russianRouletteMinDepth);
+    settings.setValue(kMaxSubsurfaceScattersKey, m_maxSubsurfaceScatters);
     settings.setValue(kAccelBvhColorRedKey, m_accelBvhColor.red());
     settings.setValue(kAccelBvhColorGreenKey, m_accelBvhColor.green());
     settings.setValue(kAccelBvhColorBlueKey, m_accelBvhColor.blue());
@@ -1223,6 +1345,7 @@ void AppSettings::save()
     settings.setValue(kLsystemEditorFontSizeKey, m_lsystemEditorFontSize);
     settings.setValue(kLogFontSizeKey, m_logFontSize);
     settings.setValue(kEnvironmentIntensityKey, static_cast<double>(m_environmentIntensity));
+    settings.setValue(kEnvironmentRotationYKey, m_environmentRotationY);
     settings.setValue(kFStopKey, static_cast<double>(m_fStop));
     settings.setValue(kFocalLengthMmKey, static_cast<double>(m_focalLengthMm));
     settings.setValue(kShutterSpeedSecondsKey, static_cast<double>(m_shutterSpeedSeconds));

@@ -100,6 +100,7 @@ bool pathTracerCopyToPbo(
     uchar4* pbo,
     int width,
     int height,
+    int publishDownscale,
     const RenderParamsGpu* d_params,
     float exposure,
     cudaStream_t stream);
@@ -112,6 +113,7 @@ bool pathTracerUpsamplePreviewToPbo(
     uchar4* pbo,
     int fullWidth,
     int fullHeight,
+    int publishDownscale,
     const RenderParamsGpu* d_params,
     float exposure,
     cudaStream_t stream);

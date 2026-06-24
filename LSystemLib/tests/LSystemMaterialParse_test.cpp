@@ -249,3 +249,98 @@ TEST(LSystemMaterialParse, parses_abbe_and_defaults)
     ASSERT_NE(def, nullptr);
     EXPECT_NEAR(materialChannelScalar(def->abbe, 58.f), 58.f, 1e-5f);
 }
+
+TEST(LSystemMaterialParse, parses_multiline_stem_subsurface_block)
+{
+    const char* text =
+        "Mat(Stem) = {\n"
+        "  albedo: {0.2, 0.5, 0.07},\n"
+        "  subsurface: {\n"
+        "    weight: 1.0,\n"
+        "    scatterR: 0.01, scatterG: 0.1, scatterB: 0.02,\n"
+        "    scatterScale: 0.005,\n"
+        "    anisotropy: 0.0\n"
+        "  }\n"
+        "}\n";
+
+    std::vector<std::string_view> lines;
+    std::string storage(text);
+    std::size_t start = 0;
+    while (start < storage.size()) {
+        const std::size_t nl = storage.find('\n', start);
+        if (nl == std::string::npos) {
+            lines.emplace_back(storage.data() + start, storage.size() - start);
+            break;
+        }
+        lines.emplace_back(storage.data() + start, nl - start);
+        start = nl + 1;
+    }
+
+    std::vector<MaterialDefinition> definitions;
+    parse_materials_from_lines(lines, definitions);
+    const MaterialEntry* entry = find_material(definitions, "Stem");
+    ASSERT_NE(entry, nullptr);
+    EXPECT_NEAR(materialChannelR(entry->albedo), 0.2f, 1e-5f);
+    EXPECT_NEAR(materialChannelScalar(entry->subsurface), 1.0f, 1e-5f);
+    EXPECT_NEAR(materialChannelR(entry->subsurfaceRadius), 0.01f, 1e-5f);
+    EXPECT_NEAR(materialChannelG(entry->subsurfaceRadius), 0.1f, 1e-5f);
+    EXPECT_NEAR(materialChannelB(entry->subsurfaceRadius), 0.02f, 1e-5f);
+    EXPECT_NEAR(materialChannelScalar(entry->subsurfaceScatterScale), 0.005f, 1e-5f);
+    EXPECT_EQ(entry->typeName, "Opaque");
+}
+
+TEST(LSystemMaterialParse, multiline_block_ignores_inline_comments)
+{
+    const char* text =
+        "Mat(Leaf) = {\n"
+        "  albedo: {0.2, 0.8, 0.1},  # leaf tint\n"
+        "  # whole-line comment\n"
+        "  subsurface: {weight: 0.8, scatterR: 1.5, scatterG: 3.0, scatterB: 0.8}\n"
+        "}\n";
+
+    std::vector<std::string_view> lines;
+    std::string storage(text);
+    std::size_t start = 0;
+    while (start < storage.size()) {
+        const std::size_t nl = storage.find('\n', start);
+        if (nl == std::string::npos) {
+            lines.emplace_back(storage.data() + start, storage.size() - start);
+            break;
+        }
+        lines.emplace_back(storage.data() + start, nl - start);
+        start = nl + 1;
+    }
+
+    std::vector<MaterialDefinition> definitions;
+    parse_materials_from_lines(lines, definitions);
+    const MaterialEntry* entry = find_material(definitions, "Leaf");
+    ASSERT_NE(entry, nullptr);
+    EXPECT_NEAR(materialChannelScalar(entry->subsurface), 0.8f, 1e-5f);
+}
+
+TEST(LSystemMaterialParse, is_line_skipped_for_axiom_multiline)
+{
+    const char* text =
+        "Mat(A) = {\n"
+        "  albedo: 0.5\n"
+        "}\n"
+        "F(1)\n";
+
+    std::vector<std::string_view> lines;
+    std::string storage(text);
+    std::size_t start = 0;
+    while (start < storage.size()) {
+        const std::size_t nl = storage.find('\n', start);
+        if (nl == std::string::npos) {
+            lines.emplace_back(storage.data() + start, storage.size() - start);
+            break;
+        }
+        lines.emplace_back(storage.data() + start, nl - start);
+        start = nl + 1;
+    }
+
+    EXPECT_TRUE(is_line_skipped_for_axiom(lines, 0));
+    EXPECT_TRUE(is_line_skipped_for_axiom(lines, 1));
+    EXPECT_TRUE(is_line_skipped_for_axiom(lines, 2));
+    EXPECT_FALSE(is_line_skipped_for_axiom(lines, 3));
+}

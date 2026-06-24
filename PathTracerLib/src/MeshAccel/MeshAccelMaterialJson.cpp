@@ -82,6 +82,7 @@ QJsonObject materialGpuToJson(const MaterialGpu& material)
     obj.insert(QStringLiteral("subsurface"), static_cast<double>(material.subsurface));
     obj.insert(QStringLiteral("subsurfaceRadius"), floatArray3(
         material.subsurfaceRadiusR, material.subsurfaceRadiusG, material.subsurfaceRadiusB));
+    obj.insert(QStringLiteral("subsurfaceScatterScale"), static_cast<double>(material.subsurfaceScatterScale));
     obj.insert(QStringLiteral("roughnessTex"), static_cast<int>(material.roughnessTex));
     obj.insert(QStringLiteral("metallicTex"), static_cast<int>(material.metallicTex));
     obj.insert(QStringLiteral("emissionTex"), static_cast<int>(material.emissionTex));
@@ -139,6 +140,8 @@ bool materialGpuFromJson(const QJsonObject& obj, MaterialGpu* outMaterial)
         material.subsurfaceRadiusG = static_cast<float>(subsurfaceRadius.at(1).toDouble(1.0));
         material.subsurfaceRadiusB = static_cast<float>(subsurfaceRadius.at(2).toDouble(1.0));
     }
+    material.subsurfaceScatterScale = static_cast<float>(
+        obj.value(QStringLiteral("subsurfaceScatterScale")).toDouble(1.0));
 
     material.albedoTex = static_cast<uint32_t>(obj.value(QStringLiteral("albedoTex")).toInt(0));
     material.roughnessTex = static_cast<uint32_t>(obj.value(QStringLiteral("roughnessTex")).toInt(0));
@@ -172,6 +175,7 @@ QJsonObject pathTracerMaterialExtrasJson(const MaterialGpu& material)
     pathTracer.insert(QStringLiteral("subsurface"), static_cast<double>(material.subsurface));
     pathTracer.insert(QStringLiteral("subsurfaceRadius"), floatArray3(
         material.subsurfaceRadiusR, material.subsurfaceRadiusG, material.subsurfaceRadiusB));
+    pathTracer.insert(QStringLiteral("subsurfaceScatterScale"), static_cast<double>(material.subsurfaceScatterScale));
     pathTracer.insert(QStringLiteral("volume"), volume);
     return pathTracer;
 }
@@ -204,6 +208,10 @@ void applyPathTracerMaterialExtrasJson(const QJsonObject& extras, MaterialGpu* m
         material->subsurfaceRadiusR = static_cast<float>(subsurfaceRadius.at(0).toDouble());
         material->subsurfaceRadiusG = static_cast<float>(subsurfaceRadius.at(1).toDouble());
         material->subsurfaceRadiusB = static_cast<float>(subsurfaceRadius.at(2).toDouble());
+    }
+    if (pathTracer.contains(QStringLiteral("subsurfaceScatterScale"))) {
+        material->subsurfaceScatterScale = static_cast<float>(
+            pathTracer.value(QStringLiteral("subsurfaceScatterScale")).toDouble());
     }
 
     const QJsonObject volume = pathTracer.value(QStringLiteral("volume")).toObject();

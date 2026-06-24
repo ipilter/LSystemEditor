@@ -33,6 +33,7 @@ public:
     QPushButton* environmentHdrBrowseButton() const;
     QPushButton* environmentHdrClearButton() const;
     QDoubleSpinBox* environmentIntensitySpinBox() const;
+    QSpinBox* environmentRotationYSpinBox() const;
     void setEnvironmentHdrPath(const QString& path);
     QDoubleSpinBox* fStopSpinBox() const;
     QDoubleSpinBox* focalLengthSpinBox() const;
@@ -48,6 +49,7 @@ public:
     QDoubleSpinBox* relativeErrorThresholdSpinBox() const;
     QSpinBox* previewStepsSpinBox() const;
     QSpinBox* russianRouletteMinDepthSpinBox() const;
+    QSpinBox* maxSubsurfaceScattersSpinBox() const;
     /** View mode combo: Render, BVH, Adaptive, UV, Normals. */
     QComboBox* renderViewOverlayComboBox() const;
     QComboBox* brdfDebugComboBox() const;
@@ -72,6 +74,9 @@ public:
     void setIteration(int value);
     void setRenderState(RenderAccumulationState state, int sampleCount, int budgetTotal, int activePixelCount);
 
+signals:
+    void applicationShuttingDown();
+
 protected:
     void closeEvent(QCloseEvent* event) override;
     bool eventFilter(QObject* watched, QEvent* event) override;
@@ -90,6 +95,7 @@ private:
     QPushButton* m_environmentHdrBrowseButton = nullptr;
     QPushButton* m_environmentHdrClearButton = nullptr;
     QDoubleSpinBox* m_environmentIntensitySpinBox = nullptr;
+    QSpinBox* m_environmentRotationYSpinBox = nullptr;
     QDoubleSpinBox* m_fStopSpinBox = nullptr;
     QDoubleSpinBox* m_focalLengthSpinBox = nullptr;
     QDoubleSpinBox* m_focusDistanceSpinBox = nullptr;
@@ -103,6 +109,7 @@ private:
     QDoubleSpinBox* m_relativeErrorThresholdSpinBox = nullptr;
     QSpinBox* m_previewStepsSpinBox = nullptr;
     QSpinBox* m_russianRouletteMinDepthSpinBox = nullptr;
+    QSpinBox* m_maxSubsurfaceScattersSpinBox = nullptr;
     QComboBox* m_renderViewOverlayComboBox = nullptr;
     QComboBox* m_brdfDebugComboBox = nullptr;
     QCheckBox* m_sceneOverlayCheckBox = nullptr;

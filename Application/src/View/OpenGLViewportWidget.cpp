@@ -22,6 +22,7 @@
 
 #include <cmath>
 #include <algorithm>
+#include <cstdint>
 #include <optional>
 #include <utility>
 
@@ -73,7 +74,26 @@ constexpr int kHeavyLoadDisplayRefreshIntervalMs = 100;
 constexpr int kModerateLoadDisplayRefreshIntervalMs = 66;
 constexpr int kHeavyLoadActivePixelThreshold = 500'000;
 constexpr int kModerateLoadActivePixelThreshold = 100'000;
+constexpr int kExtremeLoadPixelThreshold = 16'000'000;
+constexpr int kUltraLoadPixelThreshold = 64'000'000;
+constexpr int kExtremeLoadDisplayRefreshIntervalMs = 200;
+constexpr int kUltraLoadDisplayRefreshIntervalMs = 500;
+constexpr int kDisplayDecimationPixelThreshold = 4'000'000;
+constexpr int kDisplayDecimationUltraPixelThreshold = 64'000'000;
+constexpr int kRegionOverlayRepaintMs = 16;
 constexpr float kWheelZoomBase = 1.001f;
+
+int computeDisplayPublishDownscale(int width, int height)
+{
+    const std::int64_t pixels = static_cast<std::int64_t>(width) * static_cast<std::int64_t>(height);
+    if (pixels >= kDisplayDecimationUltraPixelThreshold) {
+        return 4;
+    }
+    if (pixels >= kDisplayDecimationPixelThreshold) {
+        return 2;
+    }
+    return 1;
+}
 
 void letterboxViewportRect(int widgetW, int widgetH, int renderW, int renderH, int& outX, int& outY, int& outW, int& outH)
 {
@@ -177,7 +197,8 @@ bool buildSceneMeshForModel(const SceneModel* model, Mesh& outMesh, std::string*
     }
 
     if (model->hasImportedMesh()) {
-        meshAppend(outMesh, model->importedMesh());
+        const uint32_t materialIndexOffset = static_cast<uint32_t>(outMesh.materials.size());
+        meshAppend(outMesh, model->importedMesh(), materialIndexOffset);
     }
 
     return true;
@@ -224,6 +245,13 @@ OpenGLViewportWidget::OpenGLViewportWidget(QWidget* parent)
     m_cameraTick.start();
     m_cameraTickTimer.start();
 
+    setUiUpdateEveryNSamples(AppSettings::instance().uiUpdateEveryNSamples());
+    connect(
+        &AppSettings::instance(),
+        &AppSettings::uiUpdateEveryNSamplesChanged,
+        this,
+        &OpenGLViewportWidget::setUiUpdateEveryNSamples);
+
     m_pathTracer.setFrameReadyCallback([this]() {
         m_hasNewFrame.store(true);
         if (!m_frameCallbackQueued.exchange(true)) {
@@ -234,10 +262,33 @@ OpenGLViewportWidget::OpenGLViewportWidget(QWidget* parent)
 
 OpenGLViewportWidget::~OpenGLViewportWidget()
 {
+    shutdown();
+}
+
+void OpenGLViewportWidget::shutdown()
+{
+    if (m_shutdownComplete) {
+        return;
+    }
+    m_shutdownComplete = true;
+
+    m_pathTracer.setFrameReadyCallback({});
+    m_cameraTick.stop();
+    m_cameraResetThrottle.cancel();
+    m_cameraMotionStopDebounce.cancel();
     endCameraDrag();
-    makeCurrent();
-    releaseGlResources();
-    doneCurrent();
+
+    m_hasNewFrame.store(false);
+    m_frameCallbackQueued.store(false);
+    m_iterationCallbackQueued.store(false);
+    m_publishRepaintQueued.store(false);
+    m_regionOverlayRepaintQueued.store(false);
+
+    if (m_glInitialized) {
+        makeCurrent();
+        releaseGlResources();
+        doneCurrent();
+    }
 }
 
 void OpenGLViewportWidget::setClearColor(const QColor& color)
@@ -315,6 +366,9 @@ void OpenGLViewportWidget::setSceneModel(SceneModel* model)
     connect(m_model, &SceneModel::russianRouletteMinDepthChanged, this, [this](int depth) {
         m_pathTracer.setRussianRouletteMinDepth(depth);
     });
+    connect(m_model, &SceneModel::maxSubsurfaceScattersChanged, this, [this](int count) {
+        m_pathTracer.setMaxSubsurfaceScatters(count);
+    });
 
     connect(m_model, &SceneModel::boundsOverlayModeChanged, this, [this](RenderViewOverlayMode mode) {
         m_pathTracer.setDebugOverlayMode(static_cast<int>(mode));
@@ -391,6 +445,14 @@ void OpenGLViewportWidget::setEnvironmentHdrPath(const QString& path)
 void OpenGLViewportWidget::setEnvironmentIntensity(float intensity)
 {
     m_pathTracer.setEnvironmentIntensity(intensity);
+    if (m_glInitialized) {
+        update();
+    }
+}
+
+void OpenGLViewportWidget::setEnvironmentRotationY(int degrees)
+{
+    m_pathTracer.setEnvironmentRotationY(degrees);
     if (m_glInitialized) {
         update();
     }
@@ -505,6 +567,12 @@ void OpenGLViewportWidget::resizeGL(int w, int h)
 
 void OpenGLViewportWidget::paintGL()
 {
+#ifdef PATHTRACER_PROFILE
+    QElapsedTimer paintTimer;
+    paintTimer.start();
+    qint64 uploadUs = 0;
+#endif
+
     const float r = static_cast<float>(m_clearColor.redF());
     const float g = static_cast<float>(m_clearColor.greenF());
     const float b = static_cast<float>(m_clearColor.blueF());
@@ -521,7 +589,14 @@ void OpenGLViewportWidget::paintGL()
     if (m_pathTracer.isDisplayPublishReady()) {
         const int readySlot = m_pathTracer.finishDisplayPublish();
         if (readySlot >= 0) {
+#ifdef PATHTRACER_PROFILE
+            QElapsedTimer uploadTimer;
+            uploadTimer.start();
+#endif
             uploadDisplayTexture(readySlot, !m_textureAllocated);
+#ifdef PATHTRACER_PROFILE
+            uploadUs = uploadTimer.nsecsElapsed() / 1000;
+#endif
             m_textureAllocated = true;
             m_displaySlot = 1 - readySlot;
         }
@@ -554,6 +629,23 @@ void OpenGLViewportWidget::paintGL()
     }
 
     drawSceneOverlays();
+
+#ifdef PATHTRACER_PROFILE
+    const qint64 paintUs = paintTimer.nsecsElapsed() / 1000;
+    m_paintProfileTotalUs += paintUs;
+    m_paintProfileUploadUs += uploadUs;
+    ++m_paintProfileSampleCount;
+    if (m_paintProfileSampleCount >= 64) {
+        AppLog::instance().info(
+            QStringLiteral("Viewport paint timing (last %1 frames): avg paint %2 ms, avg GL upload %3 ms")
+                .arg(m_paintProfileSampleCount)
+                .arg(static_cast<double>(m_paintProfileTotalUs) / m_paintProfileSampleCount / 1000.0, 0, 'f', 2)
+                .arg(static_cast<double>(m_paintProfileUploadUs) / m_paintProfileSampleCount / 1000.0, 0, 'f', 2));
+        m_paintProfileSampleCount = 0;
+        m_paintProfileTotalUs = 0;
+        m_paintProfileUploadUs = 0;
+    }
+#endif
 }
 
 void OpenGLViewportWidget::drawImageSpaceLayers(int viewportX, int viewportY, int viewportW, int viewportH)
@@ -647,18 +739,15 @@ void OpenGLViewportWidget::rebuildBoundsOverlay()
 
 void OpenGLViewportWidget::refreshDisplayImage()
 {
-    if (!m_glInitialized || m_model == nullptr || !m_textureAllocated) {
+    if (!m_glInitialized || m_model == nullptr) {
         update();
         return;
     }
 
-    makeCurrent();
-    const int slot = m_displaySlot;
-    if (m_pathTracer.publishDisplayFrame(slot)) {
-        uploadDisplayTexture(slot, false);
-        m_displaySlot = 1 - slot;
+    m_hasNewFrame.store(true);
+    if (m_pathTracer.hasDisplayPublishInFlight()) {
+        scheduleDisplayPublishRepaint();
     }
-    doneCurrent();
     update();
 }
 
@@ -862,7 +951,12 @@ void OpenGLViewportWidget::mouseMoveEvent(QMouseEvent* event)
         const auto imagePixel = widgetPosToImagePixel(event->pos());
         if (imagePixel.has_value() && m_regionDefinePreview != *imagePixel) {
             m_regionDefinePreview = *imagePixel;
-            update();
+            if (!m_regionOverlayRepaintQueued.exchange(true)) {
+                QTimer::singleShot(kRegionOverlayRepaintMs, this, [this]() {
+                    m_regionOverlayRepaintQueued.store(false);
+                    update();
+                });
+            }
         }
         event->accept();
         return;
@@ -1074,6 +1168,16 @@ int OpenGLViewportWidget::effectiveDisplayRefreshIntervalMs() const
         return kMinDisplayRefreshIntervalMs;
     }
 
+    const int renderW = m_model->renderSize().width();
+    const int renderH = m_model->renderSize().height();
+    const std::int64_t totalPixels = static_cast<std::int64_t>(renderW) * static_cast<std::int64_t>(renderH);
+    if (totalPixels >= kUltraLoadPixelThreshold) {
+        return kUltraLoadDisplayRefreshIntervalMs;
+    }
+    if (totalPixels >= kExtremeLoadPixelThreshold) {
+        return kExtremeLoadDisplayRefreshIntervalMs;
+    }
+
     const int previewSteps = m_model->previewStepsPerLevel();
     const int sampleCount = m_pathTracer.currentSampleCount();
     if (sampleCount <= previewSteps) {
@@ -1095,7 +1199,13 @@ void OpenGLViewportWidget::dispatchFrameUpdate()
 {
     m_frameCallbackQueued.store(false);
 
-    const bool prioritizeFirstFrame = m_pathTracer.currentSampleCount() <= 1;
+    const std::int64_t totalPixels =
+        m_model != nullptr
+        ? static_cast<std::int64_t>(m_model->renderSize().width()) *
+              static_cast<std::int64_t>(m_model->renderSize().height())
+        : 0;
+    const bool prioritizeFirstFrame =
+        m_pathTracer.currentSampleCount() <= 1 && totalPixels < kExtremeLoadPixelThreshold;
     const int refreshIntervalMs = effectiveDisplayRefreshIntervalMs();
 
     if (!prioritizeFirstFrame) {
@@ -1184,6 +1294,11 @@ void OpenGLViewportWidget::pauseRender()
     m_pathTracer.stop();
     m_renderPaused = true;
     emitRenderState();
+}
+
+void OpenGLViewportWidget::setUiUpdateEveryNSamples(int interval)
+{
+    m_pathTracer.setUiUpdateEveryNSamples(interval);
 }
 
 bool OpenGLViewportWidget::exportSceneWavefrontObj(const QString& objFilePath, QString* errorMessage) const
@@ -1403,6 +1518,17 @@ void OpenGLViewportWidget::cancelRegionDefinition()
     setRegionDefineMode(false);
 }
 
+void OpenGLViewportWidget::applyDisplayPublishDownscaleForModel()
+{
+    if (m_model == nullptr) {
+        return;
+    }
+
+    const int w = m_model->renderSize().width();
+    const int h = m_model->renderSize().height();
+    m_pathTracer.setDisplayPublishDownscale(computeDisplayPublishDownscale(w, h));
+}
+
 void OpenGLViewportWidget::recreateGpuBuffers()
 {
     if (m_model == nullptr) {
@@ -1462,8 +1588,11 @@ void OpenGLViewportWidget::recreateGpuBuffers()
         return;
     }
 
+    applyDisplayPublishDownscaleForModel();
+
     m_pathTracer.setClearColor(m_clearColor);
     m_pathTracer.setEnvironmentIntensity(m_model->environmentIntensity());
+    m_pathTracer.setEnvironmentRotationY(m_model->environmentRotationY());
 
     rebuildBoundsOverlay();
 
@@ -1473,7 +1602,9 @@ void OpenGLViewportWidget::recreateGpuBuffers()
     m_pathTracer.setDebugOverlayMode(static_cast<int>(m_model->boundsOverlayMode()));
     m_pathTracer.setBrdfDebugFlags(m_model->brdfDebugFlags());
     m_pathTracer.setPreviewStepsPerLevel(m_model->previewStepsPerLevel());
+    m_pathTracer.setUiUpdateEveryNSamples(AppSettings::instance().uiUpdateEveryNSamples());
     m_pathTracer.setRussianRouletteMinDepth(m_model->russianRouletteMinDepth());
+    m_pathTracer.setMaxSubsurfaceScatters(m_model->maxSubsurfaceScatters());
     m_pathTracer.setEnvironmentHdrPath(m_model->environmentHdrPath());
     m_pathTracer.setPhysicalCamera(m_model->fStop(), m_model->shutterSpeedSeconds(), m_model->iso());
     applyRegionRenderSettings(false);
@@ -1508,8 +1639,11 @@ void OpenGLViewportWidget::uploadDisplayTexture(int slot, bool initialUpload)
         return;
     }
 
-    const int w = m_model->renderSize().width();
-    const int h = m_model->renderSize().height();
+    const int w = m_pathTracer.displayPublishWidth();
+    const int h = m_pathTracer.displayPublishHeight();
+    if (w <= 0 || h <= 0) {
+        return;
+    }
 
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, m_pbos[slot]);
     glBindTexture(GL_TEXTURE_2D, m_texture);
