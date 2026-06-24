@@ -45,6 +45,7 @@ private:
     void onLsystemLoadButtonClicked();
     void onResetSceneButtonClicked();
     void onExportSceneButtonClicked();
+    void onImportSceneButtonClicked();
     void onEnvironmentHdrBrowseClicked();
     void onEnvironmentHdrClearClicked();
     void onEnvironmentIntensitySpinBoxChanged(double value);

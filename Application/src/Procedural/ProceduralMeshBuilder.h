@@ -17,4 +17,6 @@ public:
         Mesh& outMesh,
         const ProceduralBuildParams& params = ProceduralBuildParams{},
         std::string* outError = nullptr);
+
+    static void applyRootTransform(Mesh& mesh, const RootTransform& root);
 };

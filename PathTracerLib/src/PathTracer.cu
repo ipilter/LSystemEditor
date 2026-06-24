@@ -1,6 +1,6 @@
 #include "CameraDevice.cuh"
 #include "MeshAccel/MeshAccelScene.cuh"
-#include "PathIntegratorRandCore.h"
+#include "PathIntegratorCore.h"
 #include "PathTracerAdaptiveSampling.h"
 #include "PathTracerCuda.h"
 #include "Spectral/SpectralState.h"

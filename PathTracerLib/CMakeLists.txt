@@ -7,8 +7,12 @@ set(PATHTRACER_LIB_SOURCES
     "${PATHTRACER_LIB_DIR}/src/MeshAccel/MeshBvhBuilder.cpp"
     "${PATHTRACER_LIB_DIR}/src/MeshAccel/MeshAccelScene.cpp"
     "${PATHTRACER_LIB_DIR}/src/MeshAccel/MeshAccelWavefrontExport.cpp"
+    "${PATHTRACER_LIB_DIR}/src/MeshAccel/MeshAccelMaterialJson.cpp"
+    "${PATHTRACER_LIB_DIR}/src/MeshAccel/MeshAccelTextureBake.cpp"
+    "${PATHTRACER_LIB_DIR}/src/MeshAccel/MeshAccelGltfExport.cpp"
+    "${PATHTRACER_LIB_DIR}/src/MeshAccel/MeshAccelGltfImport.cpp"
+    "${PATHTRACER_LIB_DIR}/src/MeshAccel/MeshAccelSceneGltfExport.cpp"
     "${PATHTRACER_LIB_DIR}/src/MeshAccel/MeshSceneContent.cpp"
-    "${PATHTRACER_LIB_DIR}/src/Spectral/SpectralState.cpp"
     "${PATHTRACER_LIB_DIR}/src/PathTracer.cpp")
 
 set(PATHTRACER_CUDA_SOURCES
@@ -35,11 +39,13 @@ target_include_directories(PathTracerLib PUBLIC
     "${PATHTRACER_LIB_INCLUDE_DIR}/Geometry"
     "${PATHTRACER_LIB_INCLUDE_DIR}/MeshAccel"
     "${PATHTRACER_LIB_INCLUDE_DIR}/Brdf"
+    "${PATHTRACER_LIB_INCLUDE_DIR}/Material"
+    "${PATHTRACER_LIB_INCLUDE_DIR}/Path"
+    "${PATHTRACER_LIB_INCLUDE_DIR}/Medium"
+    "${PATHTRACER_LIB_INCLUDE_DIR}/Bssrdf"
     "${PATHTRACER_LIB_INCLUDE_DIR}/Sampling"
     "${PATHTRACER_LIB_INCLUDE_DIR}/Spectral"
     "${PATHTRACER_LIB_INCLUDE_DIR}/Texture")
-target_compile_definitions(PathTracerLib PRIVATE
-    "PATHTRACER_RGB2SPEC_COEFF_PATH=\"${PATHTRACER_LIB_DIR}/src/Spectral/srgb.coeff\"")
 option(PATHTRACER_ENABLE_PROFILE "Enable render pipeline profiling logs" ON)
 if(PATHTRACER_ENABLE_PROFILE)
     target_compile_definitions(PathTracerLib PRIVATE PATHTRACER_PROFILE)
@@ -101,29 +107,19 @@ target_include_directories(path_tracer_camera_sampling_tests PRIVATE "${PATHTRAC
 set_target_properties(path_tracer_camera_sampling_tests PROPERTIES FOLDER "PathTracerLib/tests")
 add_test(NAME PathTracerCameraSampling COMMAND path_tracer_camera_sampling_tests)
 
-add_executable(path_tracer_spectral_tests tests/PathTracerSpectralTests.cpp)
-target_link_libraries(path_tracer_spectral_tests PRIVATE PathTracerLib)
-target_compile_definitions(path_tracer_spectral_tests PRIVATE
-    "PATHTRACER_RGB2SPEC_COEFF_PATH=\"${PATHTRACER_LIB_DIR}/src/Spectral/srgb.coeff\"")
-target_include_directories(path_tracer_spectral_tests PRIVATE
-    "${PATHTRACER_LIB_INCLUDE_DIR}"
-    "${PATHTRACER_LIB_INCLUDE_DIR}/Spectral"
-    "${PATHTRACER_LIB_INCLUDE_DIR}/Geometry")
-set_target_properties(path_tracer_spectral_tests PROPERTIES FOLDER "PathTracerLib/tests")
-add_test(NAME PathTracerSpectral COMMAND path_tracer_spectral_tests)
+# Spectral tests disabled for v1 RGB integrator restart.
+# add_executable(path_tracer_spectral_tests tests/PathTracerSpectralTests.cpp)
+# ...
 
-add_executable(path_tracer_principled_brdf_tests tests/PathTracerPrincipledBrdfTests.cpp)
-target_link_libraries(path_tracer_principled_brdf_tests PRIVATE PathTracerLib)
-target_compile_definitions(path_tracer_principled_brdf_tests PRIVATE
-    "PATHTRACER_RGB2SPEC_COEFF_PATH=\"${PATHTRACER_LIB_DIR}/src/Spectral/srgb.coeff\"")
-target_include_directories(path_tracer_principled_brdf_tests PRIVATE
+add_executable(path_tracer_oren_nayar_brdf_tests tests/PathTracerOrenNayarBrdfTests.cpp)
+target_link_libraries(path_tracer_oren_nayar_brdf_tests PRIVATE PathTracerLib)
+target_include_directories(path_tracer_oren_nayar_brdf_tests PRIVATE
     "${PATHTRACER_LIB_INCLUDE_DIR}"
     "${PATHTRACER_LIB_INCLUDE_DIR}/Brdf"
     "${PATHTRACER_LIB_INCLUDE_DIR}/Geometry"
-    "${PATHTRACER_LIB_INCLUDE_DIR}/MeshAccel"
-    "${PATHTRACER_LIB_INCLUDE_DIR}/Spectral")
-set_target_properties(path_tracer_principled_brdf_tests PROPERTIES FOLDER "PathTracerLib/tests")
-add_test(NAME PathTracerPrincipledBrdf COMMAND path_tracer_principled_brdf_tests)
+    "${PATHTRACER_LIB_INCLUDE_DIR}/MeshAccel")
+set_target_properties(path_tracer_oren_nayar_brdf_tests PROPERTIES FOLDER "PathTracerLib/tests")
+add_test(NAME PathTracerOrenNayarBrdf COMMAND path_tracer_oren_nayar_brdf_tests)
 
 add_executable(path_tracer_region_render_tests tests/PathTracerRegionRenderTests.cpp)
 target_link_libraries(path_tracer_region_render_tests PRIVATE PathTracerLib)
@@ -170,3 +166,12 @@ target_include_directories(path_tracer_scene_units_tests PRIVATE
     "${PATHTRACER_LIB_INCLUDE_DIR}/Geometry")
 set_target_properties(path_tracer_scene_units_tests PROPERTIES FOLDER "PathTracerLib/tests")
 add_test(NAME PathTracerSceneUnits COMMAND path_tracer_scene_units_tests)
+
+add_executable(path_tracer_gltf_interchange_tests tests/PathTracerGltfInterchangeTests.cpp)
+target_link_libraries(path_tracer_gltf_interchange_tests PRIVATE PathTracerLib)
+target_include_directories(path_tracer_gltf_interchange_tests PRIVATE
+    "${PATHTRACER_LIB_INCLUDE_DIR}"
+    "${PATHTRACER_LIB_INCLUDE_DIR}/MeshAccel"
+    "${PATHTRACER_LIB_INCLUDE_DIR}/Geometry")
+set_target_properties(path_tracer_gltf_interchange_tests PROPERTIES FOLDER "PathTracerLib/tests")
+add_test(NAME PathTracerGltfInterchange COMMAND path_tracer_gltf_interchange_tests)

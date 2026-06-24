@@ -61,43 +61,47 @@ TEST(LSystemMaterialParse, rejects_unknown_property)
         std::runtime_error);
     EXPECT_THROW(
         {
-            const bool ignored = try_parse_material_line("Mat(0) = {subsurface: 0.5}", definitions);
-            (void)ignored;
-        },
-        std::runtime_error);
-    EXPECT_THROW(
-        {
             const bool ignored = try_parse_material_line("Mat(0) = {transmission: 1}", definitions);
             (void)ignored;
         },
         std::runtime_error);
 }
 
-TEST(LSystemMaterialParse, parses_medium_properties)
+TEST(LSystemMaterialParse, parses_subsurface_material)
 {
     std::vector<MaterialDefinition> definitions;
     ASSERT_TRUE(try_parse_material_line(
-        "Mat(Wax) = {albedo: {0.9, 0.95, 0.2}, roughness: 0.8, sigmaS: {0.3, 0.25, 0.15}, "
-        "sigmaA: {0.02, 0.015, 0.01}, g: 0.5, ior: 1.5, specular: 0.2}",
+        "Mat(Wax) = {type: Subsurface, albedo: {0.9, 0.95, 0.2}, roughness: 0.8, subsurface: 1, "
+        "subsurfaceRadius: 2.0, ior: 1.5, specular: 0.2}",
         definitions));
     const MaterialEntry* e = find_material(definitions, "Wax");
     ASSERT_NE(e, nullptr);
-    EXPECT_NEAR(materialChannelR(e->sigmaS), 0.3f, 1e-5f);
-    EXPECT_NEAR(materialChannelG(e->sigmaS), 0.25f, 1e-5f);
-    EXPECT_NEAR(materialChannelB(e->sigmaS), 0.15f, 1e-5f);
-    EXPECT_NEAR(materialChannelR(e->sigmaA), 0.02f, 1e-5f);
-    EXPECT_NEAR(materialChannelScalar(e->mediumG), 0.5f, 1e-5f);
+    EXPECT_EQ(e->typeName, "Subsurface");
+    EXPECT_NEAR(materialChannelScalar(e->subsurface), 1.f, 1e-5f);
+    EXPECT_NEAR(materialChannelR(e->subsurfaceRadius), 2.f, 1e-5f);
     EXPECT_NEAR(materialChannelScalar(e->specular, 1.f), 0.2f, 1e-5f);
 }
 
-TEST(LSystemMaterialParse, parses_sigma_scalar_gray)
+TEST(LSystemMaterialParse, parses_glass_type)
 {
     std::vector<MaterialDefinition> definitions;
-    ASSERT_TRUE(try_parse_material_line("Mat(Glass) = {albedo: 1.0, sigmaS: 0, sigmaA: 0, g: 1, ior: 1.5}", definitions));
+    ASSERT_TRUE(try_parse_material_line("Mat(Glass) = {type: Glass, albedo: 1, roughness: 0, ior: 1.42}", definitions));
     const MaterialEntry* e = find_material(definitions, "Glass");
     ASSERT_NE(e, nullptr);
-    EXPECT_NEAR(materialChannelR(e->sigmaS), 0.f, 1e-5f);
-    EXPECT_NEAR(materialChannelScalar(e->mediumG), 1.f, 1e-5f);
+    EXPECT_EQ(e->typeName, "Glass");
+    EXPECT_NEAR(materialChannelScalar(e->ior, 1.5f), 1.42f, 1e-5f);
+}
+
+TEST(LSystemMaterialParse, rejects_deprecated_sigmaS)
+{
+    std::vector<MaterialDefinition> definitions;
+    EXPECT_THROW(
+        {
+            const bool ignored = try_parse_material_line(
+                "Mat(0) = {sigmaS: {0.3, 0.25, 0.15}}", definitions);
+            (void)ignored;
+        },
+        std::runtime_error);
 }
 
 TEST(LSystemMaterialParse, parses_empty_block_defaults)
@@ -108,10 +112,10 @@ TEST(LSystemMaterialParse, parses_empty_block_defaults)
     ASSERT_NE(e, nullptr);
     EXPECT_NEAR(materialChannelR(e->albedo), 0.8f, 1e-5f);
     EXPECT_NEAR(materialChannelScalar(e->roughness, 0.5f), 0.5f, 1e-5f);
-    EXPECT_NEAR(materialChannelR(e->sigmaS), kMaterialDefaultSigmaS, 1e-3f);
+    EXPECT_EQ(e->typeName, "Opaque");
 }
 
-TEST(LSystemMaterialParse, surface_only_material_defaults_to_opaque_sigma)
+TEST(LSystemMaterialParse, surface_only_material_defaults_to_opaque)
 {
     std::vector<MaterialDefinition> definitions;
     ASSERT_TRUE(try_parse_material_line(
@@ -119,8 +123,7 @@ TEST(LSystemMaterialParse, surface_only_material_defaults_to_opaque_sigma)
         definitions));
     const MaterialEntry* e = find_material(definitions, "Diffuse");
     ASSERT_NE(e, nullptr);
-    EXPECT_NEAR(materialChannelR(e->sigmaS), kMaterialDefaultSigmaS, 1e-3f);
-    EXPECT_NEAR(materialChannelR(e->sigmaA), 0.f, 1e-5f);
+    EXPECT_EQ(e->typeName, "Opaque");
 }
 
 TEST(LSystemMaterialParse, parses_metal_preset)
@@ -134,16 +137,19 @@ TEST(LSystemMaterialParse, parses_metal_preset)
     EXPECT_NEAR(materialChannelScalar(e->metallic), 1.f, 1e-5f);
 }
 
-TEST(LSystemMaterialParse, parses_leaf_preset)
+TEST(LSystemMaterialParse, parses_leaf_subsurface_preset)
 {
     std::vector<MaterialDefinition> definitions;
     ASSERT_TRUE(try_parse_material_line(
-        "Mat(Leaf) = {albedo: {0.2, 0.8, 0.1}, roughness: 0.5, specular: 1.0, "
-        "sigmaS: {2.0, 1.0, 3.0}, sigmaA: {0.5, 1.5, 0.8}, g: 0.3, ior: 1.5}",
+        "Mat(Leaf) = {type: Subsurface, albedo: {0.2, 0.8, 0.1}, roughness: 0.5, specular: 1.0, "
+        "subsurface: 0.6, subsurfaceRadius: {1.5, 3.0, 0.8}, ior: 1.5}",
         definitions));
     const MaterialEntry* e = find_material(definitions, "Leaf");
     ASSERT_NE(e, nullptr);
-    EXPECT_NEAR(materialChannelR(e->sigmaS), 2.0f, 1e-5f);
+    EXPECT_EQ(e->typeName, "Subsurface");
+    EXPECT_NEAR(materialChannelR(e->subsurfaceRadius), 1.5f, 1e-5f);
+    EXPECT_NEAR(materialChannelG(e->subsurfaceRadius), 3.0f, 1e-5f);
+    EXPECT_NEAR(materialChannelB(e->subsurfaceRadius), 0.8f, 1e-5f);
 }
 
 TEST(LSystemMaterialParse, rejects_typed_syntax)
@@ -228,19 +234,10 @@ TEST(LSystemMaterialParse, parses_grid_freqV_only)
     EXPECT_NEAR(entry->albedo.texture.params[10], 0.05f, 1e-5f);
 }
 
-TEST(LSystemMaterialParse, clamps_g_to_unit_interval)
-{
-    std::vector<MaterialDefinition> definitions;
-    ASSERT_TRUE(try_parse_material_line("Mat(0) = {g: 2.0}", definitions));
-    const MaterialEntry* e = find_material(definitions, "0");
-    ASSERT_NE(e, nullptr);
-    EXPECT_NEAR(materialChannelScalar(e->mediumG), 1.f, 1e-5f);
-}
-
 TEST(LSystemMaterialParse, parses_abbe_and_defaults)
 {
     std::vector<MaterialDefinition> definitions;
-    ASSERT_TRUE(try_parse_material_line("Mat(Glass) = {ior: 1.42, abbe: 59}", definitions));
+    ASSERT_TRUE(try_parse_material_line("Mat(Glass) = {type: Glass, ior: 1.42, abbe: 59}", definitions));
     const MaterialEntry* glass = find_material(definitions, "Glass");
     ASSERT_NE(glass, nullptr);
     EXPECT_NEAR(materialChannelScalar(glass->ior, 1.5f), 1.42f, 1e-5f);

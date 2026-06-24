@@ -457,11 +457,43 @@ void SceneModel::addProceduralInstance(ProceduralInstance instance)
 
 void SceneModel::resetScene()
 {
-    if (m_proceduralInstances.empty()) {
+    const bool hadContent = !m_proceduralInstances.empty() || m_importedMesh.has_value();
+    if (!hadContent) {
         return;
     }
 
     m_proceduralInstances.clear();
+    m_importedMesh.reset();
+    emit sceneChanged();
+}
+
+bool SceneModel::hasImportedMesh() const
+{
+    return m_importedMesh.has_value();
+}
+
+const Mesh& SceneModel::importedMesh() const
+{
+    static const Mesh kEmpty{};
+    return m_importedMesh.has_value() ? *m_importedMesh : kEmpty;
+}
+
+void SceneModel::setImportedMesh(Mesh mesh)
+{
+    if (mesh.triangles.empty()) {
+        m_importedMesh.reset();
+    } else {
+        m_importedMesh = std::move(mesh);
+    }
+    emit sceneChanged();
+}
+
+void SceneModel::clearImportedMesh()
+{
+    if (!m_importedMesh.has_value()) {
+        return;
+    }
+    m_importedMesh.reset();
     emit sceneChanged();
 }
 

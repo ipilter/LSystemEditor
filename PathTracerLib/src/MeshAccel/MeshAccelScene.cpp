@@ -3,7 +3,7 @@
 #include "MeshBvhBuilder.h"
 #include "Geometry/MathCore.h"
 #include "Mesh.h"
-#include "Medium/MediumProperties.h"
+#include "MeshAccel/MaterialType.h"
 #include "Texture/ProceduralTexture.h"
 
 #include <cuda_runtime.h>
@@ -39,9 +39,7 @@ MaterialGpu defaultMaterial()
     material.ior = 1.5f;
     material.diffuseRoughness = -1.0f;
     material.specular = 1.0f;
-    material.sigmaSr = MediumDetail::kOpaqueSigmaS;
-    material.sigmaSg = MediumDetail::kOpaqueSigmaS;
-    material.sigmaSb = MediumDetail::kOpaqueSigmaS;
+    material.materialType = static_cast<uint32_t>(MaterialType::Opaque);
     return material;
 }
 

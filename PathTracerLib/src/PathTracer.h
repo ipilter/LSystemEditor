@@ -138,6 +138,11 @@ public:
 
     bool exportMeshSceneWavefrontObj(const QString& objFilePath, QString* errorMessage = nullptr) const;
 
+    bool exportMeshSceneGltf(const QString& glbFilePath, QString* errorMessage = nullptr) const;
+
+    /** @brief Imports glTF/GLB into a Mesh (m→mm scale). Does not rebuild the GPU scene. */
+    static bool importMeshFromGltf(const QString& gltfFilePath, Mesh* outMesh, QString* errorMessage = nullptr);
+
 private:
     void renderLoop();
     void notifyWorker();

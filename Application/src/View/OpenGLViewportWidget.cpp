@@ -3,6 +3,7 @@
 #include "AppLog.h"
 #include "AppSettings.h"
 #include "MeshAccel/MeshSceneContent.h"
+#include "MeshAccel/Mesh.h"
 #include "Procedural/ProceduralSceneMeshBuilder.h"
 #include "SceneModel.h"
 #include "SceneUnits.h"
@@ -161,12 +162,25 @@ ProceduralBuildParams proceduralBuildParamsForModel(const SceneModel* model)
 
 bool buildSceneMeshForModel(const SceneModel* model, Mesh& outMesh, std::string* outError = nullptr)
 {
+    outMesh = Mesh{};
     if (model == nullptr) {
-        outMesh = Mesh{};
         return true;
     }
-    return buildMeshFromInstances(
-        model->proceduralInstances(), proceduralBuildParamsForModel(model), outMesh, outError);
+
+    Mesh proceduralMesh{};
+    if (!model->proceduralInstances().empty()) {
+        if (!buildMeshFromInstances(
+                model->proceduralInstances(), proceduralBuildParamsForModel(model), proceduralMesh, outError)) {
+            return false;
+        }
+        outMesh = std::move(proceduralMesh);
+    }
+
+    if (model->hasImportedMesh()) {
+        meshAppend(outMesh, model->importedMesh());
+    }
+
+    return true;
 }
 
 } // namespace
@@ -174,8 +188,8 @@ bool buildSceneMeshForModel(const SceneModel* model, Mesh& outMesh, std::string*
 OpenGLViewportWidget::OpenGLViewportWidget(QWidget* parent)
     : QOpenGLWidget(parent)
     , m_clearColor(QColor(10, 10, 10))
-    , m_cameraResetThrottle(250, this)
-    , m_cameraMotionStopDebounce(200, this)
+    , m_cameraResetThrottle(10, this)
+    , m_cameraMotionStopDebounce(10, this)
 {
     QSurfaceFormat format;
     format.setVersion(4, 6);
@@ -1175,6 +1189,16 @@ void OpenGLViewportWidget::pauseRender()
 bool OpenGLViewportWidget::exportSceneWavefrontObj(const QString& objFilePath, QString* errorMessage) const
 {
     return m_pathTracer.exportMeshSceneWavefrontObj(objFilePath, errorMessage);
+}
+
+bool OpenGLViewportWidget::exportSceneGltf(const QString& glbFilePath, QString* errorMessage) const
+{
+    return m_pathTracer.exportMeshSceneGltf(glbFilePath, errorMessage);
+}
+
+bool OpenGLViewportWidget::importSceneGltf(const QString& gltfFilePath, Mesh* outMesh, QString* errorMessage) const
+{
+    return PathTracer::importMeshFromGltf(gltfFilePath, outMesh, errorMessage);
 }
 
 void OpenGLViewportWidget::syncCameraToPathTracer()

@@ -4,7 +4,7 @@
 #include "LSystemEvaluator.h"
 #include "LSystemMaterials.h"
 #include "Loft.h"
-#include "Medium/MediumProperties.h"
+#include "MeshAccel/MaterialType.h"
 #include "Texture/TexturePack.h"
 #include "Turtle.h"
 
@@ -15,10 +15,6 @@
 #include <unordered_map>
 
 namespace {
-
-static_assert(
-    kMaterialDefaultSigmaS == MediumDetail::kOpaqueSigmaS,
-    "L-system default sigmaS must match opaque medium shortcut");
 
 bool isValidManifold(const manifold::Manifold& mesh)
 {
@@ -68,6 +64,20 @@ uint32_t channelTextureIndex(const MaterialChannel& channel, std::vector<Texture
     return addTexture(bank, channel.texture);
 }
 
+uint32_t materialTypeFromName(const std::string& typeName)
+{
+    if (typeName == "Glass") {
+        return static_cast<uint32_t>(MaterialType::Glass);
+    }
+    if (typeName == "Subsurface") {
+        return static_cast<uint32_t>(MaterialType::Subsurface);
+    }
+    if (typeName == "Emissive") {
+        return static_cast<uint32_t>(MaterialType::Emissive);
+    }
+    return static_cast<uint32_t>(MaterialType::Opaque);
+}
+
 MaterialGpu toMaterialGpu(const MaterialEntry& entry, std::vector<TextureDescGpu>& bank)
 {
     MaterialGpu material{};
@@ -79,13 +89,11 @@ MaterialGpu toMaterialGpu(const MaterialEntry& entry, std::vector<TextureDescGpu
     material.emission = materialChannelScalar(entry.emission);
     material.diffuseRoughness = materialChannelScalar(entry.diffuseRoughness, -1.0f);
     material.specular = materialChannelScalar(entry.specular, 1.0f);
-    material.sigmaAr = materialChannelR(entry.sigmaA, 0.0f);
-    material.sigmaAg = materialChannelG(entry.sigmaA, 0.0f);
-    material.sigmaAb = materialChannelB(entry.sigmaA, 0.0f);
-    material.sigmaSr = materialChannelR(entry.sigmaS, MediumDetail::kOpaqueSigmaS);
-    material.sigmaSg = materialChannelG(entry.sigmaS, MediumDetail::kOpaqueSigmaS);
-    material.sigmaSb = materialChannelB(entry.sigmaS, MediumDetail::kOpaqueSigmaS);
-    material.mediumG = materialChannelScalar(entry.mediumG);
+    material.materialType = materialTypeFromName(entry.typeName);
+    material.subsurface = materialChannelScalar(entry.subsurface, 0.0f);
+    material.subsurfaceRadiusR = materialChannelR(entry.subsurfaceRadius, 1.0f);
+    material.subsurfaceRadiusG = materialChannelG(entry.subsurfaceRadius, 1.0f);
+    material.subsurfaceRadiusB = materialChannelB(entry.subsurfaceRadius, 1.0f);
     material.ior = materialChannelScalar(entry.ior, 1.5f);
     material.abbeNumber = materialChannelScalar(entry.abbe, 58.0f);
 
@@ -95,9 +103,6 @@ MaterialGpu toMaterialGpu(const MaterialEntry& entry, std::vector<TextureDescGpu
     material.emissionTex = channelTextureIndex(entry.emission, bank);
     material.diffuseRoughnessTex = channelTextureIndex(entry.diffuseRoughness, bank);
     material.specularTex = channelTextureIndex(entry.specular, bank);
-    material.sigmaATex = channelTextureIndex(entry.sigmaA, bank);
-    material.sigmaSTex = channelTextureIndex(entry.sigmaS, bank);
-    material.mediumGTex = channelTextureIndex(entry.mediumG, bank);
     material.iorTex = channelTextureIndex(entry.ior, bank);
     return material;
 }
@@ -115,9 +120,7 @@ MaterialGpu defaultMaterialGpu()
     material.abbeNumber = 58.0f;
     material.diffuseRoughness = -1.0f;
     material.specular = 1.0f;
-    material.sigmaSr = MediumDetail::kOpaqueSigmaS;
-    material.sigmaSg = MediumDetail::kOpaqueSigmaS;
-    material.sigmaSb = MediumDetail::kOpaqueSigmaS;
+    material.materialType = static_cast<uint32_t>(MaterialType::Opaque);
     return material;
 }
 
@@ -194,6 +197,11 @@ void applyRootTransformToMesh(Mesh& mesh, const RootTransform& root)
 }
 
 } // namespace
+
+void ProceduralMeshBuilder::applyRootTransform(Mesh& mesh, const RootTransform& root)
+{
+    applyRootTransformToMesh(mesh, root);
+}
 
 bool ProceduralMeshBuilder::buildHostMesh(
     std::string_view definition,

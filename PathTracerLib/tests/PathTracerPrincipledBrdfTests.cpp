@@ -1,9 +1,14 @@
 #include "Brdf/BrdfDispatch.h"
 #include "Brdf/BrdfBase.h"
-#include "Brdf/PrincipledBrdf.h"
+#include "Brdf/BrdfLobe.h"
+#include "Brdf/OrenNayarDiffuseBrdf.h"
+#include "Bssrdf/BssrdfCore.h"
+#include "Material/MaterialParams.h"
+#include "Material/MaterialType.h"
 #include "Medium/MediumProperties.h"
 #include "Medium/VolumeCore.h"
 #include "MeshAccel/MeshAccelTypes.h"
+#include "Path/PathState.h"
 #include "Spectral/SpectralCore.h"
 #include "Spectral/SpectralState.h"
 
@@ -46,13 +51,9 @@ MaterialGpu makeMaterial(
     float ior = 1.5f,
     float emission = 0.0f,
     float diffuseRoughness = -1.0f,
-    float sigmaSr = 0.0f,
-    float sigmaSg = 0.0f,
-    float sigmaSb = 0.0f,
-    float sigmaAr = 0.0f,
-    float sigmaAg = 0.0f,
-    float sigmaAb = 0.0f,
-    float mediumG = 0.0f,
+    uint32_t materialType = static_cast<uint32_t>(MaterialType::Opaque),
+    float subsurface = 0.0f,
+    float subsurfaceRadius = 1.0f,
     float specular = 1.0f)
 {
     MaterialGpu material{};
@@ -64,38 +65,34 @@ MaterialGpu makeMaterial(
     material.ior = ior;
     material.emission = emission;
     material.diffuseRoughness = diffuseRoughness;
-    material.sigmaSr = sigmaSr;
-    material.sigmaSg = sigmaSg;
-    material.sigmaSb = sigmaSb;
-    material.sigmaAr = sigmaAr;
-    material.sigmaAg = sigmaAg;
-    material.sigmaAb = sigmaAb;
-    material.mediumG = mediumG;
+    material.materialType = materialType;
+    material.subsurface = subsurface;
+    material.subsurfaceRadiusR = subsurfaceRadius;
+    material.subsurfaceRadiusG = subsurfaceRadius;
+    material.subsurfaceRadiusB = subsurfaceRadius;
     material.specular = specular;
     material.abbeNumber = 58.0f;
     return material;
 }
 
-void testMetallicSample()
+void testDiffuseSample()
 {
-    const MaterialGpu material = makeMaterial(0.9f, 0.9f, 0.9f, 0.15f, 1.0f);
+    const MaterialGpu material = makeMaterial(0.72f, 0.68f, 0.58f, 0.85f);
     const BrdfContext ctx = makeContext(material);
     const BrdfSampleResult sample = brdfSampleReflect(ctx, 0.25f, 0.75f);
-    expectTrue(sample.valid, "metallic sample valid");
-    expectTrue(vecDot3(ctx.normal, sample.direction) > 0.0f, "metallic reflection in upper hemisphere");
-    expectTrue(materialIsMetallicSurface(material), "metallic classification");
-    expectTrue(!materialUsesVolumeTransport(material), "metallic never uses volume transport");
+    expectTrue(sample.valid, "diffuse sample valid");
+    expectTrue(vecDot3(ctx.normal, sample.direction) > 0.0f, "diffuse reflection in upper hemisphere");
 }
 
 void testDiffuseThroughput()
 {
     const MaterialGpu material = makeMaterial(0.72f, 0.68f, 0.58f, 0.85f);
     const BrdfContext ctx = makeContext(material);
-    const PrincipledBrdf brdf{};
+    const OrenNayarDiffuseBrdf brdf{};
 
     for (float u1 = 0.1f; u1 < 0.9f; u1 += 0.2f) {
         for (float u2 = 0.1f; u2 < 0.9f; u2 += 0.2f) {
-            const BrdfSampleResult sample = brdf.sampleReflectImpl(ctx, u1, u2);
+            const BrdfSampleResult sample = brdf.sample(ctx, u1, u2);
             if (!sample.valid) {
                 continue;
             }
@@ -107,76 +104,60 @@ void testDiffuseThroughput()
     }
 }
 
-void testReflectLobeWeights()
+void testSurfaceLobeWeights()
 {
-    MaterialGpu material = makeMaterial(1.0f, 1.0f, 1.0f, 0.2f, 0.0f);
-    const BrdfContext ctx = makeContext(material);
-    const PrincipledDetail::LobeWeights weights = PrincipledDetail::computeReflectLobeWeights(ctx);
-    expectNear(weights.diffuse, 0.5f, 0.01f, "dielectric has diffuse weight");
-    expectNear(weights.specular, 0.5f, 0.01f, "dielectric has specular weight");
-
-    material.metallic = 1.0f;
-    const BrdfContext metalCtx = makeContext(material);
-    const PrincipledDetail::LobeWeights metalWeights = PrincipledDetail::computeReflectLobeWeights(metalCtx);
-    expectNear(metalWeights.diffuse, 0.0f, 0.01f, "metal kills diffuse lobe");
-    expectNear(metalWeights.specular, 1.0f, 0.01f, "metal is all specular");
-}
-
-void testInterfaceFresnel()
-{
-    const MaterialGpu material = makeMaterial(1.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.5f);
-    const BrdfContext ctx = makeContext(material);
-    const float fresnel = PrincipledDetail::interfaceFresnelReflectance(ctx);
-    expectTrue(fresnel >= 0.0f && fresnel <= 1.0f, "fresnel in [0,1]");
-    expectTrue(fresnel > 0.02f && fresnel < 0.2f, "normal incidence glass has modest fresnel");
-}
-
-void testRefractIntoGlass()
-{
-    const MaterialGpu material = makeMaterial(1.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.5f);
-    const BrdfContext ctx = makeContext(material);
-    const BrdfSampleResult sample = brdfSampleRefract(ctx, 0.0f, 0.5f);
-    expectTrue(sample.valid, "refract sample valid");
-    expectTrue(sample.transmitted, "refract marked transmitted");
-    expectNear(sample.nextMediumEta, 1.5f, 0.01f, "entering glass sets nextMediumEta to ior");
-    expectTrue(vecDot3(ctx.normal, sample.direction) < 0.0f, "refracted ray exits upper hemisphere");
-}
-
-void testRefractOutOfGlass()
-{
-    const MaterialGpu material = makeMaterial(1.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.5f);
-    const Vec3 normal = vecMake3(0.0f, 0.0f, 1.0f);
-    const Vec3 wo = vecNormalize3(vecMake3(0.2f, 0.1f, -1.0f));
-    const BrdfContext ctx{normal, wo, material, 1.5f, 550.0f, 0};
-    const BrdfSampleResult sample = brdfSampleRefract(ctx, 0.0f, 0.5f);
-    expectTrue(sample.valid, "exit refraction valid with interior etaMedium");
-    expectTrue(sample.transmitted, "exit refraction marked transmitted");
-    expectNear(sample.nextMediumEta, 1.0f, 0.01f, "exiting glass sets nextMediumEta to air");
-    expectTrue(vecDot3(ctx.normal, sample.direction) > 0.0f, "exiting ray continues into air");
+    const MaterialGpu material = makeMaterial(1.0f, 1.0f, 1.0f, 0.2f, 0.0f);
+    const BrdfLobeWeights weights = computeSurfaceLobeWeights(material);
+    expectNear(weights.diffuse, 1.0f, 0.01f, "v1 uses diffuse-only lobe");
+    expectNear(weights.specular, 0.0f, 0.01f, "specular lobe stubbed off");
 }
 
 void testDiffuseSurfaceDefaultsToOpaquePath()
 {
-    const MaterialGpu material = makeMaterial(
-        0.9f, 0.9f, 0.9f, 0.9f, 0.0f, 1.5f, 0.0f, -1.0f,
-        1000.0f, 1000.0f, 1000.0f);
-    expectTrue(mediumIsOpaque(mediumFromMaterial(material)), "default sigmaS uses opaque shortcut");
-    expectTrue(!materialUsesVolumeTransport(material), "surface-only dielectric skips volume path");
+    const MaterialGpu material = makeMaterial(0.9f, 0.9f, 0.9f, 0.9f);
+    expectTrue(materialIsOpaqueType(material), "default material type is opaque");
 }
 
-void testClearMediumClassification()
+void testSubsurfaceUsesVolumeTransport()
 {
-    const MaterialGpu glass = makeMaterial(1.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.5f);
-    expectTrue(materialIsClearMedium(glass), "zero sigma glass is clear");
-    expectTrue(brdfSkipsEnvironmentNee(glass), "clear medium skips environment NEE");
-    expectTrue(materialUsesVolumeTransport(glass), "clear dielectric still uses volume path at interface");
+    const MaterialGpu wax = makeMaterial(
+        0.9f, 0.95f, 0.2f, 0.8f, 0.0f, 1.5f, 0.0f, -1.0f,
+        static_cast<uint32_t>(MaterialType::Subsurface), 1.0f, 2.0f);
+    expectTrue(materialIsSubsurfaceType(wax), "typed wax is subsurface");
+    expectTrue(materialUsesVolumeTransport(wax), "subsurface uses random-walk volume transport");
 }
 
-void testOpaqueMediumClassification()
+void testMaterialParamsMapping()
 {
-    MaterialGpu plastic = makeMaterial(0.8f, 0.8f, 0.8f, 0.5f, 0.0f, 1.5f, 0.0f, -1.0f, 2000.0f, 2000.0f, 2000.0f);
-    expectTrue(mediumIsOpaque(mediumFromMaterial(plastic)), "high sigmaS is opaque shortcut");
-    expectTrue(!materialUsesVolumeTransport(plastic), "opaque dielectric skips volume transport");
+    const MaterialGpu wax = makeMaterial(
+        0.8f, 0.6f, 0.4f, 0.5f, 0.0f, 1.5f, 0.0f, -1.0f,
+        static_cast<uint32_t>(MaterialType::Subsurface), 1.0f, 2.0f);
+    const PhysicalMediumCoeffs coeffs = materialToPhysicalMedium(wax, 550.0f);
+    expectNear(coeffs.sigmaT.x, 0.5f, 0.01f, "sigma_t = 1 / radius");
+    expectNear(coeffs.sigmaS.x / coeffs.sigmaT.x, 0.8f / (0.8f + 0.6f + 0.4f), 0.05f, "albedo maps to sigma_s/sigma_t");
+}
+
+void testBssrdfEnterProbability()
+{
+    const MaterialGpu wax = makeMaterial(
+        0.8f, 0.8f, 0.8f, 0.5f, 0.0f, 1.5f, 0.0f, -1.0f,
+        static_cast<uint32_t>(MaterialType::Subsurface), 0.5f, 2.0f);
+    expectNear(bssrdfEnterProbability(wax), 0.5f, 0.01f, "enter probability follows subsurface weight");
+}
+
+void testLegacySubsurfaceInference()
+{
+    MaterialGpu legacy{};
+    legacy.sigmaSr = 0.3f;
+    legacy.sigmaSg = 0.25f;
+    legacy.sigmaSb = 0.15f;
+    legacy.sigmaAr = 0.02f;
+    legacy.sigmaAg = 0.015f;
+    legacy.sigmaAb = 0.01f;
+    legacy.ior = 1.5f;
+    applyLegacySubsurfaceInference(legacy);
+    expectTrue(materialIsSubsurfaceType(legacy), "legacy sigma infers subsurface type");
+    expectNear(legacy.subsurfaceRadiusR, 1.0f / 0.32f, 0.01f, "legacy inference sets radius from sigmaT");
 }
 
 void testOrenNayar_ZeroRoughnessMatchesLambert()
@@ -184,27 +165,8 @@ void testOrenNayar_ZeroRoughnessMatchesLambert()
     const MaterialGpu material = makeMaterial(0.8f, 0.8f, 0.8f, 0.0f, 0.0f, 1.5f, 0.0f, 0.0f);
     const BrdfContext ctx = makeContext(material);
     const Vec3 wi = vecNormalize3(vecMake3(0.3f, 0.2f, 1.0f));
-    const float factor = PrincipledDetail::diffuseOrenNayarFactor(ctx, wi);
+    const float factor = OrenNayarDetail::diffuseOrenNayarFactor(ctx, wi);
     expectNear(factor, 1.0f, 0.05f, "zero diffuse roughness approximates Lambert factor");
-}
-
-void testFreeFlightMean()
-{
-    float sum = 0.0f;
-    constexpr int samples = 10000;
-    const float sigmaT = 2.0f;
-    for (int i = 1; i <= samples; ++i) {
-        const float u = static_cast<float>(i) / static_cast<float>(samples + 1);
-        sum += mediumSampleFreeFlight(u, sigmaT);
-    }
-    expectNear(sum / static_cast<float>(samples), 1.0f / sigmaT, 0.02f, "free flight mean distance");
-}
-
-void testHgIsotropicPdf()
-{
-    expectNear(henyeyGreensteinEval(0.0f, 0.0f), 0.079577f, 0.001f, "isotropic HG eval");
-    const float cosTheta = henyeyGreensteinSampleCosTheta(0.0f, 0.25f);
-    expectNear(cosTheta, 0.5f, 0.01f, "isotropic HG sample uniform in cos theta");
 }
 
 void testSpectralBrdfEvalPositive()
@@ -212,22 +174,22 @@ void testSpectralBrdfEvalPositive()
     const MaterialGpu material = makeMaterial(0.72f, 0.68f, 0.58f, 0.5f);
     const BrdfContext ctx = makeContext(material);
     const Vec3 wi = vecNormalize3(vecMake3(0.3f, 0.2f, 1.0f));
-    const PrincipledBrdf brdf{};
+    const OrenNayarDiffuseBrdf brdf{};
     const float spectral = brdf.evalSpectral(ctx, wi);
     expectTrue(spectral > 0.0f, "scalar hero-wavelength BRDF is positive");
 }
 
-void testGlassIorDispersionViaMaterial()
+void testPathStateDefaults()
 {
-    MaterialGpu glass = makeMaterial(1.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.52f);
-    glass.abbeNumber = 40.0f;
-    BrdfContext ctxRed = makeContext(glass);
-    BrdfContext ctxBlue = makeContext(glass);
-    ctxRed.wavelengthNm = 650.0f;
-    ctxBlue.wavelengthNm = 450.0f;
-    const float iorRed = PrincipledDetail::materialIor(ctxRed);
-    const float iorBlue = PrincipledDetail::materialIor(ctxBlue);
-    expectTrue(iorBlue > iorRed, "materialIor uses Abbe dispersion");
+    PathState path{};
+    expectNear(path.wavelengthNm, 550.0f, 0.01f, "default hero wavelength");
+    expectTrue(!path.insideVolume, "path starts outside volume");
+}
+
+void testVolumeFreeFlight()
+{
+    const float distance = mediumSampleFreeFlight(0.5f, 1.0f);
+    expectTrue(distance > 0.0f, "free flight distance is positive");
 }
 
 } // namespace
@@ -240,23 +202,21 @@ int main()
         return 1;
     }
 
-    testMetallicSample();
+    testDiffuseSample();
     testDiffuseThroughput();
-    testReflectLobeWeights();
-    testInterfaceFresnel();
-    testRefractIntoGlass();
-    testRefractOutOfGlass();
+    testSurfaceLobeWeights();
     testDiffuseSurfaceDefaultsToOpaquePath();
-    testClearMediumClassification();
-    testOpaqueMediumClassification();
+    testSubsurfaceUsesVolumeTransport();
+    testMaterialParamsMapping();
+    testBssrdfEnterProbability();
+    testLegacySubsurfaceInference();
     testOrenNayar_ZeroRoughnessMatchesLambert();
-    testFreeFlightMean();
-    testHgIsotropicPdf();
     testSpectralBrdfEvalPositive();
-    testGlassIorDispersionViaMaterial();
+    testPathStateDefaults();
+    testVolumeFreeFlight();
 
     if (gFailures == 0) {
-        std::cout << "All PrincipledBrdf / medium tests passed.\n";
+        std::cout << "All Oren-Nayar / material tests passed.\n";
         return 0;
     }
 

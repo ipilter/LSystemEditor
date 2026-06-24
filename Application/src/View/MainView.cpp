@@ -416,26 +416,25 @@ MainView::MainView(QWidget* parent)
       "# metallic / met: scalar | texture  default 0\n"
       "# ior: scalar | texture  default 1.5\n"
       "# emission / emiss / em: scalar | texture  default 0  (1.0 ~ moderate area light)\n"
+      "# type: Opaque | Glass | Subsurface | Emissive  default Opaque\n"
+      "# subsurface / ss: scalar in [0,1]  default 0\n"
+      "# subsurfaceRadius / ssRadius: scalar | {r,g,b} in mm  default 1\n"
       "# diffuseRoughness / diffuse / diffRou: scalar | texture  default -1 (uses roughness)\n"
-      "# sigmaA / absorption / abs: {r,g,b} | scalar | texture  default 0  (1/mm)\n"
-      "# sigmaS / scattering / scatter / scat: {r,g,b} | scalar | texture  default opaque shortcut (1000 /mm); use 0 for clear glass\n"
-      "# g / anisotropy: scalar in [-1,1]  default 0  (Henyey-Greenstein phase)\n"
       "# specular / spec: scalar | texture  default 1\n"
-      "# mfp (mm) ≈ 1 / (sigmaA + sigmaS); tune vs branch/leaf thickness in mm\n"
       "# scalar textures multiply inline when inline > 0; inline 0 uses texture values directly\n"
       "# Procedural textures share on/off RGB (or gray), intensityOn/intensityOff, plus type-specific keys:\n"
       "# Grid: {Grid, on:{r,g,b}|gray, off:{r,g,b}|gray, intensityOn:1, intensityOff:1, freq:8, freqU:8, freqV:8, thickness:0.05}\n"
       "# Stripe: {Stripe, on:{r,g,b}|gray, off:{r,g,b}|gray, intensityOn:1, intensityOff:1, freq, thickness:0.05}\n"
       "# Noise: {Noise, on:{r,g,b}|gray, off:{r,g,b}|gray, intensityOn:1, intensityOff:1, scale, octaves:1, seed:0}\n\n"
-      "Mat(Wax) = {albedo: {0.9, 0.95, 0.2}, roughness: 0.8, diffuseRoughness: 0.7, specular: 0.2, sigmaS: {0.3, 0.25, 0.15}, sigmaA: {0.02, 0.015, 0.01}, g: 0.5, ior: 1.5}\n"
-      "Mat(Leaf) = {albedo: {0.2, 0.8, 0.1}, roughness: 0.5, specular: 1.0, sigmaS: {2.0, 1.0, 3.0}, sigmaA: {0.5, 1.5, 0.8}, g: 0.3, ior: 1.5}\n"
+      "Mat(Wax) = {type: Subsurface, albedo: {0.9, 0.95, 0.2}, roughness: 0.8, diffuseRoughness: 0.7, specular: 0.2, subsurface: 1, subsurfaceRadius: 2.0, ior: 1.5}\n"
+      "Mat(Leaf) = {type: Subsurface, albedo: {0.2, 0.8, 0.1}, roughness: 0.5, specular: 1.0, subsurface: 0.6, subsurfaceRadius: {1.5, 3.0, 0.8}, ior: 1.5}\n"
       "Mat(Grid) = {albedo: {Grid, on: {0.95, 0.95, 0.95}, off: {0.1, 0.1, 0.1}, freq: 400, thickness: 0.05}, roughness: 0.5}\n"
       "Mat(Light) = {albedo: {0.9, 0.8, 0.7}, roughness: 0.65, metallic: 1, emission: {Stripe, freq: 20, thickness: 0.25, on: 1, off: 0, intensityOn: 50}}\n"
       "Mat(Metal) = {albedo: {1.0, 0.85, 0.3}, roughness: 0.15, metallic: 1, ior: 1.5}\n"
-      "Mat(Glass) = {albedo: {0.810, 0.929, 0.78}, roughness: 0.15, sigmaS: {0, 0, 0}, sigmaA: {0, 0, 0}, g: 1, ior: 1.42}\n"
+      "Mat(Glass) = {type: Glass, albedo: 1, roughness: 0.0, ior: 1.42}\n"
       "Mat(Diffuse) = {albedo: {0.9, 0.9, 0.9}, roughness: 0.90}\n"
-      "Mat(Plastic) = {albedo: {0.99, 0.7, 0.94}, roughness: 0.1, ior: 1.5, sigmaS: {0.5, 0.5, 0.5}, sigmaA: {0.01, 0.01, 0.01}, g: 0.2}\n\n"
-      "Mat(Pearl) = {albedo: {0.9, 0.8, 0.7}, roughness: 0.35, sigmaS: {1.5, 1.2, 1.0}, sigmaA: {0.05, 0.04, 0.03}, g: 0.4, ior: 1.5}\n\n"
+      "Mat(Plastic) = {type: Subsurface, albedo: {0.99, 0.7, 0.94}, roughness: 0.1, subsurface: 0.5, subsurfaceRadius: 1.5, ior: 1.5}\n\n"
+      "Mat(Pearl) = {type: Subsurface, albedo: {0.9, 0.8, 0.7}, roughness: 0.35, subsurface: 0.8, subsurfaceRadius: 1.2, ior: 1.5}\n\n"
       "Mat(Grid)\n"
       "Pitch(-90) f(-100) F(100, 5000, 5000)\n\n"
       "f(100)\n\n"
@@ -485,7 +484,7 @@ MainView::MainView(QWidget* parent)
     lsystemActionsRow->addWidget(m_addPrimitiveButton);
     m_resetSceneButton = new QPushButton(QStringLiteral("Reset Scene"), lsystemTab);
     m_resetSceneButton->setToolTip(
-        QStringLiteral("Remove all procedural meshes from the scene. The camera position is unchanged."));
+        QStringLiteral("Remove all procedural meshes and imported glTF geometry from the scene. The camera position is unchanged."));
     lsystemActionsRow->addWidget(m_resetSceneButton);
     lsystemTabLayout->addLayout(lsystemActionsRow);
 
@@ -494,8 +493,13 @@ MainView::MainView(QWidget* parent)
 
     m_exportSceneButton = new QPushButton(QStringLiteral("Export Scene"), applicationGroup);
     m_exportSceneButton->setToolTip(
-        QStringLiteral("Export cached scene geometry and materials as Wavefront OBJ + MTL for Blender."));
+        QStringLiteral("Export cached scene geometry and materials (OBJ+MTL or glTF GLB for Blender)."));
     applicationLayout->addWidget(m_exportSceneButton);
+
+    m_importSceneButton = new QPushButton(QStringLiteral("Import glb"), applicationGroup);
+    m_importSceneButton->setToolTip(
+        QStringLiteral("Import glTF/GLB mesh with PBR materials from Blender (m→mm scale)."));
+    applicationLayout->addWidget(m_importSceneButton);
 
     m_settingsButton = new QPushButton(QStringLiteral("Settings"), applicationGroup);
     applicationLayout->addWidget(m_settingsButton);
@@ -738,6 +742,11 @@ QPushButton* MainView::resetSceneButton() const
 QPushButton* MainView::exportSceneButton() const
 {
     return m_exportSceneButton;
+}
+
+QPushButton* MainView::importSceneButton() const
+{
+    return m_importSceneButton;
 }
 
 QPlainTextEdit* MainView::lsystemEdit() const

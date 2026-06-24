@@ -52,6 +52,8 @@ public:
     bool regionDefineMode() const;
     void applyRegionRenderSettings(bool resetActiveRegion);
     bool exportSceneWavefrontObj(const QString& objFilePath, QString* errorMessage = nullptr) const;
+    bool exportSceneGltf(const QString& glbFilePath, QString* errorMessage = nullptr) const;
+    bool importSceneGltf(const QString& gltfFilePath, Mesh* outMesh, QString* errorMessage = nullptr) const;
 
 signals:
     void iterationChanged(int sampleCount);

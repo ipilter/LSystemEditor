@@ -30,12 +30,16 @@ struct MaterialChannel
 /** @brief Parsed material properties from `Mat(id) = { ... }` lines. */
 struct MaterialEntry
 {
+    /** @brief Material type name: Opaque, Glass, Subsurface, Emissive. */
+    std::string typeName = "Opaque";
     MaterialChannel albedo;
     MaterialChannel roughness;
     MaterialChannel metallic;
     MaterialChannel diffuseRoughness;
     MaterialChannel specular;
     MaterialChannel emission;
+    MaterialChannel subsurface;
+    MaterialChannel subsurfaceRadius;
     MaterialChannel sigmaA;
     MaterialChannel sigmaS;
     MaterialChannel mediumG;
@@ -70,6 +74,3 @@ inline float materialChannelB(const MaterialChannel& channel, float defaultValue
 {
     return channel.mode == MaterialChannel::Mode::Inline ? channel.b : defaultValue;
 }
-
-/** @brief Default sigmaS (/mm) when omitted; opaque surface shortcut (no volume transport). */
-inline constexpr float kMaterialDefaultSigmaS = 1000.0f;

@@ -5,7 +5,7 @@
 #include "Geometry/MathCore.h"
 #include "LSystemEvaluator.h"
 #include "LSystemMaterials.h"
-#include "Medium/MediumProperties.h"
+#include "MeshAccel/MaterialType.h"
 #include "MeshAccel/Mesh.h"
 #include "MeshAccel/MeshAccelScene.h"
 #include "MeshAccel/MeshAccelTypes.h"
@@ -773,8 +773,9 @@ void runProceduralMeshTests()
             ProceduralMeshBuilder::buildHostMesh("F\n", 0, RootTransform{}, mesh),
             "procedural build with implicit default material succeeds");
         expectTrue(!mesh.materials.empty(), "implicit default material table is populated");
-        expectNear(mesh.materials[0].sigmaSr, kMaterialDefaultSigmaS, 1.0f, "default material sigmaS is opaque");
-        expectTrue(mediumIsOpaque(mediumFromMaterial(mesh.materials[0])), "default material uses opaque sigmaS");
+        expectTrue(mesh.materials[0].materialType == static_cast<uint32_t>(MaterialType::Opaque),
+            "default material type is opaque");
+        expectTrue(materialIsOpaqueType(mesh.materials[0]), "default material is opaque type");
     }
 
     {

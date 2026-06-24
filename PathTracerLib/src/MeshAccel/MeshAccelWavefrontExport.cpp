@@ -1,4 +1,5 @@
 #include "MeshAccelScene.h"
+#include "MeshAccelMaterialJson.h"
 #include "Medium/MediumProperties.h"
 
 #include <QDir>
@@ -60,6 +61,11 @@ void writeVec3(QTextStream& out, char prefix, const Vec3& v)
     out << prefix << ' ' << v.x << ' ' << v.y << ' ' << v.z << '\n';
 }
 
+void writeVec2(QTextStream& out, char prefix, const Vec2& v)
+{
+    out << prefix << ' ' << v.x << ' ' << v.y << '\n';
+}
+
 } // namespace
 
 bool MeshAccelScene::exportWavefrontObj(const QString& objFilePath, QString* errorMessage) const
@@ -103,6 +109,12 @@ bool MeshAccelScene::exportWavefrontObj(const QString& objFilePath, QString* err
 
     mtlFile.close();
 
+    const QString materialsJsonPath =
+        objInfo.dir().filePath(objInfo.completeBaseName() + QStringLiteral("_materials.json"));
+    if (!writeMaterialsJsonSidecar(materialsJsonPath, m_materials, m_textures, errorMessage)) {
+        return false;
+    }
+
     QFile objFile(objFilePath);
     if (!objFile.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate)) {
         return fail(QStringLiteral("Failed to open OBJ file for writing: %1").arg(objFilePath));
@@ -127,6 +139,9 @@ bool MeshAccelScene::exportWavefrontObj(const QString& objFilePath, QString* err
         writeVec3(objOut, 'v', tri.v0);
         writeVec3(objOut, 'v', tri.v1);
         writeVec3(objOut, 'v', tri.v2);
+        writeVec2(objOut, 'vt', tri.uv0);
+        writeVec2(objOut, 'vt', tri.uv1);
+        writeVec2(objOut, 'vt', tri.uv2);
         writeVec3(objOut, 'vn', tri.n0);
         writeVec3(objOut, 'vn', tri.n1);
         writeVec3(objOut, 'vn', tri.n2);
@@ -134,7 +149,9 @@ bool MeshAccelScene::exportWavefrontObj(const QString& objFilePath, QString* err
         const int i0 = vertexIndex + 1;
         const int i1 = vertexIndex + 2;
         const int i2 = vertexIndex + 3;
-        objOut << "f " << i0 << "//" << i0 << ' ' << i1 << "//" << i1 << ' ' << i2 << "//" << i2 << '\n';
+        objOut << "f " << i0 << '/' << i0 << '/' << i0 << ' '
+               << i1 << '/' << i1 << '/' << i1 << ' '
+               << i2 << '/' << i2 << '/' << i2 << '\n';
         vertexIndex += 3;
     }
 

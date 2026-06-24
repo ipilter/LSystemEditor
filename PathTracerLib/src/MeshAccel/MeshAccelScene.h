@@ -40,6 +40,9 @@ public:
     /** @brief Writes Wavefront OBJ + sibling MTL from cached host geometry and materials. */
     bool exportWavefrontObj(const QString& objFilePath, QString* errorMessage = nullptr) const;
 
+    /** @brief Writes glTF 2.0 binary (.glb) with PBR materials and PathTracer extras. */
+    bool exportGltf(const QString& glbFilePath, QString* errorMessage = nullptr) const;
+
 private:
     std::vector<MeshBvhNode> m_bvhNodes;
     std::vector<TriangleGpu> m_triangles;

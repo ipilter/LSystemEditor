@@ -6,9 +6,11 @@
 #include "MainView.h"
 #include "OpenGLViewportWidget.h"
 #include "LSystemTransformDialog.h"
+#include "ProceduralMeshBuilder.h"
 #include "PhysicalCamera.h"
 #include "SceneModel.h"
 #include "SettingsDialog.h"
+#include "MeshAccel/Mesh.h"
 #include <QColorDialog>
 #include <QCheckBox>
 #include <QDialog>
@@ -261,6 +263,7 @@ SceneController::SceneController(SceneModel* model, MainView* view, QObject* par
     connect(m_view->lsystemLoadButton(), &QPushButton::clicked, this, &SceneController::onLsystemLoadButtonClicked);
     connect(m_view->resetSceneButton(), &QPushButton::clicked, this, &SceneController::onResetSceneButtonClicked);
     connect(m_view->exportSceneButton(), &QPushButton::clicked, this, &SceneController::onExportSceneButtonClicked);
+    connect(m_view->importSceneButton(), &QPushButton::clicked, this, &SceneController::onImportSceneButtonClicked);
     connect(
         m_view->environmentHdrBrowseButton(),
         &QPushButton::clicked,
@@ -589,14 +592,19 @@ void SceneController::onExportSceneButtonClicked()
         m_view,
         QStringLiteral("Export Scene"),
         QString(),
-        QStringLiteral("Wavefront OBJ (*.obj)"));
+        QStringLiteral("glTF Binary (*.glb);;Wavefront OBJ (*.obj)"));
 
     if (path.isEmpty()) {
         return;
     }
 
     QString error;
-    if (!m_view->viewport()->exportSceneWavefrontObj(path, &error)) {
+    const bool isGltf = path.endsWith(QStringLiteral(".glb"), Qt::CaseInsensitive);
+    const bool ok = isGltf
+        ? m_view->viewport()->exportSceneGltf(path, &error)
+        : m_view->viewport()->exportSceneWavefrontObj(path, &error);
+
+    if (!ok) {
         AppLog::instance().error(
             error.isEmpty()
                 ? QStringLiteral("Scene export failed.")
@@ -605,6 +613,42 @@ void SceneController::onExportSceneButtonClicked()
     }
 
     AppLog::instance().info(QStringLiteral("Scene exported to %1").arg(path));
+}
+
+void SceneController::onImportSceneButtonClicked()
+{
+    LSystemTransformDialog dialog(m_view);
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+
+    const QString path = QFileDialog::getOpenFileName(
+        m_view,
+        QStringLiteral("Import glb"),
+        QString(),
+        QStringLiteral("glTF (*.glb *.gltf)"));
+
+    if (path.isEmpty()) {
+        return;
+    }
+
+    Mesh importedMesh{};
+    QString error;
+    if (!m_view->viewport()->importSceneGltf(path, &importedMesh, &error)) {
+        AppLog::instance().error(
+            error.isEmpty()
+                ? QStringLiteral("Scene import failed.")
+                : QStringLiteral("Scene import failed: %1").arg(error));
+        return;
+    }
+
+    RootTransform root{};
+    root.translation = dialog.translation();
+    root.rotationDeg = dialog.rotationDeg();
+    ProceduralMeshBuilder::applyRootTransform(importedMesh, root);
+
+    m_model->setImportedMesh(std::move(importedMesh));
+    AppLog::instance().info(QStringLiteral("Scene imported from %1").arg(path));
 }
 
 void SceneController::syncColorButtonStyle()

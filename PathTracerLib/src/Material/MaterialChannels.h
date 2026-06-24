@@ -1,0 +1,95 @@
+#pragma once
+
+#include <cstdint>
+
+enum class MaterialChannelId : uint8_t
+{
+    Albedo,
+    Roughness,
+    Metallic,
+    DiffuseRoughness,
+    Specular,
+    Emission,
+    SigmaA,
+    SigmaS,
+    MediumG,
+    Ior,
+    Count
+};
+
+enum class ChannelComposition : uint8_t
+{
+    Replace,
+    Multiply,
+    Add,
+};
+
+enum class ChannelValueKind : uint8_t
+{
+    Scalar,
+    Rgb,
+};
+
+struct ChannelBinding
+{
+    uint32_t textureIndex = 0;
+    ChannelComposition composition = ChannelComposition::Multiply;
+};
+
+struct ResolvedMaterial
+{
+    float r = 0.8f;
+    float g = 0.8f;
+    float b = 0.8f;
+    float roughness = 0.5f;
+    float metallic = 0.0f;
+    float emission = 0.0f;
+    float diffuseRoughness = 0.5f;
+    float specular = 1.0f;
+    float sigmaAr = 0.0f;
+    float sigmaAg = 0.0f;
+    float sigmaAb = 0.0f;
+    float sigmaSr = 0.0f;
+    float sigmaSg = 0.0f;
+    float sigmaSb = 0.0f;
+    float mediumG = 0.0f;
+    float ior = 1.5f;
+    float abbeNumber = 58.0f;
+};
+
+#if defined(__CUDACC__)
+#define MATERIAL_CHANNELS_FN __host__ __device__ inline
+#else
+#define MATERIAL_CHANNELS_FN inline
+#endif
+
+MATERIAL_CHANNELS_FN ChannelValueKind channelValueKind(MaterialChannelId id)
+{
+    if (id == MaterialChannelId::Albedo || id == MaterialChannelId::SigmaA || id == MaterialChannelId::SigmaS) {
+        return ChannelValueKind::Rgb;
+    }
+    return ChannelValueKind::Scalar;
+}
+
+MATERIAL_CHANNELS_FN ChannelComposition channelDefaultComposition(
+    MaterialChannelId id,
+    float inlineScalar = 0.0f,
+    uint32_t textureIndex = 0u)
+{
+    if (id == MaterialChannelId::Albedo || id == MaterialChannelId::SigmaA || id == MaterialChannelId::SigmaS) {
+        return ChannelComposition::Replace;
+    }
+    if (textureIndex != 0u && inlineScalar == 0.0f) {
+        return ChannelComposition::Replace;
+    }
+    return ChannelComposition::Multiply;
+}
+
+MATERIAL_CHANNELS_FN ResolvedMaterial blendLayers(
+    const ResolvedMaterial* /*layers*/,
+    uint32_t /*layerCount*/)
+{
+    return ResolvedMaterial{};
+}
+
+#undef MATERIAL_CHANNELS_FN

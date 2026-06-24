@@ -3,7 +3,7 @@
 #include "Geometry/GeometryTypes.h"
 #include "Geometry/MathCore.h"
 #include "MeshAccel/MeshAccelTypes.h"
-#include "Texture/MaterialChannels.h"
+#include "Material/MaterialChannels.h"
 
 #include <cmath>
 #include <cstdint>

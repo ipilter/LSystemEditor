@@ -138,6 +138,7 @@ enum class NamedValueKind
     Scalar,
     FloatList,
     Texture,
+    Identifier,
 };
 
 struct NamedValue
@@ -146,6 +147,7 @@ struct NamedValue
     float scalar = 0.f;
     std::vector<float> floats;
     TextureDef texture;
+    std::string identifier;
 };
 
 using NamedProps = std::map<std::string, NamedValue>;
@@ -272,7 +274,14 @@ bool parse_colon_value(std::string_view line, std::size_t& pos, NamedValue& out_
     float scalar = 0.f;
     if (!parse_float(line, pos, scalar))
     {
-        material_parse_error(line, "expected number or '{' value");
+        std::string identifier;
+        if (!parse_identifier(line, pos, identifier))
+        {
+            material_parse_error(line, "expected number, identifier, or '{' value");
+        }
+        out_value.kind = NamedValueKind::Identifier;
+        out_value.identifier = std::move(identifier);
+        return true;
     }
     out_value.kind = NamedValueKind::Scalar;
     out_value.scalar = scalar;
@@ -831,12 +840,15 @@ bool parse_named_material_block(std::string_view line, std::size_t& pos, NamedPr
 
 enum class MaterialProperty
 {
+    Type,
     Albedo,
     Roughness,
     Metallic,
     DiffuseRoughness,
     Specular,
     Emission,
+    Subsurface,
+    SubsurfaceRadius,
     SigmaA,
     SigmaS,
     MediumG,
@@ -847,6 +859,10 @@ enum class MaterialProperty
 
 MaterialProperty resolve_material_property(std::string_view key)
 {
+    if (key == "type")
+    {
+        return MaterialProperty::Type;
+    }
     if (key == "albedo" || key == "alb")
     {
         return MaterialProperty::Albedo;
@@ -870,6 +886,14 @@ MaterialProperty resolve_material_property(std::string_view key)
     if (key == "emission" || key == "emiss" || key == "em")
     {
         return MaterialProperty::Emission;
+    }
+    if (key == "subsurface" || key == "ss")
+    {
+        return MaterialProperty::Subsurface;
+    }
+    if (key == "subsurfaceRadius" || key == "ssRadius")
+    {
+        return MaterialProperty::SubsurfaceRadius;
     }
     if (key == "sigmaA" || key == "absorption" || key == "abs")
     {
@@ -916,17 +940,57 @@ void set_texture_channel(MaterialChannel& channel, const TextureDef& texture)
 
 void init_default_entry(MaterialEntry& entry)
 {
+    entry.typeName = "Opaque";
     set_inline_rgb(entry.albedo, 0.8f, 0.8f, 0.8f);
     set_inline_scalar(entry.roughness, 0.5f);
     set_inline_scalar(entry.metallic, 0.f);
     set_inline_scalar(entry.diffuseRoughness, -1.f);
     set_inline_scalar(entry.specular, 1.f);
     set_inline_scalar(entry.emission, 0.f);
+    set_inline_scalar(entry.subsurface, 0.f);
+    set_inline_scalar(entry.subsurfaceRadius, 1.f);
     set_inline_rgb(entry.sigmaA, 0.f, 0.f, 0.f);
-    set_inline_rgb(entry.sigmaS, kMaterialDefaultSigmaS, kMaterialDefaultSigmaS, kMaterialDefaultSigmaS);
+    set_inline_rgb(entry.sigmaS, 0.f, 0.f, 0.f);
     set_inline_scalar(entry.mediumG, 0.f);
     set_inline_scalar(entry.ior, 1.5f);
     set_inline_scalar(entry.abbe, 58.f);
+}
+
+void assign_material_type(MaterialEntry& entry, const NamedValue& value, std::string_view line)
+{
+    if (value.kind == NamedValueKind::Identifier)
+    {
+        entry.typeName = value.identifier;
+        return;
+    }
+    if (value.kind == NamedValueKind::Scalar)
+    {
+        material_parse_error(
+            line,
+            "type expects identifier (Opaque, Glass, Subsurface, Emissive)");
+    }
+    material_parse_error(line, "type expects identifier value");
+}
+
+void reject_deprecated_volume_property(MaterialProperty property, std::string_view line)
+{
+    switch (property)
+    {
+    case MaterialProperty::SigmaA:
+        material_parse_error(
+            line,
+            "sigmaA/absorption is deprecated; use type: Subsurface with subsurfaceRadius (mm)");
+    case MaterialProperty::SigmaS:
+        material_parse_error(
+            line,
+            "sigmaS/scattering is deprecated; use type: Subsurface with subsurfaceRadius (mm)");
+    case MaterialProperty::MediumG:
+        material_parse_error(
+            line,
+            "g/anisotropy is deprecated for volume materials; use type: Subsurface with subsurfaceRadius");
+    default:
+        break;
+    }
 }
 
 void assign_scalar_channel(MaterialChannel& channel, MaterialProperty property, float value)
@@ -1014,8 +1078,14 @@ void assign_named_entry(std::string_view line, MaterialEntry& entry, const Named
 
     for (const auto& [key, value] : props)
     {
-        switch (resolve_material_property(key))
+        const MaterialProperty property = resolve_material_property(key);
+        reject_deprecated_volume_property(property, line);
+
+        switch (property)
         {
+        case MaterialProperty::Type:
+            assign_material_type(entry, value, line);
+            break;
         case MaterialProperty::Albedo:
             assign_named_rgb_or_texture(entry.albedo, value, line, true);
             break;
@@ -1034,11 +1104,11 @@ void assign_named_entry(std::string_view line, MaterialEntry& entry, const Named
         case MaterialProperty::Emission:
             assign_named_scalar_or_texture(entry.emission, MaterialProperty::Emission, value, line);
             break;
-        case MaterialProperty::SigmaA:
-            assign_named_rgb_or_texture(entry.sigmaA, value, line, false);
+        case MaterialProperty::Subsurface:
+            assign_named_scalar_or_texture(entry.subsurface, MaterialProperty::Subsurface, value, line);
             break;
-        case MaterialProperty::SigmaS:
-            assign_named_rgb_or_texture(entry.sigmaS, value, line, false);
+        case MaterialProperty::SubsurfaceRadius:
+            assign_named_rgb_or_texture(entry.subsurfaceRadius, value, line, false);
             break;
         case MaterialProperty::MediumG:
             assign_named_scalar_or_texture(entry.mediumG, MaterialProperty::MediumG, value, line);
@@ -1146,7 +1216,7 @@ bool try_parse_material_line(std::string_view trimmed_line, std::vector<Material
             material_parse_error(
                 trimmed_line,
                 "material declaration requires named properties "
-                "(e.g. Mat(id) = {albedo: {r,g,b}, roughness: 0.5, sigmaS: {0.3, 0.2, 0.1}, g: 0.5, ior: 1.5})");
+                "(e.g. Mat(id) = {type: Glass, albedo: {r,g,b}, roughness: 0.5, ior: 1.5})");
         }
     }
 

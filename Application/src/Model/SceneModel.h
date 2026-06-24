@@ -1,6 +1,7 @@
 #pragma once
 
 #include "MeshAccel/MeshAccelTypes.h"
+#include "MeshAccel/Mesh.h"
 #include "PhysicalCamera.h"
 #include "Procedural/ProceduralTypes.h"
 
@@ -15,6 +16,7 @@
 
 #include <glm/glm.hpp>
 
+#include <optional>
 #include <vector>
 
 class SceneModel : public QObject
@@ -93,6 +95,11 @@ public:
     const std::vector<ProceduralInstance>& proceduralInstances() const;
     void addProceduralInstance(ProceduralInstance instance);
     void resetScene();
+
+    bool hasImportedMesh() const;
+    const Mesh& importedMesh() const;
+    void setImportedMesh(Mesh mesh);
+    void clearImportedMesh();
 
     bool regionRenderEnabled() const;
     void setRegionRenderEnabled(bool enabled);
@@ -173,6 +180,7 @@ private:
     bool m_focusPointPinned = false;
     float m_focusDistanceMm = PhysicalCamera::kDefaultFocusDistance;
     std::vector<ProceduralInstance> m_proceduralInstances;
+    std::optional<Mesh> m_importedMesh;
     GLuint m_pboIds[bufferCount] = {0, 0};
     bool m_regionRenderEnabled = false;
     QRect m_regionRect;

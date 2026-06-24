@@ -65,6 +65,7 @@ public:
     QPushButton* lsystemLoadButton() const;
     QPushButton* resetSceneButton() const;
     QPushButton* exportSceneButton() const;
+    QPushButton* importSceneButton() const;
     QPlainTextEdit* lsystemEdit() const;
     QSpinBox* lsystemIterationsSpinBox() const;
 
@@ -120,6 +121,7 @@ private:
     QPushButton* m_lsystemLoadButton = nullptr;
     QPushButton* m_resetSceneButton = nullptr;
     QPushButton* m_exportSceneButton = nullptr;
+    QPushButton* m_importSceneButton = nullptr;
     ZoomablePlainTextEdit* m_lsystemEdit = nullptr;
     QSpinBox* m_lsystemIterationsSpinBox = nullptr;
     ZoomablePlainTextEdit* m_logView = nullptr;

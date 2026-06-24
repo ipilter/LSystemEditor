@@ -48,6 +48,14 @@ enum MeshBvhNodeFlags : uint32_t
     MeshBvhFlagLeaf = 1u << 0,
 };
 
+enum class MaterialType : uint32_t
+{
+    Opaque = 0,
+    Glass = 1,
+    Subsurface = 2,
+    Emissive = 3,
+};
+
 struct alignas(16) MaterialGpu
 {
     float r = 0.8f;
@@ -77,6 +85,14 @@ struct alignas(16) MaterialGpu
     float ior = 1.5f;
     /** @brief Abbe number for IOR dispersion; crown-glass default. */
     float abbeNumber = 58.0f;
+    /** @brief MaterialType value; 0 = Opaque when unset. */
+    uint32_t materialType = 0;
+    /** @brief Subsurface scattering weight in [0, 1]. */
+    float subsurface = 0.0f;
+    /** @brief Subsurface diffusion radius per channel in mm. */
+    float subsurfaceRadiusR = 1.0f;
+    float subsurfaceRadiusG = 1.0f;
+    float subsurfaceRadiusB = 1.0f;
 
     /** @brief 0 = use inline field; else index into scene texture bank. */
     uint32_t albedoTex = 0;
