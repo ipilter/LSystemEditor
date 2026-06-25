@@ -29,5 +29,7 @@ struct RenderParamsGpu
     int debugOverlayMode = 0;
     /** @brief BrdfDebugFlags bit mask for glass/transmission debugging. */
     int brdfDebugFlags = 0;
+    /** @brief Emissive triangle NEE samples per bounce (1–4). */
+    int emissiveNeeSamples = 1;
     float relativeErrorThreshold = 0.02f;
 };

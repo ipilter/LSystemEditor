@@ -15,6 +15,8 @@ namespace MaterialParamsDetail {
 
 constexpr float kMinSigmaT = 1.0e-6f;
 constexpr float kMinMeanFreePathMm = 0.01f;
+constexpr float kDefaultScatterDistanceMm = 1.0f;
+constexpr float kZeroScatterThresholdMm = 1.0e-6f;
 
 } // namespace MaterialParamsDetail
 
@@ -22,8 +24,8 @@ constexpr float kMinMeanFreePathMm = 0.01f;
  * Artist-friendly material parameters mapped to physical volume coefficients.
  *
  * albedo rgb           -> alpha = sigma_s / (sigma_s + sigma_a)
- * subsurfaceRadius rgb -> sigma_t = 1 / mean_free_path
- * subsurface weight    -> scales effective sigma_t
+ * subsurfaceRadius rgb -> sigma_t = 1 / mean_free_path (mm)
+ * subsurface weight    -> lobe probability only (decoupled from mfp)
  */
 struct PhysicalMediumCoeffs
 {
@@ -39,10 +41,28 @@ MATERIAL_PARAMS_FN float materialAlbedoChannel(float rgb, float sigmaS, float si
     return sigmaT > MaterialParamsDetail::kMinSigmaT ? sigmaS / sigmaT : rgb;
 }
 
+MATERIAL_PARAMS_FN float materialScatterDistanceFallbackMm(const MaterialGpu& material, int channelIndex)
+{
+    float fallback = MaterialParamsDetail::kDefaultScatterDistanceMm;
+    if (channelIndex != 0
+        && material.subsurfaceRadiusR > MaterialParamsDetail::kZeroScatterThresholdMm) {
+        fallback = material.subsurfaceRadiusR;
+    }
+    if (channelIndex != 1
+        && material.subsurfaceRadiusG > MaterialParamsDetail::kZeroScatterThresholdMm) {
+        fallback = vecMax2(fallback, material.subsurfaceRadiusG);
+    }
+    if (channelIndex != 2
+        && material.subsurfaceRadiusB > MaterialParamsDetail::kZeroScatterThresholdMm) {
+        fallback = vecMax2(fallback, material.subsurfaceRadiusB);
+    }
+    return vecMax2(fallback, MaterialParamsDetail::kMinMeanFreePathMm);
+}
+
 MATERIAL_PARAMS_FN float materialScatterDistanceChannel(const MaterialGpu& material, int channelIndex)
 {
     float sigmaT = 0.0f;
-    float radius = 1.0f;
+    float radius = MaterialParamsDetail::kDefaultScatterDistanceMm;
     if (channelIndex < 1) {
         sigmaT = vecMax2(0.0f, material.sigmaAr) + vecMax2(0.0f, material.sigmaSr);
         radius = material.subsurfaceRadiusR;
@@ -56,6 +76,9 @@ MATERIAL_PARAMS_FN float materialScatterDistanceChannel(const MaterialGpu& mater
 
     if (sigmaT > MaterialParamsDetail::kMinSigmaT) {
         return vecMax2(1.0f / sigmaT, MaterialParamsDetail::kMinMeanFreePathMm);
+    }
+    if (radius <= MaterialParamsDetail::kZeroScatterThresholdMm) {
+        return materialScatterDistanceFallbackMm(material, channelIndex);
     }
     return vecMax2(radius, MaterialParamsDetail::kMinMeanFreePathMm);
 }
@@ -87,13 +110,13 @@ MATERIAL_PARAMS_FN PhysicalMediumCoeffs materialToPhysicalMedium(
     } else if (sub > 1.0e-6f) {
         const float scatterScale = vecMax2(material.subsurfaceScatterScale, 1.0e-6f);
         const float radiusR = vecMax2(
-            materialScatterDistanceChannel(material, 0) * sub * scatterScale,
+            materialScatterDistanceChannel(material, 0) * scatterScale,
             MaterialParamsDetail::kMinMeanFreePathMm);
         const float radiusG = vecMax2(
-            materialScatterDistanceChannel(material, 1) * sub * scatterScale,
+            materialScatterDistanceChannel(material, 1) * scatterScale,
             MaterialParamsDetail::kMinMeanFreePathMm);
         const float radiusB = vecMax2(
-            materialScatterDistanceChannel(material, 2) * sub * scatterScale,
+            materialScatterDistanceChannel(material, 2) * scatterScale,
             MaterialParamsDetail::kMinMeanFreePathMm);
 
         coeffs.sigmaT = vecMake3(1.0f / radiusR, 1.0f / radiusG, 1.0f / radiusB);

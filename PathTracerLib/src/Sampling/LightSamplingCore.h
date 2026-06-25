@@ -4,6 +4,7 @@
 #include "MeshAccel/MeshAccelIntersectCore.h"
 #include "MeshAccel/MeshAccelTypes.h"
 #include "RenderTypes.h"
+#include "Sampling/MisCore.h"
 #include "SceneUnits.h"
 #include "Spectral/SpectralCore.h"
 
@@ -284,6 +285,27 @@ LIGHT_CORE_FN bool lightIsOccluded(
     return false;
 }
 
+LIGHT_CORE_FN bool lightIsOccludedBefore(
+    Vec3 position,
+    Vec3 shadingNormal,
+    Vec3 wi,
+    float maxDistanceMm,
+    const MeshAccelSceneGpu* scene,
+    float hitDistanceMm,
+    uint32_t sourceTriangleIndex)
+{
+    if (maxDistanceMm <= LightCoreDetail::kMinPdf) {
+        return true;
+    }
+
+    const float epsilon = SceneUnits::rayEpsilonMm(hitDistanceMm, lightSceneExtentMm(scene));
+    const Vec3 offsetNormal = lightShadowOffsetNormal(shadingNormal, scene, sourceTriangleIndex);
+    const Vec3 origin = vecAdd3(position, vecScale3(offsetNormal, epsilon));
+    const float tMax = vecMax2(epsilon, maxDistanceMm - epsilon);
+    const MeshHit shadowHit = meshAccelTraceRay(origin, wi, scene, epsilon, tMax);
+    return lightShadowHitOccludes(shadowHit, sourceTriangleIndex, epsilon);
+}
+
 LIGHT_CORE_FN MaterialGpu lightFetchMaterial(const MeshAccelSceneGpu* scene, uint32_t triangleIndex)
 {
     MaterialGpu fallback{};
@@ -400,6 +422,71 @@ LIGHT_CORE_FN bool lightSampleEmissiveTriangle(
     return pdf > LightCoreDetail::kMinPdf;
 }
 
+LIGHT_CORE_FN bool lightEmissiveListIndexForTriangle(
+    const MeshAccelSceneGpu* scene,
+    uint32_t triangleIndex,
+    uint32_t& outEmissiveListIndex)
+{
+    if (scene == nullptr || scene->emissiveTriangleIndices == nullptr || scene->emissiveTriangleCount == 0) {
+        return false;
+    }
+    for (uint32_t i = 0; i < scene->emissiveTriangleCount; ++i) {
+        if (scene->emissiveTriangleIndices[i] == triangleIndex) {
+            outEmissiveListIndex = i;
+            return true;
+        }
+    }
+    return false;
+}
+
+LIGHT_CORE_FN bool lightTriangleIsEmissive(
+    const MeshAccelSceneGpu* scene,
+    uint32_t triangleIndex)
+{
+    uint32_t ignored = 0;
+    return lightEmissiveListIndexForTriangle(scene, triangleIndex, ignored);
+}
+
+LIGHT_CORE_FN float lightPdfEmissiveTriangleForIndex(
+    const MeshAccelSceneGpu* scene,
+    Vec3 fromPosition,
+    Vec3 toPosition,
+    uint32_t triangleIndex,
+    Vec3& outLightNormal)
+{
+    if (scene == nullptr || scene->triangles == nullptr || triangleIndex >= scene->triangleCount) {
+        return 0.0f;
+    }
+
+    uint32_t emissiveListIndex = 0;
+    if (!lightEmissiveListIndexForTriangle(scene, triangleIndex, emissiveListIndex)) {
+        return 0.0f;
+    }
+
+    const Vec3 toLight = vecSub3(toPosition, fromPosition);
+    const float dist2 = vecDot3(toLight, toLight);
+    if (dist2 <= LightCoreDetail::kMinPdf) {
+        return 0.0f;
+    }
+
+    const TriangleGpu& tri = scene->triangles[triangleIndex];
+    const Vec3 normal = lightTriangleNormal(tri);
+    outLightNormal = normal;
+    const Vec3 wi = vecNormalize3(toLight);
+    const float cosLight = vecMax2(0.0f, vecDot3(normal, vecScale3(wi, -1.0f)));
+    if (cosLight <= 0.0f) {
+        return 0.0f;
+    }
+
+    const float area = lightTriangleArea(tri);
+    if (area <= LightCoreDetail::kMinPdf) {
+        return 0.0f;
+    }
+
+    const float triPdf = lightEmissiveSelectionPdf(scene, emissiveListIndex);
+    return triPdf * dist2 / (area * cosLight);
+}
+
 LIGHT_CORE_FN float lightPdfEmissiveTriangle(
     const MeshAccelSceneGpu* scene,
     Vec3 position,
@@ -420,29 +507,47 @@ LIGHT_CORE_FN float lightPdfEmissiveTriangle(
     for (uint32_t emissiveListIndex = 0; emissiveListIndex < scene->emissiveTriangleCount; ++emissiveListIndex) {
         const uint32_t triangleIndex = scene->emissiveTriangleIndices[emissiveListIndex];
         const TriangleGpu& tri = scene->triangles[triangleIndex];
-        const Vec3 normal = lightTriangleNormal(tri);
-        const float cosLight = vecMax2(0.0f, vecDot3(normal, vecScale3(wi, -1.0f)));
-        if (cosLight <= 0.0f) {
-            continue;
+        const Vec3 triCenter = vecScale3(
+            vecAdd3(vecAdd3(tri.v0, tri.v1), tri.v2),
+            1.0f / 3.0f);
+        const float triPdf = lightPdfEmissiveTriangleForIndex(
+            scene, position, triCenter, triangleIndex, outLightNormal);
+        if (triPdf > LightCoreDetail::kMinPdf) {
+            pdfSum += triPdf;
         }
-
-        const float area = lightTriangleArea(tri);
-        if (area <= LightCoreDetail::kMinPdf) {
-            continue;
-        }
-
-        const float dist2 = vecDot3(wi, wi);
-        if (dist2 <= LightCoreDetail::kMinPdf) {
-            continue;
-        }
-
-        const float triPdf = lightEmissiveSelectionPdf(scene, emissiveListIndex);
-        const float solidAnglePdf = triPdf * dist2 / (area * cosLight);
-        pdfSum += solidAnglePdf;
-        outLightNormal = normal;
     }
 
     return pdfSum;
+}
+
+LIGHT_CORE_FN Vec3 lightDirectEmissionWithMis(
+    const MeshAccelSceneGpu* scene,
+    Vec3 prevPosition,
+    Vec3 hitPosition,
+    uint32_t hitTriangleIndex,
+    Vec3 throughput,
+    Vec3 emission,
+    float prevBsdfPdf,
+    bool applyMis)
+{
+    const float emissionLuminance =
+        emission.x * 0.2126f + emission.y * 0.7152f + emission.z * 0.0722f;
+    if (emissionLuminance <= LightCoreDetail::kMinPdf) {
+        return vecMake3(0.0f, 0.0f, 0.0f);
+    }
+
+    float misWeight = 1.0f;
+    if (applyMis) {
+        Vec3 lightNormal{};
+        const float lightPdf = lightPdfEmissiveTriangleForIndex(
+            scene, prevPosition, hitPosition, hitTriangleIndex, lightNormal);
+        misWeight = misBalanceWeight(prevBsdfPdf, lightPdf);
+    }
+
+    return vecMake3(
+        throughput.x * emission.x * misWeight,
+        throughput.y * emission.y * misWeight,
+        throughput.z * emission.z * misWeight);
 }
 
 LIGHT_CORE_FN bool lightIsOccludedFrom(
@@ -465,6 +570,25 @@ LIGHT_CORE_FN bool lightIsOccludedFrom(
         return lightShadowHitOccludes(shadowHit, sourceTriangleIndex, epsilon);
     }
     return false;
+}
+
+LIGHT_CORE_FN bool lightIsOccludedFromBefore(
+    Vec3 position,
+    Vec3 wi,
+    float maxDistanceMm,
+    const MeshAccelSceneGpu* scene,
+    float hitDistanceMm,
+    uint32_t sourceTriangleIndex)
+{
+    if (maxDistanceMm <= LightCoreDetail::kMinPdf) {
+        return true;
+    }
+
+    const float epsilon = SceneUnits::rayEpsilonMm(hitDistanceMm, lightSceneExtentMm(scene));
+    const Vec3 origin = vecAdd3(position, vecScale3(wi, epsilon));
+    const float tMax = vecMax2(epsilon, maxDistanceMm - epsilon);
+    const MeshHit shadowHit = meshAccelTraceRay(origin, wi, scene, epsilon, tMax);
+    return lightShadowHitOccludes(shadowHit, sourceTriangleIndex, epsilon);
 }
 
 #undef LIGHT_CORE_FN

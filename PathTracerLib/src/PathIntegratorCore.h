@@ -103,8 +103,8 @@ PATH_INTEGRATOR_CORE_FN Vec3 pathIntegratorEvaluateEnvironmentNee(
 
     const BrdfContext ctx{normal, wo, material, 1.0f, 550.0f, 0};
     const Vec3 lightRadiance = lightEvalEnvironmentOrBackground(env, params, wi);
-    const Vec3 bsdf = brdfEval(ctx, wi);
-    const float bsdfPdfValue = brdfPdf(ctx, wi);
+    const Vec3 bsdf = brdfEvalDirectLighting(ctx, wi);
+    const float bsdfPdfValue = brdfPdfDirectLighting(ctx, wi);
     const float misWeight = misBalanceWeight(lightPdf, bsdfPdfValue);
     const Vec3 scale = vecScale3(bsdf, misWeight * cosTheta / lightPdf);
 
@@ -114,7 +114,7 @@ PATH_INTEGRATOR_CORE_FN Vec3 pathIntegratorEvaluateEnvironmentNee(
         throughput.z * lightRadiance.z * scale.z);
 }
 
-PATH_INTEGRATOR_CORE_FN Vec3 pathIntegratorEvaluateEmissiveNee(
+PATH_INTEGRATOR_CORE_FN Vec3 pathIntegratorEvaluateEmissiveNeeSample(
     Vec3 position,
     Vec3 normal,
     Vec3 wo,
@@ -156,7 +156,14 @@ PATH_INTEGRATOR_CORE_FN Vec3 pathIntegratorEvaluateEmissiveNee(
         return vecMake3(0.0f, 0.0f, 0.0f);
     }
 
-    if (lightIsOccludedFrom(position, wi, scene, hitDistanceMm, sourceTriangleIndex)) {
+    if (lightIsOccludedBefore(
+            position,
+            normal,
+            wi,
+            sqrtf(dist2),
+            scene,
+            hitDistanceMm,
+            sourceTriangleIndex)) {
         return vecMake3(0.0f, 0.0f, 0.0f);
     }
 
@@ -166,8 +173,8 @@ PATH_INTEGRATOR_CORE_FN Vec3 pathIntegratorEvaluateEmissiveNee(
     }
 
     const BrdfContext ctx{normal, wo, material, 1.0f, 550.0f, 0};
-    const Vec3 bsdf = brdfEval(ctx, wi);
-    const float bsdfPdfValue = brdfPdf(ctx, wi);
+    const Vec3 bsdf = brdfEvalDirectLighting(ctx, wi);
+    const float bsdfPdfValue = brdfPdfDirectLighting(ctx, wi);
     const float misWeight = misBalanceWeight(lightPdf, bsdfPdfValue);
     const Vec3 scale = vecScale3(bsdf, misWeight * cosTheta / lightPdf);
 
@@ -175,6 +182,46 @@ PATH_INTEGRATOR_CORE_FN Vec3 pathIntegratorEvaluateEmissiveNee(
         throughput.x * lightRadiance.x * scale.x,
         throughput.y * lightRadiance.y * scale.y,
         throughput.z * lightRadiance.z * scale.z);
+}
+
+PATH_INTEGRATOR_CORE_FN Vec3 pathIntegratorEvaluateEmissiveNee(
+    Vec3 position,
+    Vec3 normal,
+    Vec3 wo,
+    const MaterialGpu& material,
+    Vec3 throughput,
+    const MeshAccelSceneGpu* scene,
+    const RenderParamsGpu* params,
+    curandState* rng,
+    float hitDistanceMm,
+    uint32_t sourceTriangleIndex)
+{
+    int sampleCount = 1;
+    if (params != nullptr) {
+        sampleCount = params->emissiveNeeSamples;
+        if (sampleCount < 1) {
+            sampleCount = 1;
+        } else if (sampleCount > 4) {
+            sampleCount = 4;
+        }
+    }
+
+    Vec3 result = vecMake3(0.0f, 0.0f, 0.0f);
+    const float invCount = 1.0f / static_cast<float>(sampleCount);
+    for (int sampleIndex = 0; sampleIndex < sampleCount; ++sampleIndex) {
+        const Vec3 sampleRadiance = pathIntegratorEvaluateEmissiveNeeSample(
+            position,
+            normal,
+            wo,
+            material,
+            throughput,
+            scene,
+            rng,
+            hitDistanceMm,
+            sourceTriangleIndex);
+        result = vecAdd3(result, vecScale3(sampleRadiance, invCount));
+    }
+    return result;
 }
 
 PATH_INTEGRATOR_CORE_FN bool pathIntegratorContinueAfterTrace(
@@ -253,6 +300,8 @@ PATH_INTEGRATOR_CORE_FN Vec3 tracePathCoreFromHit(
     Vec3 currentOrigin = rayOrigin;
     Vec3 currentDir = rayDir;
     MeshHit currentHit = hit;
+    Vec3 prevPosition = vecMake3(0.0f, 0.0f, 0.0f);
+    float prevBsdfPdf = 0.0f;
 
     for (int depth = 0; depth < maxDepth; ++depth) {
         const Vec3 position = vecEvalRay(currentOrigin, currentDir, currentHit.t);
@@ -264,10 +313,15 @@ PATH_INTEGRATOR_CORE_FN Vec3 tracePathCoreFromHit(
         const Vec3 emission = lightEmissiveRadiance(material);
         radiance = vecAdd3(
             radiance,
-            vecMake3(
-                path.throughput.x * emission.x,
-                path.throughput.y * emission.y,
-                path.throughput.z * emission.z));
+            lightDirectEmissionWithMis(
+                scene,
+                prevPosition,
+                position,
+                currentHit.triangleIndex,
+                path.throughput,
+                emission,
+                prevBsdfPdf,
+                depth > 0));
         sssRadiance += path.sssThroughput
             * lightEmissiveRadianceSpectral(material, path.wavelengthNm);
 
@@ -295,6 +349,7 @@ PATH_INTEGRATOR_CORE_FN Vec3 tracePathCoreFromHit(
                 material,
                 path.throughput,
                 scene,
+                params,
                 rng,
                 currentHit.t,
                 currentHit.triangleIndex));
@@ -362,6 +417,7 @@ PATH_INTEGRATOR_CORE_FN Vec3 tracePathCoreFromHit(
                     exitMaterial,
                     path.throughput,
                     scene,
+                    params,
                     rng,
                     sssResult.exitHit.t,
                     sssResult.exitHit.triangleIndex));
@@ -398,6 +454,8 @@ PATH_INTEGRATOR_CORE_FN Vec3 tracePathCoreFromHit(
                     continuationBias)) {
                 break;
             }
+            prevPosition = sssResult.exitPosition;
+            prevBsdfPdf = exitSample.pdf;
         } else {
             const float surfacePdf = vecMax2(
                 1.0f - lobeWeights.subsurface, PathIntegratorCoreDetail::kMinPdf);
@@ -433,6 +491,8 @@ PATH_INTEGRATOR_CORE_FN Vec3 tracePathCoreFromHit(
                     continuationBias)) {
                 break;
             }
+            prevPosition = position;
+            prevBsdfPdf = sample.pdf;
         }
 
         const float throughputLuminance = brdfThroughputLuminance(path.throughput);

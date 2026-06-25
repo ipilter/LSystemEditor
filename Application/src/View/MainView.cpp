@@ -52,6 +52,9 @@ constexpr int kDefaultRussianRouletteMinDepth = 3;
 constexpr int kMinMaxSubsurfaceScatters = 1;
 constexpr int kMaxMaxSubsurfaceScatters = 128;
 constexpr int kDefaultMaxSubsurfaceScatters = 8;
+constexpr int kMinEmissiveNeeSamples = 1;
+constexpr int kMaxEmissiveNeeSamples = 4;
+constexpr int kDefaultEmissiveNeeSamples = 1;
 constexpr int kLogMaxBlockCount = 500;
 constexpr int kControlPanelMinWidth = 160;
 constexpr int kControlPanelInitialWidth = 220;
@@ -185,6 +188,18 @@ MainView::MainView(QWidget* parent)
     sssScatterCapRow->addWidget(m_maxSubsurfaceScattersSpinBox);
     renderLayout->addLayout(sssScatterCapRow);
 
+    auto* emissiveNeeRow = new QHBoxLayout();
+    emissiveNeeRow->addWidget(new QLabel(QStringLiteral("Light NEE:"), renderGroup));
+    m_emissiveNeeSamplesSpinBox = new QSpinBox(renderGroup);
+    m_emissiveNeeSamplesSpinBox->setRange(kMinEmissiveNeeSamples, kMaxEmissiveNeeSamples);
+    m_emissiveNeeSamplesSpinBox->setValue(kDefaultEmissiveNeeSamples);
+    m_emissiveNeeSamplesSpinBox->setToolTip(
+        QStringLiteral(
+            "Emissive triangle next-event-estimation samples per path bounce (1–4). "
+            "Higher values reduce noise from area lights at increased cost."));
+    emissiveNeeRow->addWidget(m_emissiveNeeSamplesSpinBox);
+    renderLayout->addLayout(emissiveNeeRow);
+
     auto* boundsOverlayRow = new QHBoxLayout();
     boundsOverlayRow->addWidget(new QLabel(QStringLiteral("View Mode:"), renderGroup));
     m_renderViewOverlayComboBox = new QComboBox(renderGroup);
@@ -193,12 +208,14 @@ MainView::MainView(QWidget* parent)
     m_renderViewOverlayComboBox->addItem(QStringLiteral("Adaptive"));
     m_renderViewOverlayComboBox->addItem(QStringLiteral("UV"));
     m_renderViewOverlayComboBox->addItem(QStringLiteral("Normals"));
+    m_renderViewOverlayComboBox->addItem(QStringLiteral("Emissive"));
     m_renderViewOverlayComboBox->setToolTip(
         QStringLiteral(
             "View modes: Render (path-traced image), BVH wireframe overlay, "
             "Adaptive sampling (red = active, dark green = converged), "
             "UV (U to red, V to green), "
-            "Normals (R=±X, G=±Y, B=±Z; uses interpolated split normals)."));
+            "Normals (R=±X, G=±Y, B=±Z; uses interpolated split normals), "
+            "Emissive (warm tint on emissive mesh triangles)."));
     boundsOverlayRow->addWidget(m_renderViewOverlayComboBox, 1);
     renderLayout->addLayout(boundsOverlayRow);
 
@@ -445,6 +462,7 @@ MainView::MainView(QWidget* parent)
       "# type: (optional) Opaque | Glass | Subsurface | Emissive — behavior is driven by weights\n"
       "# subsurface / ss: scalar in [0,1] | nested {weight, scatterR, scatterG, scatterB, scatterScale, anisotropy}\n"
       "# subsurfaceRadius / ssRadius: scalar | {r,g,b} in mm  default 1\n"
+      "# scatterR/G/B: mean free path per channel in mm (NOT RGB color weights); 0 = inherit from other channels\n"
       "# scatterScale / subsurfaceScatterScale: geometry tuning scalar  default 1\n"
       "# diffuseRoughness / diffuse / diffRou: scalar | texture  default -1 (uses roughness)\n"
       "# specular / spec: scalar | texture  default 1\n"
@@ -454,17 +472,22 @@ MainView::MainView(QWidget* parent)
       "# Stripe: {Stripe, on:{r,g,b}|gray, off:{r,g,b}|gray, intensityOn:1, intensityOff:1, freq, thickness:0.05}\n"
       "# Noise: {Noise, on:{r,g,b}|gray, off:{r,g,b}|gray, intensityOn:1, intensityOff:1, scale, octaves:1, seed:0}\n\n"
       "Mat(Wax) = {\n"
-      "  albedo: {0.99, 0.98, 0.94},\n"
+      "  albedo: {0.99, 0.98, 0.95},\n"
       "  roughness: 0.78,\n"
       "  diffuseRoughness: 0.88,\n"
       "  specular: 0.12,\n"
       "  subsurface: {\n"
-      "    weight: 1.0,\n"
+      "    weight: 0.85,\n"
       "    scatterR: 3.5, scatterG: 3.0, scatterB: 1.0,\n"
       "    scatterScale: 1.0,\n"
       "    anisotropy: 0.0\n"
       "  },\n"
       "  ior: 1.43\n"
+      "}\n"
+      "Mat(Fire) = {\n"
+      "  albedo: {0.9, 0.8, 0.2},\n"
+      "  roughness: 1.0,\n"
+      "  emission: 0.0\n"
       "}\n"
       "Mat(Leaf) = {\n"
       "  albedo: {0.18, 0.72, 0.08},\n"
@@ -562,6 +585,10 @@ MainView::MainView(QWidget* parent)
       "Pitch(-90) f(250) Pitch(90)\n"
       "Mat(Wax)\n"
       "F(0, 100)\n"
+      "[Mat(Fire)\n"
+      "f(101)\n"
+      "F(30, 5)\n"
+      "f(-120)]\n"
       "Pitch(-90) f(250) Pitch(90)\n"
       "Mat(Pearl)\n"
       "F(0, 100)\n"
@@ -778,6 +805,11 @@ QSpinBox* MainView::russianRouletteMinDepthSpinBox() const
 QSpinBox* MainView::maxSubsurfaceScattersSpinBox() const
 {
     return m_maxSubsurfaceScattersSpinBox;
+}
+
+QSpinBox* MainView::emissiveNeeSamplesSpinBox() const
+{
+    return m_emissiveNeeSamplesSpinBox;
 }
 
 QComboBox* MainView::renderViewOverlayComboBox() const

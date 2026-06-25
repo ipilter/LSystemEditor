@@ -369,6 +369,9 @@ void OpenGLViewportWidget::setSceneModel(SceneModel* model)
     connect(m_model, &SceneModel::maxSubsurfaceScattersChanged, this, [this](int count) {
         m_pathTracer.setMaxSubsurfaceScatters(count);
     });
+    connect(m_model, &SceneModel::emissiveNeeSamplesChanged, this, [this](int count) {
+        m_pathTracer.setEmissiveNeeSamples(count);
+    });
 
     connect(m_model, &SceneModel::boundsOverlayModeChanged, this, [this](RenderViewOverlayMode mode) {
         m_pathTracer.setDebugOverlayMode(static_cast<int>(mode));
@@ -1605,6 +1608,7 @@ void OpenGLViewportWidget::recreateGpuBuffers()
     m_pathTracer.setUiUpdateEveryNSamples(AppSettings::instance().uiUpdateEveryNSamples());
     m_pathTracer.setRussianRouletteMinDepth(m_model->russianRouletteMinDepth());
     m_pathTracer.setMaxSubsurfaceScatters(m_model->maxSubsurfaceScatters());
+    m_pathTracer.setEmissiveNeeSamples(m_model->emissiveNeeSamples());
     m_pathTracer.setEnvironmentHdrPath(m_model->environmentHdrPath());
     m_pathTracer.setPhysicalCamera(m_model->fStop(), m_model->shutterSpeedSeconds(), m_model->iso());
     applyRegionRenderSettings(false);

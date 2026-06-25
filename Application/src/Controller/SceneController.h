@@ -37,6 +37,8 @@ private:
     void syncRussianRouletteMinDepthSpinBox();
     void onMaxSubsurfaceScattersSpinBoxChanged();
     void syncMaxSubsurfaceScattersSpinBox();
+    void onEmissiveNeeSamplesSpinBoxChanged();
+    void syncEmissiveNeeSamplesSpinBox();
     void onBoundsOverlayComboBoxChanged();
     void onBrdfDebugComboBoxChanged();
     void onSceneOverlayCheckBoxChanged();

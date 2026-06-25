@@ -41,6 +41,7 @@ enum class RenderViewOverlayMode : int
     AdaptiveSampling = 2,
     Uv = 3,
     Normals = 4,
+    EmissiveLights = 5,
 };
 
 enum MeshBvhNodeFlags : uint32_t

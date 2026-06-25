@@ -254,6 +254,55 @@ void testVolumeFreeFlight()
     expectTrue(distance > 0.0f, "free flight distance is positive");
 }
 
+void testSubsurfaceWeightDecoupledFromMfp()
+{
+    const MaterialGpu halfWeight = makeMaterial(
+        0.8f, 0.8f, 0.8f, 0.5f, 0.0f, 1.5f, 0.0f, -1.0f,
+        static_cast<uint32_t>(MaterialType::Opaque), 0.5f, 2.0f);
+    const MaterialGpu fullWeight = makeMaterial(
+        0.8f, 0.8f, 0.8f, 0.5f, 0.0f, 1.5f, 0.0f, -1.0f,
+        static_cast<uint32_t>(MaterialType::Opaque), 1.0f, 2.0f);
+
+    const PhysicalMediumCoeffs halfCoeffs = materialToPhysicalMedium(halfWeight, 550.0f);
+    const PhysicalMediumCoeffs fullCoeffs = materialToPhysicalMedium(fullWeight, 550.0f);
+    expectNear(halfCoeffs.sigmaT.x, 0.5f, 0.01f, "half weight keeps same sigma_t");
+    expectNear(fullCoeffs.sigmaT.x, 0.5f, 0.01f, "full weight keeps same sigma_t");
+    expectNear(bssrdfEnterProbability(halfWeight), 0.5f, 0.01f, "enter probability follows weight");
+    expectNear(bssrdfEnterProbability(fullWeight), 1.0f, 0.01f, "enter probability follows weight");
+}
+
+void testZeroScatterChannelFallback()
+{
+    MaterialGpu wax = makeMaterial(
+        0.8f, 0.8f, 0.8f, 0.5f, 0.0f, 1.5f, 0.0f, -1.0f,
+        static_cast<uint32_t>(MaterialType::Opaque), 1.0f, 1.0f);
+    wax.subsurfaceRadiusR = 3.5f;
+    wax.subsurfaceRadiusG = 0.0f;
+    wax.subsurfaceRadiusB = 1.0f;
+
+    expectNear(materialScatterDistanceChannel(wax, 0), 3.5f, 0.01f, "red channel unchanged");
+    expectNear(materialScatterDistanceChannel(wax, 1), 3.5f, 0.01f, "zero green inherits max of others");
+    expectNear(materialScatterDistanceChannel(wax, 2), 1.0f, 0.01f, "blue channel unchanged");
+}
+
+void testSubsurfaceDirectLightingBsdf()
+{
+    MaterialGpu wax = makeMaterial(
+        0.99f, 0.98f, 0.95f, 0.78f, 0.0f, 1.43f, 0.0f, 0.88f,
+        static_cast<uint32_t>(MaterialType::Opaque), 1.0f, 3.5f, 0.12f);
+    wax.subsurfaceRadiusR = 3.5f;
+    wax.subsurfaceRadiusG = 3.0f;
+    wax.subsurfaceRadiusB = 1.0f;
+
+    const BrdfContext ctx = makeContext(wax);
+    const Vec3 wi = vecNormalize3(vecMake3(0.1f, 0.05f, 1.0f));
+    const Vec3 surfaceOnly = brdfEval(ctx, wi);
+    const Vec3 directLighting = brdfEvalDirectLighting(ctx, wi);
+
+    expectTrue(directLighting.x > surfaceOnly.x * 0.5f, "subsurface direct lighting adds diffuse term");
+    expectTrue(brdfPdfDirectLighting(ctx, wi) > 0.0f, "subsurface direct lighting pdf positive");
+}
+
 } // namespace
 
 int main()
@@ -280,6 +329,9 @@ int main()
     testSubsurfaceShellMode();
     testThinShellTransmittanceOrdering();
     testVolumeFreeFlight();
+    testSubsurfaceWeightDecoupledFromMfp();
+    testZeroScatterChannelFallback();
+    testSubsurfaceDirectLightingBsdf();
 
     if (gFailures == 0) {
         std::cout << "All Oren-Nayar / material tests passed.\n";

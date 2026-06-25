@@ -3,6 +3,7 @@
 #include "AppLog.h"
 #include "CameraGpu.h"
 #include "EnvironmentMap.h"
+#include "Geometry/MathCore.h"
 #include "PhysicalCamera.h"
 #include "PathTracerSampleBudget.h"
 #include "PathTracerAdaptiveSampling.h"
@@ -1158,6 +1159,40 @@ void logPipelineTimingIfDue()
 
 #endif // PATHTRACER_PROFILE
 
+float hostTriangleArea(const TriangleGpu& tri)
+{
+    const Vec3 e1 = vecSub3(tri.v1, tri.v0);
+    const Vec3 e2 = vecSub3(tri.v2, tri.v0);
+    const Vec3 cross = vecCross3(e1, e2);
+    return 0.5f * vecLength3(cross);
+}
+
+void logEmissiveLightStats(const MeshAccelScene& meshScene)
+{
+    const std::vector<uint32_t>& indices = meshScene.emissiveTriangleIndicesHost();
+    const std::vector<float>& cdf = meshScene.emissiveTriangleCdfHost();
+    const std::vector<TriangleGpu>& triangles = meshScene.trianglesHost();
+
+    if (indices.empty()) {
+        AppLog::instance().info(QStringLiteral("Emissive lights: 0 triangles"));
+        return;
+    }
+
+    float totalAreaMm2 = 0.0f;
+    for (const uint32_t triangleIndex : indices) {
+        if (triangleIndex < triangles.size()) {
+            totalAreaMm2 += hostTriangleArea(triangles[triangleIndex]);
+        }
+    }
+
+    const float power = cdf.empty() ? 0.0f : cdf.back();
+    AppLog::instance().info(
+        QStringLiteral("Emissive lights: %1 triangles (total area %2 mm², power %3)")
+            .arg(indices.size())
+            .arg(static_cast<double>(totalAreaMm2), 0, 'f', 2)
+            .arg(static_cast<double>(power), 0, 'f', 2));
+}
+
 bool buildAndUploadMeshScene(
     PathTracerDetail::PathTracerImpl* impl,
     const Mesh& mesh,
@@ -1195,6 +1230,8 @@ bool buildAndUploadMeshScene(
         }
         return false;
     }
+
+    logEmissiveLightStats(impl->meshScene);
 
     return true;
 }
@@ -1524,7 +1561,8 @@ bool launchDisplayPublishLocked(
     const int overlayMode = impl->debugOverlayMode.load();
     const bool rayTraceDebugMode =
         overlayMode == static_cast<int>(RenderViewOverlayMode::Uv)
-        || overlayMode == static_cast<int>(RenderViewOverlayMode::Normals);
+        || overlayMode == static_cast<int>(RenderViewOverlayMode::Normals)
+        || overlayMode == static_cast<int>(RenderViewOverlayMode::EmissiveLights);
 
     if (!rayTraceDebugMode && (!impl->displayBuffersValid.load() || !hasDisplayableContent(*impl))) {
         return false;
@@ -1606,6 +1644,15 @@ bool launchDisplayPublishLocked(
             impl->displayStream);
     } else if (overlayMode == static_cast<int>(RenderViewOverlayMode::Normals)) {
         copied = pathTracerWriteNormalsDebugToPbo(
+            impl->d_camera,
+            impl->meshScene.deviceScene(),
+            static_cast<uchar4*>(devicePointer),
+            impl->acc.width,
+            impl->acc.height,
+            impl->d_renderParams,
+            impl->displayStream);
+    } else if (overlayMode == static_cast<int>(RenderViewOverlayMode::EmissiveLights)) {
+        copied = pathTracerWriteEmissiveLightsDebugToPbo(
             impl->d_camera,
             impl->meshScene.deviceScene(),
             static_cast<uchar4*>(devicePointer),
@@ -2089,6 +2136,32 @@ void PathTracer::setMaxSubsurfaceScatters(int count)
 int PathTracer::maxSubsurfaceScatters() const
 {
     return m_impl->hostRenderParams.maxSubsurfaceScatters;
+}
+
+void PathTracer::setEmissiveNeeSamples(int count)
+{
+    if (count < 1) {
+        count = 1;
+    }
+    if (count > 4) {
+        count = 4;
+    }
+
+    if (m_impl->hostRenderParams.emissiveNeeSamples == count) {
+        return;
+    }
+
+    m_impl->hostRenderParams.emissiveNeeSamples = count;
+    m_impl->renderParamsDirty.store(true);
+
+    if (m_impl->configured.load()) {
+        resetAccumulation();
+    }
+}
+
+int PathTracer::emissiveNeeSamples() const
+{
+    return m_impl->hostRenderParams.emissiveNeeSamples;
 }
 
 void PathTracer::setPhysicalCamera(float fStop, float shutterSpeedSeconds, float iso)

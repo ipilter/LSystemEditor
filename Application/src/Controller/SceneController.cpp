@@ -47,6 +47,8 @@ RenderViewOverlayMode renderViewOverlayModeFromComboIndex(int index)
         return RenderViewOverlayMode::Uv;
     case 4:
         return RenderViewOverlayMode::Normals;
+    case 5:
+        return RenderViewOverlayMode::EmissiveLights;
     case 0:
     default:
         return RenderViewOverlayMode::Render;
@@ -64,6 +66,8 @@ int comboIndexFromBoundsOverlayMode(RenderViewOverlayMode mode)
         return 3;
     case RenderViewOverlayMode::Normals:
         return 4;
+    case RenderViewOverlayMode::EmissiveLights:
+        return 5;
     case RenderViewOverlayMode::Render:
     default:
         return 0;
@@ -171,6 +175,7 @@ SceneController::SceneController(SceneModel* model, MainView* view, QObject* par
     syncPreviewStepsSpinBox();
     syncRussianRouletteMinDepthSpinBox();
     syncMaxSubsurfaceScattersSpinBox();
+    syncEmissiveNeeSamplesSpinBox();
     syncBoundsOverlayComboBox();
     syncBrdfDebugComboBox();
     syncSceneOverlayCheckBox();
@@ -201,6 +206,9 @@ SceneController::SceneController(SceneModel* model, MainView* view, QObject* par
     connect(m_model, &SceneModel::maxSubsurfaceScattersChanged, this, [this](int) {
         syncMaxSubsurfaceScattersSpinBox();
     });
+    connect(m_model, &SceneModel::emissiveNeeSamplesChanged, this, [this](int) {
+        syncEmissiveNeeSamplesSpinBox();
+    });
     connect(m_model, &SceneModel::boundsOverlayModeChanged, this, [this](RenderViewOverlayMode) {
         syncBoundsOverlayComboBox();
     });
@@ -230,6 +238,11 @@ SceneController::SceneController(SceneModel* model, MainView* view, QObject* par
         &QSpinBox::valueChanged,
         this,
         &SceneController::onMaxSubsurfaceScattersSpinBoxChanged);
+    connect(
+        m_view->emissiveNeeSamplesSpinBox(),
+        &QSpinBox::valueChanged,
+        this,
+        &SceneController::onEmissiveNeeSamplesSpinBoxChanged);
     connect(
         m_view->renderViewOverlayComboBox(),
         QOverload<int>::of(&QComboBox::currentIndexChanged),
@@ -448,6 +461,11 @@ void SceneController::onRussianRouletteMinDepthSpinBoxChanged()
 void SceneController::onMaxSubsurfaceScattersSpinBoxChanged()
 {
     m_model->setMaxSubsurfaceScatters(m_view->maxSubsurfaceScattersSpinBox()->value());
+}
+
+void SceneController::onEmissiveNeeSamplesSpinBoxChanged()
+{
+    m_model->setEmissiveNeeSamples(m_view->emissiveNeeSamplesSpinBox()->value());
 }
 
 void SceneController::onBoundsOverlayComboBoxChanged()
@@ -733,6 +751,13 @@ void SceneController::syncMaxSubsurfaceScattersSpinBox()
     m_view->maxSubsurfaceScattersSpinBox()->blockSignals(true);
     m_view->maxSubsurfaceScattersSpinBox()->setValue(m_model->maxSubsurfaceScatters());
     m_view->maxSubsurfaceScattersSpinBox()->blockSignals(false);
+}
+
+void SceneController::syncEmissiveNeeSamplesSpinBox()
+{
+    m_view->emissiveNeeSamplesSpinBox()->blockSignals(true);
+    m_view->emissiveNeeSamplesSpinBox()->setValue(m_model->emissiveNeeSamples());
+    m_view->emissiveNeeSamplesSpinBox()->blockSignals(false);
 }
 
 void SceneController::syncBoundsOverlayComboBox()

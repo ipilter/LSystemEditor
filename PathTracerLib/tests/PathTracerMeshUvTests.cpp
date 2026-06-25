@@ -300,6 +300,9 @@ void testOverlayModeEnumValues()
         static_cast<int>(RenderViewOverlayMode::Normals) == 4,
         "Normals view mode enum value is 4");
     expectTrue(
+        static_cast<int>(RenderViewOverlayMode::EmissiveLights) == 5,
+        "EmissiveLights view mode enum value is 5");
+    expectTrue(
         static_cast<int>(RenderViewOverlayMode::AdaptiveSampling) < static_cast<int>(RenderViewOverlayMode::Uv),
         "Uv follows AdaptiveSampling in view mode enum");
     expectTrue(

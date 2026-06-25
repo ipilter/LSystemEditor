@@ -53,6 +53,9 @@ public:
     int maxSubsurfaceScatters() const;
     void setMaxSubsurfaceScatters(int value);
 
+    int emissiveNeeSamples() const;
+    void setEmissiveNeeSamples(int value);
+
     RenderViewOverlayMode boundsOverlayMode() const;
     void setBoundsOverlayMode(RenderViewOverlayMode mode);
 
@@ -128,6 +131,7 @@ signals:
     void previewStepsPerLevelChanged(int value);
     void russianRouletteMinDepthChanged(int value);
     void maxSubsurfaceScattersChanged(int value);
+    void emissiveNeeSamplesChanged(int value);
     void boundsOverlayModeChanged(RenderViewOverlayMode mode);
     void brdfDebugFlagsChanged(int flags);
     void sceneOverlayVisibleChanged(bool visible);
@@ -156,6 +160,7 @@ private:
     static int clampPreviewSteps(int value);
     static int clampRussianRouletteMinDepth(int value);
     static int clampMaxSubsurfaceScatters(int value);
+    static int clampEmissiveNeeSamples(int value);
     static float clampCreaseAngleDeg(float value);
     static float clampFStop(float value);
     static float clampFocalLengthMm(float value);
@@ -175,6 +180,7 @@ private:
     int m_previewStepsPerLevel = 2;
     int m_russianRouletteMinDepth = 3;
     int m_maxSubsurfaceScatters = 8;
+    int m_emissiveNeeSamples = 1;
     RenderViewOverlayMode m_renderViewOverlayMode = RenderViewOverlayMode::Render;
     int m_brdfDebugFlags = 0;
     bool m_sceneOverlayVisible = true;

@@ -129,7 +129,7 @@ VOLUME_SCATTERING_FN float volumeInteriorEmissiveNee(
         return 0.0f;
     }
 
-    if (lightIsOccludedFrom(position, wi, scene, 0.0f, UINT32_MAX)) {
+    if (lightIsOccludedFromBefore(position, wi, sqrtf(dist2), scene, 0.0f, UINT32_MAX)) {
         return 0.0f;
     }
 

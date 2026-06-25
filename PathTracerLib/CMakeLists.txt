@@ -184,6 +184,17 @@ target_include_directories(path_tracer_shadow_epsilon_tests PRIVATE
 set_target_properties(path_tracer_shadow_epsilon_tests PROPERTIES FOLDER "PathTracerLib/tests")
 add_test(NAME PathTracerShadowEpsilon COMMAND path_tracer_shadow_epsilon_tests)
 
+add_executable(path_tracer_light_sampling_tests tests/PathTracerLightSamplingTests.cpp)
+target_link_libraries(path_tracer_light_sampling_tests PRIVATE PathTracerLib)
+target_include_directories(path_tracer_light_sampling_tests PRIVATE
+    "${PATHTRACER_LIB_INCLUDE_DIR}"
+    "${PATHTRACER_LIB_INCLUDE_DIR}/Geometry"
+    "${PATHTRACER_LIB_INCLUDE_DIR}/MeshAccel"
+    "${PATHTRACER_LIB_INCLUDE_DIR}/Sampling"
+    "${PATHTRACER_LIB_INCLUDE_DIR}/Texture")
+set_target_properties(path_tracer_light_sampling_tests PROPERTIES FOLDER "PathTracerLib/tests")
+add_test(NAME PathTracerLightSampling COMMAND path_tracer_light_sampling_tests)
+
 add_executable(path_tracer_scene_units_tests tests/PathTracerSceneUnitsTests.cpp)
 target_link_libraries(path_tracer_scene_units_tests PRIVATE PathTracerLib)
 target_include_directories(path_tracer_scene_units_tests PRIVATE

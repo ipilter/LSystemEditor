@@ -56,10 +56,9 @@ BSSRDF_CORE_FN float bssrdfEnterProbability(const MaterialGpu& material)
 BSSRDF_CORE_FN float subsurfaceEffectiveRadius(const MaterialGpu& material, float channelIndex)
 {
     const float scatterScale = vecMax2(material.subsurfaceScatterScale, 1.0e-6f);
-    const float sub = vecMin2(1.0f, vecMax2(0.0f, material.subsurface));
     const int channel = channelIndex < 0.5f ? 0 : (channelIndex < 1.5f ? 1 : 2);
     const float radius = materialScatterDistanceChannel(material, channel);
-    return vecMax2(radius * sub * scatterScale, BssrdfDetail::kMinShellMm);
+    return vecMax2(radius * scatterScale, BssrdfDetail::kMinShellMm);
 }
 
 BSSRDF_CORE_FN float subsurfaceMinEffectiveRadius(const MaterialGpu& material)

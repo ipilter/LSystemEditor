@@ -141,6 +141,10 @@ public:
     void setMaxSubsurfaceScatters(int count);
     int maxSubsurfaceScatters() const;
 
+    /// Emissive triangle NEE samples per bounce (1–4).
+    void setEmissiveNeeSamples(int count);
+    int emissiveNeeSamples() const;
+
     void rebuildMeshBoundsMesh(const QColor& boundsColor);
     const MeshAccelBoundsMesh& meshBoundsMesh() const;
 

@@ -19,6 +19,8 @@ constexpr int kMinRussianRouletteMinDepth = 0;
 constexpr int kMaxRussianRouletteMinDepth = 64;
 constexpr int kMinMaxSubsurfaceScatters = 1;
 constexpr int kMaxMaxSubsurfaceScatters = 128;
+constexpr int kMinEmissiveNeeSamples = 1;
+constexpr int kMaxEmissiveNeeSamples = 4;
 constexpr float kMinCreaseAngleDeg = 0.0f;
 constexpr float kMaxCreaseAngleDeg = 180.0f;
 constexpr float kMinEnvironmentIntensity = 0.0f;
@@ -206,6 +208,22 @@ void SceneModel::setMaxSubsurfaceScatters(int value)
     m_maxSubsurfaceScatters = clamped;
     AppSettings::instance().setMaxSubsurfaceScatters(clamped);
     emit maxSubsurfaceScattersChanged(m_maxSubsurfaceScatters);
+}
+
+int SceneModel::emissiveNeeSamples() const
+{
+    return m_emissiveNeeSamples;
+}
+
+void SceneModel::setEmissiveNeeSamples(int value)
+{
+    const int clamped = clampEmissiveNeeSamples(value);
+    if (m_emissiveNeeSamples == clamped) {
+        return;
+    }
+
+    m_emissiveNeeSamples = clamped;
+    emit emissiveNeeSamplesChanged(m_emissiveNeeSamples);
 }
 
 RenderViewOverlayMode SceneModel::boundsOverlayMode() const
@@ -684,6 +702,17 @@ int SceneModel::clampMaxSubsurfaceScatters(int value)
     return value;
 }
 
+int SceneModel::clampEmissiveNeeSamples(int value)
+{
+    if (value < kMinEmissiveNeeSamples) {
+        return kMinEmissiveNeeSamples;
+    }
+    if (value > kMaxEmissiveNeeSamples) {
+        return kMaxEmissiveNeeSamples;
+    }
+    return value;
+}
+
 RenderViewOverlayMode SceneModel::clampBoundsOverlayMode(RenderViewOverlayMode mode)
 {
     switch (mode) {
@@ -692,6 +721,7 @@ RenderViewOverlayMode SceneModel::clampBoundsOverlayMode(RenderViewOverlayMode m
     case RenderViewOverlayMode::AdaptiveSampling:
     case RenderViewOverlayMode::Uv:
     case RenderViewOverlayMode::Normals:
+    case RenderViewOverlayMode::EmissiveLights:
         return mode;
     default:
         return RenderViewOverlayMode::Render;

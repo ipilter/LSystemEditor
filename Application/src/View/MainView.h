@@ -50,7 +50,8 @@ public:
     QSpinBox* previewStepsSpinBox() const;
     QSpinBox* russianRouletteMinDepthSpinBox() const;
     QSpinBox* maxSubsurfaceScattersSpinBox() const;
-    /** View mode combo: Render, BVH, Adaptive, UV, Normals. */
+    QSpinBox* emissiveNeeSamplesSpinBox() const;
+    /** View mode combo: Render, BVH, Adaptive, UV, Normals, Emissive. */
     QComboBox* renderViewOverlayComboBox() const;
     QComboBox* brdfDebugComboBox() const;
     QCheckBox* sceneOverlayCheckBox() const;
@@ -110,6 +111,7 @@ private:
     QSpinBox* m_previewStepsSpinBox = nullptr;
     QSpinBox* m_russianRouletteMinDepthSpinBox = nullptr;
     QSpinBox* m_maxSubsurfaceScattersSpinBox = nullptr;
+    QSpinBox* m_emissiveNeeSamplesSpinBox = nullptr;
     QComboBox* m_renderViewOverlayComboBox = nullptr;
     QComboBox* m_brdfDebugComboBox = nullptr;
     QCheckBox* m_sceneOverlayCheckBox = nullptr;
